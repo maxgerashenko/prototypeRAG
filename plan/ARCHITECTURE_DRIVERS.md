@@ -125,10 +125,13 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Why unavoidable: Places terms forbid storing most Places content permanently (only
   `place_id` may be kept indefinitely; other data has caching limits).
 - Breaks: W1 / "all knowledge in RAG".
-- Forced choice: store only `place_id`; fetch hours/address/reviews live (with short
-  caching allowed by the terms) or get the facts from the business website / owner.
-  Reviews are not put in the vector DB.
-- Status: **Open** — verify current terms before building the crawler.
+- Forced choice (DEC-11): **sources of truth for stored facts are the business website
+  and the owner** (confirmed in the dashboard). From Places we store only `place_id`;
+  Places fields are used as a live lookup, not stored. Reviews are not stored.
+  Note: the "30 days" caching allowance in Google's terms is for latitude/longitude —
+  it is not a general permission to cache any Places content for 30 days.
+- Status: **Accepted** for the approach; exact terms still to verify (OPEN-04), incl.
+  whether Places may pre-fill the owner's profile form at onboarding.
 
 **R10 — Website terms, robots.txt, bot protection**
 - Why unavoidable: legal/ethical limits; Cloudflare and similar block crawlers.
@@ -217,17 +220,27 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Breaks: D5 (instance busy for the whole call) and "fire-and-forget" background work.
 - Forced choice: timeout 3600 s; an open WebSocket is an active request, so CPU stays
   allocated during the call without "CPU always allocated"; post-call work (summaries)
-  runs inside its own request — the Twilio status callback (DEC-24); limit concurrent
-  calls per instance; calls > 60 min are cut (acceptable).
+  runs inside its own request — the Twilio status callback (DEC-24); calls > 60 min are
+  cut (acceptable).
+- Concurrency (DEC-25): set `--concurrency` explicitly for the call-handling service,
+  from a load test (per-call CPU: audio conversion, VAD, streaming). Start low (≈10–20
+  calls per 1 vCPU instance), not Cloud Run's default of 80. Cap `--max-instances` (R20).
+- Rejected: "CPU always allocated" to avoid stutter — CPU is not throttled while a
+  WebSocket request is open, so it doesn't help streaming and costs more.
 - Status: **Accepted**.
 
 **R20 — Serverless connections to Postgres**
 - Why unavoidable: many Cloud Run instances × connection pools can exhaust a small
   database's connection limit.
 - Breaks: D4 slightly.
-- Forced choice: small pool per instance; use the provider's pooler (Neon
-  pooler) or Cloud SQL connector limits; cap Cloud Run max instances.
-- Status: **Watch**.
+- Forced choice: small pool per instance; cap Cloud Run `--max-instances`;
+  - **Neon:** app uses the **pooled** connection string (`-pooler` host, PgBouncer
+    transaction mode); migrations (`ADMIN_DATABASE_URL`) use the **direct** connection.
+  - Transaction mode rules: only `SET LOCAL` inside a transaction (never session `SET`),
+    no session state (advisory locks, `LISTEN`, temp tables) across transactions;
+    check prepared-statement support of the driver/pooler.
+  - **Cloud SQL (later):** connector + small pools, or a pooler if instances grow.
+- Status: **Accepted** (details verified when implementing the foundation).
 
 ---
 

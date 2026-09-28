@@ -49,6 +49,8 @@ messages         (id, business_id, conversation_id, role, content, created_at)
 - `embed_model` records which model produced the vector, so a re-index is detectable.
 - Roles: migrations run as the table owner (`ADMIN_DATABASE_URL`); the app connects as
   `app_user` (`DATABASE_URL`) and sets `SET LOCAL app.business_id` per transaction.
+  A single `tenant_session(business_id)` helper in `app/db/` opens the transaction and
+  sets it — no query runs without it. Only `SET LOCAL`, never `SET` (pooler, R20).
 
 ## Answer pipeline
 

@@ -43,11 +43,12 @@ Google Places API ─► business profile (hours, address, phone, reviews) ─�
 4. **Extract business profile** (structured facts)
    - Merge Places API data with facts found on the site into one record:
      `name, address, phone, email, opening_hours, booking_policy, price_range, languages`.
-   - Use the LLM with a JSON schema to extract fields from the site text; Places API wins
-     on conflicts for hours/address/phone.
-   - **Open (OPEN-04, R9):** Places terms limit what may be stored permanently (only
-     `place_id` for sure). Until checked, store `place_id` and treat Places fields as a
-     short-lived cache / live fetch. Reviews are not stored in the knowledge base.
+   - Use the LLM with a JSON schema to extract fields from the site text; conflicts
+     between website and Places are shown to the owner to resolve.
+   - **Sources of truth (DEC-11, R9):** stored facts come from the **website** and are
+     **confirmed/edited by the owner** in the dashboard. From Places we store only
+     `place_id`; Places fields are a live lookup, not stored or cached. Reviews are not
+     stored. Open (OPEN-04): whether Places may pre-fill the owner's profile form.
    - This record goes into the prompt directly — critical facts should not depend on
      vector search.
 

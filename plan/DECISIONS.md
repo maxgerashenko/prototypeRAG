@@ -58,7 +58,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-08 | Embeddings | `nomic-embed-text` local, `gemini-embedding-001` cloud, 768 dims, re-index on switch | 🔄 |
 | DEC-09 | Crawled content storage | Postgres tables, no file storage | ✅ |
 | DEC-10 | Crawler tech | Crawl4AI + httpx fallback, separate crawler image | ✅ |
-| DEC-11 | Google listing data | Places API, not scraping; storage limited by terms | ❓ (R9) |
+| DEC-11 | Google listing data | Website + owner are the stored source of truth; Places = `place_id` + live lookup | 🔄 (OPEN-04) |
 | DEC-12 | Retrieval | Hybrid: pgvector + Postgres full-text, rank fusion, exact search per business | ✅ |
 | DEC-13 | Speech | Google STT/TTS, also locally; Gemini Live evaluated later | ✅ |
 | DEC-14 | Telephony | Twilio Media Streams; ngrok locally | 🔄 |
@@ -72,6 +72,8 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-22 | Recordings | Transcripts only; audio recording off by default | 🔄 (R16) |
 | DEC-23 | Docs layout | Flat `plan/` folder | ✅ |
 | DEC-24 | Post-call work | Summaries run inside a request (Twilio status callback / end-of-chat), not background tasks | ✅ |
+| DEC-25 | Cloud Run settings for calls | Request-based billing; explicit low `--concurrency` from load test; `--max-instances` cap | 🔄 (load test) |
+| DEC-26 | Number of Cloud Run services | One API service (webhook + voice + chat + dashboard) for now | 🔄 |
 
 ---
 
@@ -181,10 +183,13 @@ Runs in a **separate crawler image** as a Cloud Run Job, so the API image stays 
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **Places API** | Official, stable | Storage/caching limits (only `place_id` permanent) | ✅ source |
+| **Website + owner-confirmed profile as stored facts; Places = `place_id` + live lookup** | Compliant; facts owned by the business; no per-call Places cost | Owner must confirm/edit profile at onboarding | ✅ |
+| Store Places data with a < 30-day `expires_at` cache (Gemini suggestion) | Simple | The 30-day allowance is for lat/lng only, not general content — likely non-compliant | ❌ |
+| Fetch Places live on every call | Always fresh | Latency + cost in the call path | ❌ (only for rare questions) |
 | Scraping Google Maps | "Free" | Violates ToS; breaks often | ❌ |
 
-Open: what exactly we may store/cache → fetch live vs store (R9).
+Still open (OPEN-04): verify current terms, and whether Places data may pre-fill the
+owner's profile form at onboarding.
 
 ### DEC-12 — Retrieval
 
@@ -274,6 +279,27 @@ Flat `plan/` folder with overview files + numbered part files + this log.
 
 Reason: R19.
 
+### DEC-25 — Cloud Run settings for calls
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Request-based billing, explicit `--concurrency` (start ≈10–20 per vCPU, tune by load test), `--max-instances` cap, timeout 3600 s** | Cheapest; CPU is allocated while the call's WebSocket is open | Needs a load test | ✅ |
+| "CPU always allocated" (instance-based billing) to avoid stutter (Gemini suggestion) | Needed only for background work | Doesn't affect streaming — CPU isn't throttled during an open request; costs more | ❌ |
+| Default concurrency 80 | No config | Too many audio streams per instance → latency spikes | ❌ |
+
+Reason: R2, R19, R20.
+
+### DEC-26 — Number of Cloud Run services
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **One API service** (Twilio webhook, voice WebSocket, chat, dashboard) | Simplest; one deploy | `min-instances=1` keeps the whole app warm; dashboard traffic shares instances with calls | ✅ now |
+| Split: voice service (webhook + WebSocket) vs web service (chat, dashboard) | Voice tuned separately (concurrency, min-instances); dashboard scales to zero | Two deploys from the same image | 🔄 when call volume or dashboard load justifies it |
+| Separate webhook and voice services (Gemini diagram) | — | Extra hop in the call path; no benefit | ❌ |
+
+The split needs no code changes — same image, different entry routes/settings.
+
+
 ---
 
 ## 4. Still considering (open questions)
@@ -283,7 +309,8 @@ Reason: R19.
 | OPEN-01 | Which business type first? | Restaurant (table booking) · appointment-based (salon, clinic) | Access to a real pilot business | Part 4 |
 | OPEN-02 | Target country / region | EU (`europe-west1`) · US (`us-central1`) · other | Where pilot businesses are | Part 5, legal (R16) |
 | OPEN-03 | Languages for voice | English only · + local language(s) | OPEN-02 | Part 3 (STT/TTS/model choice) |
-| OPEN-04 | Places API data we may store | Store `place_id` only + live fetch · short cache | Read current Places terms (R9) | Part 1 |
+| OPEN-04 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) | Part 1 |
+| OPEN-15 | Voice concurrency per instance | 10 · 20 · 40 … | Load test with real call audio (DEC-25) | Go-live |
 | OPEN-05 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Whether offline learning matters more than index parity | Part 2 |
 | OPEN-06 | Specific local model | `llama3.1:8b` · Qwen instruct · other | Laptop RAM/GPU, eval results | Part 2 |
 | OPEN-07 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs | Part 5 |
@@ -308,7 +335,11 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Gemini 1.5 Flash "2M context" | Was 1M (2M was Pro); model generations change — check current model at deploy | DEC-07 |
 | Qdrant snapshot migration | Doesn't help when switching embedding models — vectors must be recomputed anyway | DEC-08 |
 | Twilio webhook timing | While our webhook runs, the caller hears ringing (Twilio waits up to 15 s) — no dead air | DEC-17 |
-| Cloud Run CPU | With request-based billing CPU is throttled when no request is active; an open WebSocket counts as active | DEC-16, DEC-24 |
+| Cloud Run CPU | With request-based billing CPU is throttled when no request is active; an open WebSocket counts as active — so "CPU always allocated" doesn't fix streaming | DEC-16, DEC-24, DEC-25 |
+| Cloud Run concurrency | Default 80 requests per instance (max 1000, not 250); voice needs a lower, load-tested value | DEC-25 |
+| Neon pooler | Separate `-pooler` hostname, PgBouncer transaction mode; `SET LOCAL` works, session `SET` doesn't; migrations use the direct connection | R20 |
+| Places "30-day cache" | Google's 30-day allowance applies to lat/lng, not to Places content in general; only `place_id` may be stored indefinitely | DEC-11 |
+| Async DB lookup in the webhook (Gemini) | Unneeded — the lookup runs while the caller hears ringing (DEC-17) | DEC-17 |
 | Neon wake time | Doesn't depend on data size (tenant pattern doesn't change it) | DEC-04, DEC-17 |
 | RLS pitfall | RLS doesn't apply to the table owner unless `FORCE ROW LEVEL SECURITY`; app must use a non-owner role | DEC-04 |
 | Supabase free tier | Projects pause after ~1 week idle | DEC-03 |

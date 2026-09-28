@@ -101,8 +101,9 @@ Considered and rejected:
 5. **Build & push images:** Artifact Registry repo; build the **API** image
    (`.../app/api`) and the **crawler** image (`.../app/crawler`) with `gcloud builds submit`.
 6. **Deploy API:**
-   `gcloud run deploy api --image .../app/api --set-secrets ... --timeout 3600`
-   (add `--add-cloudsql-instances <conn-name>` only after moving to Cloud SQL).
+   `gcloud run deploy api --image .../app/api --set-secrets ... --timeout 3600 --concurrency <from load test> --max-instances <cap>`
+   (request-based billing; add `--add-cloudsql-instances <conn-name>` only after moving
+   to Cloud SQL; one service for now, split voice vs web later — DEC-25, DEC-26).
 7. **Deploy crawler job:**
    `gcloud run jobs deploy ingest --image .../app/crawler --command python --args -m,app.ingest.run`
    + Cloud Scheduler trigger (e.g. weekly re-crawl).
@@ -133,6 +134,7 @@ Considered and rejected:
 - [ ] Data load + re-embed with Gemini embeddings
 - [ ] Artifact Registry + both images + Cloud Run deploy (API)
 - [ ] Cloud Run Job + Scheduler (crawler)
+- [ ] Load test concurrent calls → set `--concurrency` (OPEN-15)
 - [ ] Twilio cutover + test calls
 - [ ] Logging, latency metrics, alerts
 - [ ] CI/CD pipeline
