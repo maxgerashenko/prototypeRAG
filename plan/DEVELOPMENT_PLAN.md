@@ -2,6 +2,9 @@
 
 ## Principles
 
+Full list of drivers and the restrictions that force exceptions:
+[ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md)
+
 1. **Learn locally at zero cost.** Run the LLM and the vector database on the laptop and
    test everything by hand before paying for cloud.
 2. **Only technology that exists both locally and as a managed Google Cloud service.**
@@ -9,7 +12,7 @@
 3. **Standard interfaces instead of custom abstractions.** Postgres for all data, the
    OpenAI-compatible API for all LLM calls. Moving to cloud = changing environment
    variables.
-4. **Same Docker image** locally and on Cloud Run.
+4. **Same Docker images** locally and on Cloud Run (API image + separate crawler image, R8).
 5. **Simple but scalable.** Managed, scale-to-zero services; no Kubernetes, no VMs, no
    extra vector database service.
 6. **One deployment for all businesses** (multi-tenant): a business is rows in the
@@ -20,8 +23,8 @@
 | Layer | Local | Google Cloud | Change on migration |
 |---|---|---|---|
 | App (API, voice, dashboard) | FastAPI in Docker | **Cloud Run** | none — same image |
-| Crawler | CLI in the same image | **Cloud Run Job** + **Cloud Scheduler** | none |
-| Vectors + all app data | **Postgres 16 + pgvector** (`pgvector/pgvector:pg16`) | **Cloud SQL for PostgreSQL + pgvector** | `DATABASE_URL` |
+| Crawler | CLI in a separate crawler image (headless browser) | **Cloud Run Job** + **Cloud Scheduler** | none |
+| Vectors + all app data | **Postgres 16 + pgvector** (`pgvector/pgvector:pg16`) | Managed Postgres + pgvector: **Neon/Supabase** free tier to start, **Cloud SQL** later | `DATABASE_URL` |
 | LLM (chat + tool calling) | **Ollama** via OpenAI-compatible API | **Gemini** via OpenAI-compatible API | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
 | Embeddings | Ollama `nomic-embed-text` via OpenAI-compatible API | Gemini embeddings via OpenAI-compatible API | `EMBED_*` vars + one re-index |
 | Speech-to-Text / Text-to-Speech | Google Speech APIs (called from laptop) | same | none |
@@ -37,12 +40,13 @@ What we deliberately **don't** use:
   while testing and behaves identically in cloud.
 - **File storage** for pages/chunks — stored in Postgres, so no local-folder vs Cloud
   Storage switch.
-- **VMs, Kubernetes** — Cloud Run + Cloud SQL are managed and scale on their own.
+- **Firestore + separate vector DB** — two databases to sync; bookings need SQL transactions.
+- **VMs, Kubernetes** — Cloud Run + managed Postgres are managed and scale on their own.
 
 ## Why these two interfaces make migration smooth
 
 **Postgres + pgvector** — the same SQL, extension and migrations run in Docker and in
-Cloud SQL. Vectors, full-text search, businesses, bookings and conversations live in one
+any managed Postgres (Neon, Supabase, Cloud SQL). Vectors, full-text search, businesses, bookings and conversations live in one
 database, so there is nothing to keep in sync.
 
 **OpenAI-compatible API** — Ollama and Gemini both serve `/chat/completions` and
@@ -131,18 +135,14 @@ Details: [05-cloud-migration.md](05-cloud-migration.md)
 ```
 Twilio ──► Cloud Run: api (FastAPI, WebSockets) ──► Gemini (chat, embeddings)
                  │                              ──► Google Speech-to-Text / Text-to-Speech
-                 └──► Cloud SQL Postgres + pgvector (vectors + all app data)
-Cloud Scheduler ──► Cloud Run Job: ingest / re-crawl ──► Cloud SQL
+                 └──► Postgres + pgvector (Neon/Supabase → Cloud SQL)
+Cloud Scheduler ──► Cloud Run Job: ingest / re-crawl ──► Postgres
 ```
 
-Base cost: Cloud SQL smallest instance ≈ $10/month; Cloud Run, Scheduler and Jobs are
+Base cost: database $0 on Neon/Supabase free tier (≈ $10/month once on Cloud SQL); Cloud Run, Scheduler and Jobs are
 mostly within free tier at low traffic; Gemini and Speech are pay-per-use. Main cost at
 scale: telephony + speech minutes.
 
 ## Open questions
 
-- Which business type first (restaurant vs appointment-based)? Drives which booking
-  integration comes first.
-- Languages needed for voice?
-- Twilio vs other telephony provider (pricing in target country)?
-- Store call recordings or only transcripts (privacy / GDPR)?
+Tracked in [DECISIONS.md](DECISIONS.md) → section 4 "Still considering".

@@ -14,7 +14,7 @@ correctly, says "I don't know" for questions not covered by the data, and every 
 | Service | How it runs | Purpose | Cloud equivalent |
 |---|---|---|---|
 | `api` | Docker (our image) | FastAPI: RAG, later voice + actions | Cloud Run |
-| `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Cloud SQL for PostgreSQL + pgvector |
+| `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Managed Postgres + pgvector (Neon/Supabase → Cloud SQL) |
 | Ollama | **Natively on the Mac** (uses GPU) | LLM + embeddings via OpenAI-compatible API | Gemini via OpenAI-compatible API |
 
 The container reaches Ollama at `http://host.docker.internal:11434/v1`.
@@ -40,6 +40,8 @@ messages         (id, conversation_id, role, content, created_at)
 ```
 
 - `kind`: `scraped | custom_reply | review`.
+- Every table has `business_id`; isolation is enforced by Postgres Row-Level Security
+  (see [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) R18).
 - Every query filters by `business_id`. A business has hundreds to a few thousand chunks,
   so exact vector search within one business is fast — no ANN index needed at first.
   Add an HNSW index later if data grows.

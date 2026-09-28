@@ -10,6 +10,9 @@ such as booking a table or an appointment.
 One codebase serves many businesses (multi-tenant): each business gets its own
 knowledge base, phone number, and settings.
 
+Decisions, priorities and open questions: [DECISIONS.md](DECISIONS.md) ·
+restrictions: [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md)
+
 Detailed plan per part:
 [1 Crawler](01-crawler.md) ·
 [2 Local RAG](02-local-rag.md) ·
@@ -77,7 +80,7 @@ Details: [02-local-rag.md](02-local-rag.md)
 - **Prompt:** system prompt with business profile (structured facts) + retrieved chunks +
   conversation history. Instruct the model to say "I don't know, let me connect you /
   take a message" instead of guessing.
-- **Storage:** Postgres + pgvector for vectors and all data (Docker locally, Cloud SQL in cloud).
+- **Storage:** Postgres + pgvector for vectors and all data (Docker locally; Neon/Supabase free tier, later Cloud SQL, in cloud).
 - **LLM:** one OpenAI-compatible client — Ollama locally, Gemini in cloud; switch by env vars.
 - **Custom replies:** per-business overrides stored in the DB (greeting, tone, answers
   the owner wants phrased a specific way, forbidden topics). These are retrieved with

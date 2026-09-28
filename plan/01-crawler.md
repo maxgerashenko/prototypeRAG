@@ -56,7 +56,7 @@ Google Places API ─► business profile (hours, address, phone, reviews) ─�
 
 6. **Save**
    - Everything goes into **Postgres** (same database as Part 2, locally in Docker,
-     Cloud SQL in cloud) — no file storage to switch between local and cloud:
+     managed Postgres in cloud) — no file storage to switch between local and cloud:
      - cleaned Markdown → `pages` table (url, title, markdown, content_hash, scraped_at)
      - profile → `business_profile` table
      - chunks → `chunks` table with empty `embedding`; Part 2's indexer fills it.
