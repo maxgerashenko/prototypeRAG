@@ -63,7 +63,9 @@ class BookingBackend(Protocol):
 
 ## Conversation summaries
 
-At the end of each call/chat (async job):
+At the end of each call/chat — run **inside a request** (Twilio status callback for calls,
+end-of-chat request for chat), not as fire-and-forget background work, because Cloud Run
+throttles CPU after a response is sent (DEC-24, R19):
 - LLM generates: short summary, caller intent, outcome (`answered | booked | message | transferred | unresolved`),
   extracted contact details, follow-up needed (yes/no), sentiment.
 - Stored in `conversations` table with full transcript.
@@ -73,14 +75,14 @@ At the end of each call/chat (async job):
 
 ## Owner dashboard (minimal web UI)
 
-- Conversations list: date, channel, summary, outcome; open for transcript/recording.
+- Conversations list: date, channel, summary, outcome; open for transcript (recording only if enabled).
 - Bookings/appointments list + calendar view.
 - Unanswered questions → "add answer" (creates a custom reply).
 - Knowledge base: pages scraped, last crawl, "re-crawl" button.
 - Settings: greeting, enabled tools, transfer number, booking rules, calendar connection.
 
 Start simple: server-rendered pages (FastAPI + Jinja + HTMX) — no separate frontend build.
-Add login (e.g. Google sign-in / magic link) before any real business uses it.
+Add login (Google sign-in or magic link — OPEN-12) before any real business uses it.
 
 ## Data model additions
 
@@ -89,7 +91,10 @@ Add login (e.g. Google sign-in / magic link) before any real business uses it.
 - `booking_rules` — business_id, capacity per slot, slot length, lead time, max party
 - `messages_for_owner` — id, business_id, conversation_id, text, status
 - `conversations` — + summary, outcome, intent, follow_up, recording_url
-- `action_log` — every tool call with arguments, result, timestamp (debugging + audit)
+- `action_log` — business_id, conversation_id, tool, arguments, result, timestamp (debugging + audit)
+- `calendar_connections` — business_id, provider, encrypted refresh token (key in Secret Manager, R14)
+
+All tables carry `business_id` and are covered by Row-Level Security (R18).
 
 ## Code layout
 

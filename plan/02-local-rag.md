@@ -14,7 +14,7 @@ correctly, says "I don't know" for questions not covered by the data, and every 
 | Service | How it runs | Purpose | Cloud equivalent |
 |---|---|---|---|
 | `api` | Docker (our image) | FastAPI: RAG, later voice + actions | Cloud Run |
-| `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Managed Postgres + pgvector (Neon/Supabase → Cloud SQL) |
+| `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Managed Postgres + pgvector (Neon → Cloud SQL) |
 | Ollama | **Natively on the Mac** (uses GPU) | LLM + embeddings via OpenAI-compatible API | Gemini via OpenAI-compatible API |
 
 The container reaches Ollama at `http://host.docker.internal:11434/v1`.
@@ -30,16 +30,16 @@ Models (via Ollama):
 CREATE EXTENSION IF NOT EXISTS vector;
 
 businesses       (id, name, website, timezone, phone_numbers, settings jsonb)
-business_profile (business_id, name, address, phone, opening_hours jsonb, ...)  -- from Part 1
+business_profile (business_id, name, address, phone, opening_hours jsonb, place_id, ...)  -- from Part 1
 pages            (id, business_id, url, title, markdown, content_hash, scraped_at)
 chunks           (id, business_id, page_id, kind, section_heading, text,
                   embedding vector(768), embed_model, tsv tsvector GENERATED, content_hash)
 custom_replies   (id, business_id, question, answer)          -- owner overrides, also chunked (kind='custom_reply')
 conversations    (id, business_id, channel, started_at, ...)
-messages         (id, conversation_id, role, content, created_at)
+messages         (id, business_id, conversation_id, role, content, created_at)
 ```
 
-- `kind`: `scraped | custom_reply | review`.
+- `kind`: `scraped | custom_reply` (no reviews — Places terms, R9).
 - Every table has `business_id`; isolation is enforced by Postgres Row-Level Security
   (see [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) R18).
 - Every query filters by `business_id`. A business has hundreds to a few thousand chunks,
@@ -47,6 +47,8 @@ messages         (id, conversation_id, role, content, created_at)
   Add an HNSW index later if data grows.
 - `tsv` (generated full-text column + GIN index) enables keyword search for hybrid retrieval.
 - `embed_model` records which model produced the vector, so a re-index is detectable.
+- Roles: migrations run as the table owner (`ADMIN_DATABASE_URL`); the app connects as
+  `app_user` (`DATABASE_URL`) and sets `SET LOCAL app.business_id` per transaction.
 
 ## Answer pipeline
 
@@ -116,7 +118,8 @@ docker-compose.yml, Dockerfile, .env.example
 
 - [ ] `docker-compose.yml` (api + pgvector Postgres) + Ollama install notes
 - [ ] Config + `llm.py` (OpenAI-compatible client)
-- [ ] Schema + Alembic migrations (`vector` extension, `tsv` column + GIN index)
+- [ ] Schema + Alembic migrations (`vector` extension, `tsv` column + GIN index, RLS policies, `app_user` role)
+- [ ] Tenant isolation tests (business A never sees business B)
 - [ ] Indexer: embed chunks missing an embedding or with a different `embed_model`
 - [ ] Retrieval: vector search → add keyword search → rank fusion
 - [ ] Prompt builder + answer pipeline with streaming

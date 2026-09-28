@@ -12,7 +12,8 @@ returns a correct spoken answer with under ~1.5 s response delay.
 
 ```
 Caller ──PSTN──► Twilio number
-                    │ 1. HTTP webhook POST /twilio/voice  (which number was called → business_id)
+                    │ 1. HTTP webhook POST /twilio/voice  (which number was called → business_id;
+                    │    caller still hears ringing here, and this query wakes the DB)
                     │    ◄── TwiML: <Connect><Stream url="wss://.../voice/ws"/>
                     │ 2. WebSocket: bidirectional audio (8 kHz μ-law, 20 ms frames)
                     ▼
@@ -63,8 +64,10 @@ short, short spoken-style answers, play a filler ("one moment…") when a tool c
 
 ## Conversation behaviour
 
-- Greeting per business: "Hi, you've reached <name>. I'm an AI assistant, this call may
-  be recorded. How can I help?" (AI + recording disclosure is legally required in many places.)
+- Greeting per business: "Hi, you've reached <name>. I'm an AI assistant. How can I
+  help?" — pre-generated TTS audio stored at onboarding, so it plays instantly (DEC-17).
+  AI disclosure always; add "this call may be recorded" only if recording is enabled
+  (off by default, DEC-22, R15).
 - Barge-in: caller speaking stops bot audio immediately.
 - Silence handling: re-prompt after ~6 s, hang up politely after repeated silence.
 - Fallback: transfer to the business's human number (Twilio `<Dial>`) or take a message.
@@ -81,7 +84,7 @@ short, short spoken-style answers, play a filler ("one moment…") when a tool c
 
 ```
 app/voice/
-  twilio_routes.py   POST /twilio/voice (TwiML), POST /twilio/status
+  twilio_routes.py   POST /twilio/voice (TwiML), POST /twilio/status (call end → summary)
   ws.py              WebSocket /voice/ws — call session loop
   session.py         per-call state: business_id, history, audio buffers
   audio.py           μ-law ↔ PCM, resampling 8k ↔ 16k
@@ -101,7 +104,7 @@ web/mic-test.html    browser mic test client
 - [ ] VAD, turn-taking, barge-in
 - [ ] Phone number → business_id mapping from Postgres
 - [ ] Call transfer + take-a-message fallback
-- [ ] Save transcript at call end
+- [ ] Save transcript at call end; summary runs in the Twilio status callback (DEC-24)
 - [ ] Measure latency per stage and log it per turn
 - [ ] Spike: Gemini Live API version
 
@@ -110,4 +113,6 @@ web/mic-test.html    browser mic test client
 - Phone audio is 8 kHz — test STT on real call audio, not just clean mic audio.
 - Twilio charges per minute (number rental + inbound minutes); keep test calls short.
 - WebSocket calls need the server to stay up for the call's duration — relevant for
-  Cloud Run settings in Part 5.
+  Cloud Run settings in Part 5 (timeout 3600 s, `min-instances=1` in production, DEC-16, R19).
+- No generic "please wait while I load the assistant" message: the DB wake-up happens
+  during ringing (DEC-17, R3).

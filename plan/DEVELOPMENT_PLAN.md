@@ -24,7 +24,7 @@ Full list of drivers and the restrictions that force exceptions:
 |---|---|---|---|
 | App (API, voice, dashboard) | FastAPI in Docker | **Cloud Run** | none — same image |
 | Crawler | CLI in a separate crawler image (headless browser) | **Cloud Run Job** + **Cloud Scheduler** | none |
-| Vectors + all app data | **Postgres 16 + pgvector** (`pgvector/pgvector:pg16`) | Managed Postgres + pgvector: **Neon/Supabase** free tier to start, **Cloud SQL** later | `DATABASE_URL` |
+| Vectors + all app data | **Postgres 16 + pgvector** (`pgvector/pgvector:pg16`) | Managed Postgres + pgvector: **Neon** free tier to start, **Cloud SQL** later | `DATABASE_URL` |
 | LLM (chat + tool calling) | **Ollama** via OpenAI-compatible API | **Gemini** via OpenAI-compatible API | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
 | Embeddings | Ollama `nomic-embed-text` via OpenAI-compatible API | Gemini embeddings via OpenAI-compatible API | `EMBED_*` vars + one re-index |
 | Speech-to-Text / Text-to-Speech | Google Speech APIs (called from laptop) | same | none |
@@ -46,8 +46,8 @@ What we deliberately **don't** use:
 ## Why these two interfaces make migration smooth
 
 **Postgres + pgvector** — the same SQL, extension and migrations run in Docker and in
-any managed Postgres (Neon, Supabase, Cloud SQL). Vectors, full-text search, businesses, bookings and conversations live in one
-database, so there is nothing to keep in sync.
+any managed Postgres (Neon now, Cloud SQL later). Vectors, full-text search, businesses,
+bookings and conversations live in one database, so there is nothing to keep in sync.
 
 **OpenAI-compatible API** — Ollama and Gemini both serve `/chat/completions` and
 `/embeddings` with tool calling, so one client works for both:
@@ -60,7 +60,8 @@ llm.chat.completions.create(model=settings.llm_model, messages=..., tools=...)
 
 ```bash
 # .env.local
-DATABASE_URL=postgresql+psycopg://app:app@postgres:5432/app
+DATABASE_URL=postgresql+psycopg://app_user:app@postgres:5432/app      # app role, RLS applies
+ADMIN_DATABASE_URL=postgresql+psycopg://owner:owner@postgres:5432/app  # migrations only
 LLM_BASE_URL=http://host.docker.internal:11434/v1
 LLM_API_KEY=ollama
 LLM_MODEL=llama3.1:8b
@@ -69,7 +70,8 @@ EMBED_MODEL=nomic-embed-text
 EMBED_DIM=768
 
 # .env.cloud — same code, different values (secrets from Secret Manager)
-DATABASE_URL=postgresql+psycopg://app:<secret>@/app?host=/cloudsql/<project>:<region>:<instance>
+DATABASE_URL=postgresql+psycopg://app_user:<secret>@<neon-pooler-host>/app?sslmode=require
+ADMIN_DATABASE_URL=<secret>      # later Cloud SQL: host=/cloudsql/<project>:<region>:<instance>
 LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 LLM_API_KEY=<secret>
 LLM_MODEL=gemini-2.5-flash        # use the current Flash model at deploy time
@@ -109,8 +111,9 @@ app/
   voice/            Twilio routes, WebSocket session, Google STT/TTS
   actions/          tools: booking, appointment, summary, message, transfer
   dashboard/        owner UI (Jinja + HTMX)
-docker-compose.yml  api + postgres(pgvector)
-Dockerfile
+docker-compose.yml  api + postgres(pgvector) + crawler (run on demand)
+Dockerfile          API image
+Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8)
 .env.example
 ```
 
@@ -118,15 +121,14 @@ Dockerfile
 
 Details: [02-local-rag.md](02-local-rag.md)
 
-1. `docker-compose.yml` (api + pgvector Postgres), Ollama installed natively, FastAPI
-   health check, Alembic migration enabling `vector`.
+1. Foundation: `docker-compose.yml` (api + pgvector Postgres), Ollama installed natively,
+   FastAPI health check, Alembic migrations (`vector`, base tables, RLS, `app_user`).
 2. Crawler → one real business stored in Postgres ([01-crawler.md](01-crawler.md)).
 3. Index + retrieval + `/chat` + eval questions ([02-local-rag.md](02-local-rag.md)).
    Inspect chunks, vectors and search results directly with `psql`.
 4. Voice via Twilio + ngrok with Google Speech ([03-voice-channel.md](03-voice-channel.md)).
 5. Tools: summary, booking, appointment + minimal dashboard ([04-actions.md](04-actions.md)).
-6. Second business onboarded with no code changes.
-7. Switch `LLM_*` to Gemini while still local → compare quality.
+6. Switch `LLM_*` / `EMBED_*` to Gemini while still local → run eval + booking tests, compare quality.
 
 ## Phase 2 — Google Cloud
 
@@ -135,12 +137,14 @@ Details: [05-cloud-migration.md](05-cloud-migration.md)
 ```
 Twilio ──► Cloud Run: api (FastAPI, WebSockets) ──► Gemini (chat, embeddings)
                  │                              ──► Google Speech-to-Text / Text-to-Speech
-                 └──► Postgres + pgvector (Neon/Supabase → Cloud SQL)
+                 └──► Postgres + pgvector (Neon → Cloud SQL)
 Cloud Scheduler ──► Cloud Run Job: ingest / re-crawl ──► Postgres
 ```
 
-Base cost: database $0 on Neon/Supabase free tier (≈ $10/month once on Cloud SQL); Cloud Run, Scheduler and Jobs are
-mostly within free tier at low traffic; Gemini and Speech are pay-per-use. Main cost at
+Then: onboard a second business with no code changes (M7).
+
+Base cost: database $0 on Neon free tier (≈ $10/month once on Cloud SQL); Cloud Run,
+Scheduler and Jobs are mostly within free tier at low traffic; Gemini and Speech are pay-per-use. Main cost at
 scale: telephony + speech minutes.
 
 ## Open questions

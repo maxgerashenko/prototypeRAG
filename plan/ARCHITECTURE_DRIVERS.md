@@ -212,17 +212,20 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Status: **Accepted**.
 
 **R19 — Cloud Run limits for calls**
-- Why unavoidable: max request timeout 60 min; each call holds a WebSocket and CPU.
-- Breaks: D5 (CPU must be allocated during the whole call).
-- Forced choice: timeout 3600 s; CPU always allocated for the voice service; limit
-  concurrent calls per instance; calls > 60 min are cut (acceptable).
+- Why unavoidable: max request timeout 60 min; each call holds a WebSocket; with
+  request-based billing, CPU is throttled as soon as no request is active.
+- Breaks: D5 (instance busy for the whole call) and "fire-and-forget" background work.
+- Forced choice: timeout 3600 s; an open WebSocket is an active request, so CPU stays
+  allocated during the call without "CPU always allocated"; post-call work (summaries)
+  runs inside its own request — the Twilio status callback (DEC-24); limit concurrent
+  calls per instance; calls > 60 min are cut (acceptable).
 - Status: **Accepted**.
 
 **R20 — Serverless connections to Postgres**
 - Why unavoidable: many Cloud Run instances × connection pools can exhaust a small
   database's connection limit.
 - Breaks: D4 slightly.
-- Forced choice: small pool per instance; use the provider's pooler (Neon/Supabase
+- Forced choice: small pool per instance; use the provider's pooler (Neon
   pooler) or Cloud SQL connector limits; cap Cloud Run max instances.
 - Status: **Watch**.
 

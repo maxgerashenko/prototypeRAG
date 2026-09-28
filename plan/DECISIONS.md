@@ -71,6 +71,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-21 | Secrets | `.env` locally, Secret Manager in cloud | ✅ |
 | DEC-22 | Recordings | Transcripts only; audio recording off by default | 🔄 (R16) |
 | DEC-23 | Docs layout | Flat `plan/` folder | ✅ |
+| DEC-24 | Post-call work | Summaries run inside a request (Twilio status callback / end-of-chat), not background tasks | ✅ |
 
 ---
 
@@ -261,6 +262,17 @@ Storage + consent, R15/R16).
 ### DEC-23 — Docs layout
 
 Flat `plan/` folder with overview files + numbered part files + this log.
+`CLAUDE.md` at the repo root explains the files and how to record discussions.
+
+### DEC-24 — Post-call work (summaries)
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Inside a request: Twilio status callback (calls) / end-of-chat request (chat)** | CPU allocated while it runs; no extra service | Callback waits for the LLM (fine — Twilio doesn't need a fast reply here) | ✅ |
+| Fire-and-forget background task after the call | Simple code | Cloud Run throttles CPU after the response → work stalls or is lost | ❌ |
+| Cloud Tasks queue → internal endpoint | Retries, decoupled | Extra service | 🔄 if summaries need retries |
+
+Reason: R19.
 
 ---
 
@@ -296,6 +308,7 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Gemini 1.5 Flash "2M context" | Was 1M (2M was Pro); model generations change — check current model at deploy | DEC-07 |
 | Qdrant snapshot migration | Doesn't help when switching embedding models — vectors must be recomputed anyway | DEC-08 |
 | Twilio webhook timing | While our webhook runs, the caller hears ringing (Twilio waits up to 15 s) — no dead air | DEC-17 |
+| Cloud Run CPU | With request-based billing CPU is throttled when no request is active; an open WebSocket counts as active | DEC-16, DEC-24 |
 | Neon wake time | Doesn't depend on data size (tenant pattern doesn't change it) | DEC-04, DEC-17 |
 | RLS pitfall | RLS doesn't apply to the table owner unless `FORCE ROW LEVEL SECURITY`; app must use a non-owner role | DEC-04 |
 | Supabase free tier | Projects pause after ~1 week idle | DEC-03 |

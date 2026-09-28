@@ -38,13 +38,16 @@ Google Places API ─► business profile (hours, address, phone, reviews) ─�
 3. **Clean**
    - Remove navigation, footer, cookie banners, repeated boilerplate across pages.
    - Keep headings, lists, tables → Markdown.
-   - Store one Markdown file per page with its source URL.
+   - One Markdown document per page with its source URL (stored in `pages`, step 6).
 
 4. **Extract business profile** (structured facts)
    - Merge Places API data with facts found on the site into one record:
      `name, address, phone, email, opening_hours, booking_policy, price_range, languages`.
    - Use the LLM with a JSON schema to extract fields from the site text; Places API wins
      on conflicts for hours/address/phone.
+   - **Open (OPEN-04, R9):** Places terms limit what may be stored permanently (only
+     `place_id` for sure). Until checked, store `place_id` and treat Places fields as a
+     short-lived cache / live fetch. Reviews are not stored in the knowledge base.
    - This record goes into the prompt directly — critical facts should not depend on
      vector search.
 
@@ -82,9 +85,12 @@ app/ingest/
   store.py          write pages/profile/chunks to Postgres
 ```
 
+Runs in its **own Docker image** (Crawl4AI + headless browser), separate from the API
+image so the API stays small and starts fast (R8, DEC-10). In cloud: Cloud Run Job.
+
 ## Tasks
 
-- [ ] CLI skeleton + DB tables for pages/profile/chunks
+- [ ] CLI skeleton + crawler Docker image (uses tables from the foundation step)
 - [ ] Page discovery (sitemap, links, limits, robots.txt)
 - [ ] Fetch with Crawl4AI, fallback fetcher
 - [ ] Cleaning + Markdown output, check on 3 different real sites
@@ -98,5 +104,5 @@ app/ingest/
 
 - JS-heavy sites and sites behind Cloudflare may block crawling → fallback: owner uploads.
 - Menus often exist only as images/PDF → PDF text extraction; image OCR later if needed.
-- Reviews are useful for "what do people like" questions but should be clearly
-  separated from official business facts.
+- Reviews: not stored in the knowledge base (Places terms, R9); if used at all, fetched
+  live and clearly separated from official business facts.
