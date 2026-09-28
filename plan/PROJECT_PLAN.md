@@ -77,7 +77,8 @@ Details: [02-local-rag.md](02-local-rag.md)
 - **Prompt:** system prompt with business profile (structured facts) + retrieved chunks +
   conversation history. Instruct the model to say "I don't know, let me connect you /
   take a message" instead of guessing.
-- **LLM:** swappable provider — local model in development, Gemini (Vertex AI) in cloud.
+- **Storage:** Postgres + pgvector for vectors and all data (Docker locally, Cloud SQL in cloud).
+- **LLM:** one OpenAI-compatible client — Ollama locally, Gemini in cloud; switch by env vars.
 - **Custom replies:** per-business overrides stored in the DB (greeting, tone, answers
   the owner wants phrased a specific way, forbidden topics). These are retrieved with
   priority over scraped content.
@@ -98,8 +99,7 @@ Details: [03-voice-channel.md](03-voice-channel.md)
 - **Phone number + call handling:** Twilio (or Telnyx / Vonage). Each business is mapped
   to a number; the incoming number tells us which `business_id` to use.
 - **Audio streaming:** Twilio Media Streams → WebSocket → our voice service.
-- **Speech-to-Text:** local = faster-whisper; cloud = Google Speech-to-Text (streaming).
-- **Text-to-Speech:** local = Piper; cloud = Google Text-to-Speech.
+- **Speech-to-Text / Text-to-Speech:** Google Speech APIs, both locally and in cloud.
 - **Alternative:** Gemini Live API (native audio in/out) to replace STT + LLM + TTS with
   one streaming call — lower latency, fewer moving parts. Evaluate once text RAG works.
 - **Latency target:** < ~1.5 s from end of caller speech to start of reply. Use

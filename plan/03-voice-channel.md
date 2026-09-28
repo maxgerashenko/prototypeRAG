@@ -26,13 +26,19 @@ Caller ──PSTN──► Twilio number
 
 ## Components
 
-| Step | Local (free) | Cloud |
+| Step | Local | Cloud |
 |---|---|---|
 | Telephony | Twilio trial number + **ngrok** tunnel to local API | Twilio → Cloud Run URL |
-| VAD | Silero VAD / webrtcvad | same |
-| Speech-to-Text | faster-whisper (small/medium model) | Google Speech-to-Text v2 (streaming) |
-| Text-to-Speech | Piper | Google Text-to-Speech (Neural2/Chirp voices) |
-| All-in-one alternative | — | **Gemini Live API** (audio in → audio out, with tool calling) |
+| VAD | Silero VAD / webrtcvad (small library inside the app) | same |
+| Speech-to-Text | **Google Speech-to-Text** (streaming), called from the laptop | same |
+| Text-to-Speech | **Google Text-to-Speech** (Neural2/Chirp voices), called from the laptop | same |
+| All-in-one alternative | **Gemini Live API** (audio in → audio out, with tool calling) | same |
+
+Speech runs on Google's APIs **also locally** — no local speech models (Whisper, Piper).
+They would be local-only tech to replace later, and speech costs only cents while
+testing. The LLM behind the voice still follows Part 2 (Ollama locally, Gemini in cloud).
+Google Speech uses native Google SDKs (not the OpenAI-compatible API); authenticate
+locally with `gcloud auth application-default login`, in cloud with the service account.
 
 **Recommended path:** build the classic pipeline (STT → RAG → TTS) first to understand
 every piece, then try Gemini Live as a replacement: it removes two services and usually
@@ -80,8 +86,8 @@ app/voice/
   session.py         per-call state: business_id, history, audio buffers
   audio.py           μ-law ↔ PCM, resampling 8k ↔ 16k
   vad.py
-  stt.py             SpeechToText interface → Whisper | Google
-  tts.py             TextToSpeech interface → Piper | Google
+  stt.py             Google Speech-to-Text streaming
+  tts.py             Google Text-to-Speech
   live.py            Gemini Live implementation (later)
 web/mic-test.html    browser mic test client
 ```
@@ -89,7 +95,7 @@ web/mic-test.html    browser mic test client
 ## Tasks
 
 - [ ] Audio utilities (μ-law/PCM, resampling) + tests
-- [ ] STT/TTS interfaces with local implementations
+- [ ] Google STT/TTS streaming (local auth via gcloud ADC)
 - [ ] Local mic test mode end-to-end with Part 2 RAG
 - [ ] Twilio webhook + TwiML + media stream WebSocket
 - [ ] VAD, turn-taking, barge-in

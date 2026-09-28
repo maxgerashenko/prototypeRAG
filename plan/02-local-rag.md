@@ -1,55 +1,64 @@
 # Part 2 — Local RAG (local LLM + local vector database)
 
-**Goal:** answer questions about a business using only its own data, running entirely on
-the local machine at zero cost, with code that later switches to Google Cloud by config.
+**Goal:** answer questions about a business using only its own data, running on the
+local machine at zero cost, with the same technology that runs on Google Cloud.
 
 **Done when:** `POST /chat` answers a set of test questions for an ingested business
-correctly, and says "I don't know" for questions not covered by the data.
+correctly, says "I don't know" for questions not covered by the data, and every step
+(chunks, vectors, search results, prompt) can be inspected by hand.
 
 ---
 
-## Local stack (Docker Compose)
+## Local stack
 
-| Service | Image | Purpose |
-|---|---|---|
-| `api` | our FastAPI image | RAG endpoints, later voice + actions |
-| `qdrant` | `qdrant/qdrant` | Vector database (ports 6333/6334, volume for storage) |
-| `postgres` | `postgres:16` | Businesses, custom replies, conversations, bookings |
-| `ollama` | `ollama/ollama` | Local LLM + embedding model |
+| Service | How it runs | Purpose | Cloud equivalent |
+|---|---|---|---|
+| `api` | Docker (our image) | FastAPI: RAG, later voice + actions | Cloud Run |
+| `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Cloud SQL for PostgreSQL + pgvector |
+| Ollama | **Natively on the Mac** (uses GPU) | LLM + embeddings via OpenAI-compatible API | Gemini via OpenAI-compatible API |
+
+The container reaches Ollama at `http://host.docker.internal:11434/v1`.
 
 Models (via Ollama):
-- **Embeddings:** `nomic-embed-text` (768 dims) — small, fast, good quality.
-- **LLM:** a general chat/instruct model sized to the hardware, e.g. `llama3.1:8b` or a
-  Qwen instruct model. Not a coding model — a customer-facing assistant needs
-  conversational quality.
+- **Embeddings:** `nomic-embed-text` (768 dims).
+- **LLM:** a general chat/instruct model sized to the hardware with tool-calling support,
+  e.g. `llama3.1:8b` or a Qwen instruct model. Not a coding model.
 
-On a Mac, run Ollama natively (uses Apple GPU) and point the container at
-`http://host.docker.internal:11434`; Ollama inside Docker on macOS is CPU-only and slow.
+## Data model (Postgres)
 
-## Data model
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
 
-**Qdrant:** one collection `business_chunks`, every point has `business_id` in the
-payload (indexed) and every search filters by it. Simpler than a collection per business
-and scales to many businesses. Payload also stores `text, source_url, section_heading,
-kind` where `kind` is `scraped | custom_reply | review`.
+businesses       (id, name, website, timezone, phone_numbers, settings jsonb)
+business_profile (business_id, name, address, phone, opening_hours jsonb, ...)  -- from Part 1
+pages            (id, business_id, url, title, markdown, content_hash, scraped_at)
+chunks           (id, business_id, page_id, kind, section_heading, text,
+                  embedding vector(768), embed_model, tsv tsvector GENERATED, content_hash)
+custom_replies   (id, business_id, question, answer)          -- owner overrides, also chunked (kind='custom_reply')
+conversations    (id, business_id, channel, started_at, ...)
+messages         (id, conversation_id, role, content, created_at)
+```
 
-**Postgres:**
-- `businesses` — id, name, website, phone number(s), settings (tone, language, greeting)
-- `business_profile` — structured facts from Part 1
-- `custom_replies` — owner-defined Q/A overrides (also embedded into Qdrant with `kind=custom_reply`)
-- `conversations`, `messages` — history (used by Part 4 summaries)
+- `kind`: `scraped | custom_reply | review`.
+- Every query filters by `business_id`. A business has hundreds to a few thousand chunks,
+  so exact vector search within one business is fast — no ANN index needed at first.
+  Add an HNSW index later if data grows.
+- `tsv` (generated full-text column + GIN index) enables keyword search for hybrid retrieval.
+- `embed_model` records which model produced the vector, so a re-index is detectable.
 
 ## Answer pipeline
 
 ```
-question ─► embed ─► Qdrant search (filter business_id, top-k 5)
-                         │  + keyword/BM25 (hybrid, Qdrant sparse vectors)
-                         ▼
-             custom replies boosted to the top
-                         ▼
- prompt = system rules + business profile + retrieved chunks + recent history + question
-                         ▼
-                   LLM (streaming) ─► answer
+question ─► embed (OpenAI-compatible /embeddings)
+             ▼
+   SQL: vector search   ORDER BY embedding <=> :q     WHERE business_id = :b   (top 10)
+   SQL: keyword search  ts_rank(tsv, query)           WHERE business_id = :b   (top 10)
+             ▼
+   merge with reciprocal rank fusion → top 5, custom replies boosted first
+             ▼
+   prompt = system rules + business profile + chunks + recent history + question
+             ▼
+   LLM (OpenAI-compatible /chat/completions, streaming, tools) ─► answer
 ```
 
 Prompt rules:
@@ -58,27 +67,22 @@ Prompt rules:
 - Keep answers short (they will also be spoken in Part 3).
 - Answer in the caller's language.
 
-## Provider abstraction (key for cloud migration)
+## LLM client — one client for local and cloud
 
 ```python
-class LLMProvider(Protocol):
-    def chat(self, messages: list[dict], tools: list | None = None, stream: bool = False): ...
+from openai import OpenAI
 
-class EmbedProvider(Protocol):
-    dim: int
-    def embed(self, texts: list[str]) -> list[list[float]]: ...
+chat_client  = OpenAI(base_url=settings.llm_base_url,   api_key=settings.llm_api_key)
+embed_client = OpenAI(base_url=settings.embed_base_url, api_key=settings.embed_api_key)
 
-class VectorStore(Protocol):
-    def upsert(self, business_id: str, chunks: list[Chunk]) -> None: ...
-    def search(self, business_id: str, vector: list[float], k: int) -> list[Hit]: ...
-    def delete_by_source(self, business_id: str, source_url: str) -> None: ...
+def embed(texts: list[str]) -> list[list[float]]:
+    r = embed_client.embeddings.create(model=settings.embed_model, input=texts)
+    return [d.embedding for d in r.data]
 ```
 
-Implementations selected by env vars: `LLM_PROVIDER=ollama|vertex`,
-`EMBED_PROVIDER=ollama|vertex`, `VECTOR_DB=qdrant|pgvector`. Nothing outside
-`app/providers/` imports Ollama, Qdrant, or Vertex directly.
-
-The LLM interface supports **tool calling** from the start — Part 4 needs it.
+No provider classes, no LangChain. Switching to Gemini = changing `LLM_*` / `EMBED_*`
+env vars. Tool calling uses the standard `tools=[...]` parameter from the start — Part 4
+needs it.
 
 ## Code layout
 
@@ -86,37 +90,43 @@ The LLM interface supports **tool calling** from the start — Part 4 needs it.
 app/
   main.py               FastAPI app
   config.py             settings from env (pydantic-settings)
-  api/chat.py           POST /chat, GET /chat/stream (SSE)
+  llm.py                OpenAI-compatible chat + embed helpers
+  db/                   SQLAlchemy models, Alembic migrations (enables pgvector)
+  api/chat.py           POST /chat, GET /chat/stream (SSE), GET /debug/retrieve
   rag/
-    index.py            load chunks.jsonl → embed → upsert
-    retrieve.py         hybrid search + custom reply boost
+    index.py            chunks without embedding (or wrong embed_model) → embed → UPDATE
+    retrieve.py         vector + keyword SQL, rank fusion, custom reply boost
     prompt.py           prompt builder
     answer.py           full pipeline
-  providers/            llm.py, embeddings.py, vectordb.py
-  db/                   SQLAlchemy models, Alembic migrations
-web/chat.html           minimal test chat page
+web/chat.html           minimal test chat page (shows retrieved chunks next to the answer)
 tests/eval/<business>.yaml  question → expected facts
 docker-compose.yml, Dockerfile, .env.example
 ```
 
+## Manual testing — see how it works
+
+- `psql` into the database: look at `pages`, `chunks`, vectors, run similarity queries by hand.
+- `GET /debug/retrieve?business_id=..&q=..` returns the retrieved chunks with scores.
+- Chat page shows the answer **and** the chunks and prompt it was built from.
+- Log every LLM call (prompt, response, tokens, latency) during development.
+
 ## Tasks
 
-- [ ] `docker-compose.yml` (api, qdrant, postgres) + Ollama setup notes
-- [ ] Config + provider interfaces + Ollama/Qdrant implementations
-- [ ] Postgres schema + migrations
-- [ ] Indexer: `chunks.jsonl` → Qdrant (idempotent upserts by content hash)
-- [ ] Retrieval (vector first, then add hybrid sparse search)
+- [ ] `docker-compose.yml` (api + pgvector Postgres) + Ollama install notes
+- [ ] Config + `llm.py` (OpenAI-compatible client)
+- [ ] Schema + Alembic migrations (`vector` extension, `tsv` column + GIN index)
+- [ ] Indexer: embed chunks missing an embedding or with a different `embed_model`
+- [ ] Retrieval: vector search → add keyword search → rank fusion
 - [ ] Prompt builder + answer pipeline with streaming
 - [ ] `/chat` endpoint with conversation history
-- [ ] Custom replies CRUD + embedding
-- [ ] Simple chat web page
+- [ ] Debug retrieval endpoint + chat page showing sources
+- [ ] Custom replies CRUD + indexing
 - [ ] Eval script: run test questions, check expected facts appear, report score
+- [ ] Run the eval with Gemini (only env vars changed) and compare to the local model
 
 ## Notes
 
 - Measure retrieval separately from generation: for each eval question, check that the
-  right chunk is in top-k before tuning prompts.
-- Small local models hallucinate more than Gemini — good for learning, but judge final
-  quality with the cloud model too.
-- Embedding model is part of the index: changing it (e.g. to Vertex) means re-indexing
-  from `chunks.jsonl`.
+  right chunk is in the top 5 before tuning prompts.
+- Changing the embedding model means re-embedding all chunks; the indexer handles it
+  via `embed_model`. Keep `EMBED_DIM=768` in both environments so the column type stays.

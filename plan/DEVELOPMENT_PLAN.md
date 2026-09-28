@@ -1,164 +1,148 @@
-# Development Plan — Local First, Then Google Cloud (Cheap)
+# Development Plan — Local First, Then Google Cloud
 
-Principles:
-1. **Build and learn locally** at zero cost; every component runs in Docker.
-2. **Same container image** runs locally and on Google Cloud — only environment
-   variables change.
-3. **Scale to zero / pay per use** in the cloud; avoid anything that bills 24/7 unless it
-   is tiny.
-4. **One deployment serves all businesses** (multi-tenant) — not one stack per business.
-   Per-business isolation is done with data (collection or `business_id` filter), config,
-   and phone number mapping. This is what keeps cost per business near zero.
+## Principles
 
----
+1. **Learn locally at zero cost.** Run the LLM and the vector database on the laptop and
+   test everything by hand before paying for cloud.
+2. **Only technology that exists both locally and as a managed Google Cloud service.**
+   No local-only tools that must be replaced later, no self-managed servers in the cloud.
+3. **Standard interfaces instead of custom abstractions.** Postgres for all data, the
+   OpenAI-compatible API for all LLM calls. Moving to cloud = changing environment
+   variables.
+4. **Same Docker image** locally and on Cloud Run.
+5. **Simple but scalable.** Managed, scale-to-zero services; no Kubernetes, no VMs, no
+   extra vector database service.
+6. **One deployment for all businesses** (multi-tenant): a business is rows in the
+   database with a `business_id`, plus a phone number mapping.
 
-## Phase 1 — Local, cloud-compatible
+## Stack
 
-Details: [02-local-rag.md](02-local-rag.md)
+| Layer | Local | Google Cloud | Change on migration |
+|---|---|---|---|
+| App (API, voice, dashboard) | FastAPI in Docker | **Cloud Run** | none — same image |
+| Crawler | CLI in the same image | **Cloud Run Job** + **Cloud Scheduler** | none |
+| Vectors + all app data | **Postgres 16 + pgvector** (`pgvector/pgvector:pg16`) | **Cloud SQL for PostgreSQL + pgvector** | `DATABASE_URL` |
+| LLM (chat + tool calling) | **Ollama** via OpenAI-compatible API | **Gemini** via OpenAI-compatible API | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
+| Embeddings | Ollama `nomic-embed-text` via OpenAI-compatible API | Gemini embeddings via OpenAI-compatible API | `EMBED_*` vars + one re-index |
+| Speech-to-Text / Text-to-Speech | Google Speech APIs (called from laptop) | same | none |
+| Telephony | Twilio → ngrok | Twilio → Cloud Run URL | webhook URL |
+| Secrets | `.env` | **Secret Manager** → env vars | none in code |
 
-### Stack
+What we deliberately **don't** use:
+- **Separate vector DB** (Qdrant, Vertex AI Vector Search) — pgvector in Postgres covers
+  our scale (hundreds to thousands of chunks per business) and removes a whole service.
+- **LangChain / LlamaIndex** — the `openai` Python client + SQL is enough and easier to
+  understand and debug.
+- **Local speech models** (Whisper, Piper) — local-only tech; Google Speech costs cents
+  while testing and behaves identically in cloud.
+- **File storage** for pages/chunks — stored in Postgres, so no local-folder vs Cloud
+  Storage switch.
+- **VMs, Kubernetes** — Cloud Run + Cloud SQL are managed and scale on their own.
 
-| Component | Local | Google Cloud equivalent |
-|---|---|---|
-| API / app | FastAPI in Docker | Cloud Run (same image) |
-| Vector DB | Qdrant in Docker | Qdrant on small VM / Qdrant Cloud, or pgvector on Cloud SQL |
-| Relational data (businesses, bookings, conversations) | Postgres in Docker | Cloud SQL Postgres (or same Postgres with pgvector) |
-| Embeddings | Ollama `nomic-embed-text` or sentence-transformers | Vertex AI `text-embedding` / `gemini-embedding` |
-| LLM | Ollama (general instruct model, e.g. Llama 3.1 8B / Qwen instruct) | Gemini Flash on Vertex AI |
-| STT / TTS | faster-whisper / Piper | Google Speech-to-Text / Text-to-Speech, or Gemini Live |
-| Crawler jobs | Python script / container | Cloud Run Jobs + Cloud Scheduler |
-| Files (raw pages, recordings) | local folder | Cloud Storage |
-| Secrets | `.env` | Secret Manager |
-| Phone webhooks | Twilio → ngrok tunnel | Twilio → Cloud Run URL |
+## Why these two interfaces make migration smooth
 
-Note: use a general chat/instruct model locally, not a coding model (e.g. `qwen2.5-coder`)
-— a customer-facing assistant needs conversational quality, not code generation.
+**Postgres + pgvector** — the same SQL, extension and migrations run in Docker and in
+Cloud SQL. Vectors, full-text search, businesses, bookings and conversations live in one
+database, so there is nothing to keep in sync.
 
-### Code structure (provider abstraction)
+**OpenAI-compatible API** — Ollama and Gemini both serve `/chat/completions` and
+`/embeddings` with tool calling, so one client works for both:
 
-Every external dependency sits behind a small interface, chosen by env var:
+```python
+from openai import OpenAI
+llm = OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+llm.chat.completions.create(model=settings.llm_model, messages=..., tools=...)
+```
+
+```bash
+# .env.local
+DATABASE_URL=postgresql+psycopg://app:app@postgres:5432/app
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_API_KEY=ollama
+LLM_MODEL=llama3.1:8b
+EMBED_BASE_URL=http://host.docker.internal:11434/v1
+EMBED_MODEL=nomic-embed-text
+EMBED_DIM=768
+
+# .env.cloud — same code, different values (secrets from Secret Manager)
+DATABASE_URL=postgresql+psycopg://app:<secret>@/app?host=/cloudsql/<project>:<region>:<instance>
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_API_KEY=<secret>
+LLM_MODEL=gemini-2.5-flash        # use the current Flash model at deploy time
+EMBED_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+EMBED_MODEL=gemini-embedding-001
+EMBED_DIM=768                     # reduced output dimension, keeps the column size
+```
+
+Gemini is reachable through the Gemini API (API key, simplest) or Vertex AI (IAM/service
+account, regional data residency); both offer OpenAI-compatible endpoints. Start with the
+Gemini API on a **paid** key — free-tier data may be used by Google to improve products,
+which is not acceptable for customer data.
+
+Native Google SDKs are used only where the OpenAI-compatible API can't do the job
+(Speech APIs, Gemini Live for voice).
+
+## Local ↔ cloud differences to keep in mind
+
+- **Embeddings:** `nomic-embed-text` and Gemini produce different vectors → re-embed all
+  chunks once when switching (one command; chunk text is in Postgres). Option: use Gemini
+  embeddings locally too, so the tested index is the shipped index — costs almost nothing.
+- **Answer quality:** small local models hallucinate more and are weaker at tool calling.
+  Use them to learn the flow; validate real quality by pointing `LLM_BASE_URL` at Gemini
+  before going live.
+- **Ollama on Mac:** run it natively (uses the GPU), not in Docker.
+
+## Code structure
 
 ```
 app/
-  api/            FastAPI routes: /chat, /voice/ws, /twilio/*, /admin/*
-  ingest/         crawler, cleaner, chunker, places_client
-  rag/            retriever, prompt builder, answer pipeline
-  providers/
-    llm.py        LLMProvider      -> OllamaLLM | GeminiLLM
-    embeddings.py EmbedProvider    -> OllamaEmbed | VertexEmbed
-    vectordb.py   VectorStore      -> QdrantStore | PgVectorStore
-    speech.py     STT / TTS        -> Whisper/Piper | Google
-  actions/        tools: book_table, make_appointment, summarize, transfer
-  models/         DB schema (SQLAlchemy)
-docker-compose.yml   api, qdrant, postgres, ollama
+  main.py           FastAPI app
+  config.py         settings from env (pydantic-settings)
+  db/               SQLAlchemy models + Alembic migrations (incl. pgvector)
+  llm.py            OpenAI-compatible client: chat, embed
+  ingest/           crawler, cleaner, chunker, Places client
+  rag/              index, retrieve (SQL), prompt, answer
+  voice/            Twilio routes, WebSocket session, Google STT/TTS
+  actions/          tools: booking, appointment, summary, message, transfer
+  dashboard/        owner UI (Jinja + HTMX)
+docker-compose.yml  api + postgres(pgvector)
 Dockerfile
 .env.example
 ```
 
-```bash
-# .env (local)
-LLM_PROVIDER=ollama
-EMBED_PROVIDER=ollama
-VECTOR_DB=qdrant
-VECTOR_DB_URL=http://qdrant:6333
-DATABASE_URL=postgresql://app:app@postgres:5432/app
+## Phase 1 — Local
 
-# .env (cloud) — same code, different values
-LLM_PROVIDER=vertex
-EMBED_PROVIDER=vertex
-VECTOR_DB_URL=https://<qdrant-host>:6333
-VECTOR_DB_API_KEY=<from Secret Manager>
-```
+Details: [02-local-rag.md](02-local-rag.md)
 
-Using LangChain/LlamaIndex for these interfaces is optional; thin hand-written wrappers
-are easier to understand while learning and have fewer dependencies.
+1. `docker-compose.yml` (api + pgvector Postgres), Ollama installed natively, FastAPI
+   health check, Alembic migration enabling `vector`.
+2. Crawler → one real business stored in Postgres ([01-crawler.md](01-crawler.md)).
+3. Index + retrieval + `/chat` + eval questions ([02-local-rag.md](02-local-rag.md)).
+   Inspect chunks, vectors and search results directly with `psql`.
+4. Voice via Twilio + ngrok with Google Speech ([03-voice-channel.md](03-voice-channel.md)).
+5. Tools: summary, booking, appointment + minimal dashboard ([04-actions.md](04-actions.md)).
+6. Second business onboarded with no code changes.
+7. Switch `LLM_*` to Gemini while still local → compare quality.
 
-**Important:** the embedding model must be the same for ingestion and queries. Switching
-local → Vertex embeddings means **re-embedding** the data (different vector dimensions),
-not just copying the Qdrant snapshot. Store raw chunks (Markdown) so re-embedding is a
-one-command job.
-
-### Local steps
-
-1. `docker-compose.yml` with Qdrant, Postgres, Ollama; FastAPI skeleton + health check.
-2. Ingestion pipeline (Part 1) → one real business ingested.
-3. RAG `/chat` endpoint (Part 2) + a tiny web chat page + eval questions.
-4. Local voice loop (mic → whisper → RAG → Piper) (Part 3).
-5. Twilio number → ngrok → `/twilio` webhook + media stream (Part 3).
-6. Tools: summary, booking, appointment (Part 4) + minimal owner dashboard.
-7. Multi-tenant: `businesses` table, phone-number → business mapping, per-business config.
-
----
-
-## Phase 2 — Google Cloud, as cheap as possible
+## Phase 2 — Google Cloud
 
 Details: [05-cloud-migration.md](05-cloud-migration.md)
 
-### Target architecture
-
 ```
-Twilio ──► Cloud Run: api (FastAPI, WebSockets) ──► Vertex AI Gemini (LLM, embeddings)
-                 │            │
-                 │            └──► Vector DB (Qdrant VM / Qdrant Cloud / pgvector)
-                 └──► Cloud SQL Postgres (or Postgres on the same VM)
-Cloud Scheduler ──► Cloud Run Job: ingest/re-crawl ──► Cloud Storage (raw pages)
+Twilio ──► Cloud Run: api (FastAPI, WebSockets) ──► Gemini (chat, embeddings)
+                 │                              ──► Google Speech-to-Text / Text-to-Speech
+                 └──► Cloud SQL Postgres + pgvector (vectors + all app data)
+Cloud Scheduler ──► Cloud Run Job: ingest / re-crawl ──► Cloud SQL
 ```
 
-### Vector DB options (cost)
-
-| Option | Approx. cost | Notes |
-|---|---|---|
-| Qdrant Cloud free tier (1 GB, runs on GCP) | $0 | Enough for many small businesses to start; zero migration effort |
-| Qdrant on `e2-small`/`e2-medium` VM (optionally Spot) | ~$7–25/mo | Same Docker image as local; Spot can be preempted — keep snapshots in Cloud Storage |
-| pgvector on Cloud SQL (smallest tier) | ~$10–30/mo | One DB for vectors + bookings + conversations; simplest ops |
-| Vertex AI Vector Search | $$ (always-on endpoint) | Overkill and expensive at this scale — avoid for now |
-
-**Recommendation:** start with Qdrant Cloud free tier (or pgvector if we want one
-database for everything). Move to a VM only when free tier is outgrown.
-
-Website data for a small business is small (hundreds to a few thousand chunks), so even
-many businesses fit in a small instance.
-
-### Compute and cost notes
-
-- **Cloud Run**, min instances = 0 for chat/admin → pay only per request.
-- **Voice latency:** a cold start during a phone call is noticeable. Options: min
-  instances = 1 for the voice service only (~few $/mo with CPU throttling off only when
-  needed), or accept cold start for the prototype. Cloud Run supports WebSockets with
-  request timeout up to 60 min — enough for calls.
-- **LLM:** Gemini Flash (pay per token, cheap). Cache business profile in the prompt;
-  keep retrieved context small (top-k 3–5) to control token cost.
-- **Ingestion** runs as a Cloud Run Job on a schedule (e.g. weekly), not a live service.
-- **Budget alerts** in Cloud Billing from day one.
-- Biggest real cost at scale will be **telephony minutes + STT/TTS**, not the vector DB.
-
-### Deployment steps
-
-1. Create GCP project, enable Cloud Run, Artifact Registry, Vertex AI, Secret Manager,
-   Cloud Scheduler; set budget alert.
-2. Build image → push to Artifact Registry (`gcloud builds submit`).
-3. Provision vector DB (Qdrant Cloud free tier) and Postgres.
-4. Re-run ingestion with Vertex embeddings to populate cloud vector DB.
-5. Deploy `api` to Cloud Run with cloud `.env` values from Secret Manager.
-6. Point Twilio webhook to the Cloud Run URL; test a call.
-7. Deploy ingestion as Cloud Run Job + Cloud Scheduler trigger.
-8. Later: CI/CD (GitHub Actions → build → deploy), Terraform for infra.
-
-### Onboarding a new business (target flow)
-
-1. Owner enters website URL (+ Google listing) in the dashboard.
-2. Ingestion job runs → knowledge base ready.
-3. Buy/assign a Twilio number, map it to `business_id`.
-4. Owner reviews answers, adds custom replies, connects calendar.
-
-No new deployment per business — just rows in the database and a phone number.
-
----
+Base cost: Cloud SQL smallest instance ≈ $10/month; Cloud Run, Scheduler and Jobs are
+mostly within free tier at low traffic; Gemini and Speech are pay-per-use. Main cost at
+scale: telephony + speech minutes.
 
 ## Open questions
 
-- Which business type to start with (restaurant vs appointment-based)? Drives which
-  booking integration comes first.
-- Languages needed for voice (affects STT/TTS/model choice)?
+- Which business type first (restaurant vs appointment-based)? Drives which booking
+  integration comes first.
+- Languages needed for voice?
 - Twilio vs other telephony provider (pricing in target country)?
 - Store call recordings or only transcripts (privacy / GDPR)?

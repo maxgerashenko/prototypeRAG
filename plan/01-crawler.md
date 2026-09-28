@@ -55,11 +55,14 @@ Google Places API ─► business profile (hours, address, phone, reviews) ─�
      `business_id, source_url, page_title, section_heading, chunk_index, scraped_at, content_hash`.
 
 6. **Save**
-   - Raw HTML + cleaned Markdown → `data/<business_id>/pages/` (later Cloud Storage).
-   - Profile → `data/<business_id>/profile.json` (later Postgres).
-   - Chunks → `data/<business_id>/chunks.jsonl` — the input for Part 2 embedding.
-   - Keeping raw chunks on disk means we can **re-embed** any time (needed when moving
-     to cloud embeddings) without re-crawling.
+   - Everything goes into **Postgres** (same database as Part 2, locally in Docker,
+     Cloud SQL in cloud) — no file storage to switch between local and cloud:
+     - cleaned Markdown → `pages` table (url, title, markdown, content_hash, scraped_at)
+     - profile → `business_profile` table
+     - chunks → `chunks` table with empty `embedding`; Part 2's indexer fills it.
+   - Keeping chunk text in the database means we can **re-embed** any time (needed when
+     moving to cloud embeddings) without re-crawling.
+   - Raw HTML is not kept by default; add a Cloud Storage bucket later only if needed.
 
 7. **Refresh**
    - Re-crawl on a schedule; compare `content_hash` per page and only re-chunk/re-embed
@@ -76,12 +79,12 @@ app/ingest/
   places.py         Google Places API client
   profile.py        LLM-based structured extraction + merge
   chunk.py          header-aware chunking + metadata
-  store.py          write pages/profile/chunks to disk (later GCS / DB)
+  store.py          write pages/profile/chunks to Postgres
 ```
 
 ## Tasks
 
-- [ ] CLI skeleton + `data/` layout
+- [ ] CLI skeleton + DB tables for pages/profile/chunks
 - [ ] Page discovery (sitemap, links, limits, robots.txt)
 - [ ] Fetch with Crawl4AI, fallback fetcher
 - [ ] Cleaning + Markdown output, check on 3 different real sites
