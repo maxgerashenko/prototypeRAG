@@ -18,7 +18,12 @@ Detailed plan per part:
 [2 Local RAG](02-local-rag.md) ·
 [3 Voice channel](03-voice-channel.md) ·
 [4 Actions](04-actions.md) ·
-[5 Move to cloud](05-cloud-migration.md)
+[5 Cloud — stage 2](05-cloud-migration.md) ·
+[6 Scale — stage 3](06-scale.md)
+
+Built in three learning stages — **1 Local** (understand the principles) → **2 Cloud**
+(understand the infrastructure, one business) → **3 Scale** (many businesses, price and
+reliability). See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
 
 ```
             ┌────────────── Part 1: Ingestion ──────────────┐
@@ -144,14 +149,16 @@ bookings, knowledge-base status, "re-scrape" button, custom replies editor.
 
 Order follows the build order in [DECISIONS.md](DECISIONS.md) section 1.
 
-| # | Milestone | Done when |
-|---|---|---|
-| M0 | Foundation | Docker Compose (API + Postgres/pgvector), migrations, base tables with RLS |
-| M1 | Ingestion | `ingest <url>` fills Postgres (pages, profile, chunks) for one real business |
-| M2 | Text RAG | Chat answers test questions correctly, says "don't know" otherwise |
-| M3 | Voice (local) | Talk to the bot through the mic locally |
-| M4 | Phone | Real phone call answered via Twilio (ngrok tunnel locally) |
-| M5 | Actions | Booking + conversation summary working end-to-end |
-| M5b | Gemini check | Eval + booking tests pass with Gemini (env vars only), still local |
-| M6 | Cloud | Deployed on Google Cloud, see [05-cloud-migration.md](05-cloud-migration.md) |
-| M7 | Multi-business | Second business onboarded with no code changes |
+| # | Stage | Milestone | Done when |
+|---|---|---|---|
+| M0 | 1 | Foundation | Postgres/pgvector in Docker, migrations, base tables with `business_id`, `tenant_session` |
+| M1 | 1 | Ingestion | `ingest <url>` fills Postgres (pages, profile, chunks) for one real business |
+| M2 | 1 | Text RAG | Chat answers test questions correctly, says "don't know" otherwise |
+| M3 | 1 | Voice (local) | Talk to the bot through the mic locally |
+| M4 | 1 | Phone | Real phone call answered via Twilio (ngrok tunnel locally) |
+| M5 | 1 | Actions | Booking + conversation summary working end-to-end |
+| M5b | 1 | Gemini check | Eval + booking tests pass with Gemini (env vars only), still local |
+| M5c | 1 | Containerized | App + crawler run from Docker images with env-var config only |
+| M6 | 2 | Cloud | Pilot business live on Cloud Run + Neon + Gemini, `deploy.sh`, latency/cost measured — [05](05-cloud-migration.md) |
+| M7 | 3 | Multi-business | RLS enforced; second business onboarded with no code changes — [06](06-scale.md) |
+| M8 | 3 | Profitable scale | Cost per business measured and below price; latency holds under load test |

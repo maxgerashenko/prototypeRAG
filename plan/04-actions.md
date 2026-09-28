@@ -82,7 +82,9 @@ throttles CPU after a response is sent (DEC-24, R19):
 - Settings: greeting, enabled tools, transfer number, booking rules, calendar connection.
 
 Start simple: server-rendered pages (FastAPI + Jinja + HTMX) — no separate frontend build.
-Add login (Google sign-in or magic link — OPEN-12) before any real business uses it.
+Stages 1–2: minimal dashboard without login (local / single pilot, access restricted).
+Stage 3: login (Google sign-in or magic link — OPEN-12) and onboarding flow before the
+second business ([06-scale.md](06-scale.md)).
 
 ## Data model additions
 
@@ -117,7 +119,7 @@ app/dashboard/       routes + Jinja templates
 - [ ] SMS confirmation
 - [ ] Post-conversation summary job
 - [ ] Owner dashboard: conversations, bookings, unanswered questions
-- [ ] Google Calendar backend (OAuth, free/busy, create event)
+- [ ] Google Calendar backend (OAuth, free/busy, create event) — stage 3
 - [ ] Owner notifications
 - [ ] Test scripts: simulated conversations for booking happy path + edge cases
   (closed day, full slot, change of mind, cancellation)

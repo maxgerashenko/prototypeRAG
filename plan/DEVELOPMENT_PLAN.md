@@ -1,102 +1,183 @@
-# Development Plan — Local First, Then Google Cloud
+# Development Plan — Three Learning Stages
 
-## Principles
+The project is built in three stages. Each stage has its own **learning goal**, and we
+choose the **simplest solution that reaches that goal** — not the solution needed for
+the final product. Harder problems are deliberately deferred to the stage where they
+become real.
 
-Full list of drivers and the restrictions that force exceptions:
-[ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md)
+| Stage | Goal | Question it answers | Businesses | Infra cost |
+|---|---|---|---|---|
+| **1. Local** | Understand the principles | How do crawling, RAG, voice and tool calling actually work? | 1 (test) | ~$0 (+ cents for Google Speech / Gemini tests) |
+| **2. Cloud** | Understand cloud infrastructure | How does it run on Google Cloud — images, services, jobs, secrets, IAM, logs? | 1 (pilot) | ~$0–5/month + usage |
+| **3. Scale** | Solve multi-client scale and price problems | How do we serve many businesses safely, reliably and profitably? | many | grows with usage; known cost per business |
 
-1. **Learn locally at zero cost.** Run the LLM and the vector database on the laptop and
-   test everything by hand before paying for cloud.
-2. **Only technology that exists both locally and as a managed Google Cloud service.**
-   No local-only tools that must be replaced later, no self-managed servers in the cloud.
-3. **Standard interfaces instead of custom abstractions.** Postgres for all data, the
-   OpenAI-compatible API for all LLM calls. Moving to cloud = changing environment
-   variables.
-4. **Same Docker images** locally and on Cloud Run (API image + separate crawler image, R8).
-5. **Simple but scalable.** Managed, scale-to-zero services; no Kubernetes, no VMs, no
-   extra vector database service.
-6. **One deployment for all businesses** (multi-tenant): a business is rows in the
-   database with a `business_id`, plus a phone number mapping.
+Related: principles and restrictions → [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) ·
+decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 
-## Stack
+## Principles across all stages
 
-| Layer | Local | Google Cloud | Change on migration |
+1. **Standard interfaces from day one** — Postgres + pgvector for all data, the
+   OpenAI-compatible API for all LLM calls, env vars for configuration. This is what
+   makes each stage transition cheap.
+2. **Multi-tenant data model from day one, enforcement later** — every table has
+   `business_id` and every query goes through `tenant_session(business_id)` from stage 1;
+   Row-Level Security policies are switched on in stage 3 (a migration, no code rewrite).
+3. **Only technology that exists locally and as a managed service** — nothing to throw
+   away between stages.
+4. **Defer, don't pre-build** — each stage lists what is deliberately *not* done yet.
+5. **One deployment for all businesses** (D6) — even in stage 3 a new business is rows +
+   a phone number, not new infrastructure.
+
+## Stack by stage
+
+| Layer | Stage 1 — Local | Stage 2 — Cloud | Stage 3 — Scale |
 |---|---|---|---|
-| App (API, voice, dashboard) | FastAPI in Docker | **Cloud Run** | none — same image |
-| Crawler | CLI in a separate crawler image (headless browser) | **Cloud Run Job** + **Cloud Scheduler** | none |
-| Vectors + all app data | **Postgres 16 + pgvector** (`pgvector/pgvector:pg16`) | Managed Postgres + pgvector: **Neon** free tier to start, **Cloud SQL** later | `DATABASE_URL` |
-| LLM (chat + tool calling) | **Ollama** via OpenAI-compatible API | **Gemini** via OpenAI-compatible API | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
-| Embeddings | Ollama `nomic-embed-text` via OpenAI-compatible API | Gemini embeddings via OpenAI-compatible API | `EMBED_*` vars + one re-index |
-| Speech-to-Text / Text-to-Speech | Google Speech APIs (called from laptop) | same | none |
-| Telephony | Twilio → ngrok | Twilio → Cloud Run URL | webhook URL |
-| Secrets | `.env` | **Secret Manager** → env vars | none in code |
+| App runtime | FastAPI **natively** (`uv run`, hot reload, debugger) → Docker image at stage exit | **Cloud Run**, one service, `min-instances=0` | `min-instances=1` for calls, tuned concurrency, split voice vs web if needed |
+| Crawler | Python CLI natively | Separate crawler image → **Cloud Run Job** + Scheduler | same, per-business schedules |
+| Database | Postgres 16 + pgvector in **Docker** (the only container) | **Neon** free tier (same region) | Neon paid or **Cloud SQL** (OPEN-10), pooling, backups, HNSW if needed |
+| Tenant isolation | `business_id` + `tenant_session` helper | same | **RLS policies + `app_user` role + isolation tests** |
+| LLM | **Ollama** native (OpenAI-compatible); Gemini for comparison | **Gemini** paid key (OpenAI-compatible) | + cost controls; Gemini Live if cheaper/faster (OPEN-08) |
+| Embeddings | `nomic-embed-text` (or Gemini, OPEN-05) | Gemini embeddings, one re-index | same |
+| Speech | Google STT/TTS from laptop | same | voice/cost choice per OPEN-08 |
+| Telephony | Browser mic first, then Twilio trial + **ngrok** | Twilio → Cloud Run URL | provider per country/price (OPEN-09) |
+| Secrets | `.env` | **Secret Manager** | same + rotation |
+| Deploy | — | Manual `gcloud` → `deploy.sh` | **CI/CD** (GitHub Actions + WIF), **Terraform**, staging/prod |
+| Observability | logs in terminal, debug endpoints | Cloud Logging, budget alert, latency numbers | dashboards, alerts, **cost per business** |
 
-What we deliberately **don't** use:
-- **Separate vector DB** (Qdrant, Vertex AI Vector Search) — pgvector in Postgres covers
-  our scale (hundreds to thousands of chunks per business) and removes a whole service.
-- **LangChain / LlamaIndex** — the `openai` Python client + SQL is enough and easier to
-  understand and debug.
-- **Local speech models** (Whisper, Piper) — local-only tech; Google Speech costs cents
-  while testing and behaves identically in cloud.
-- **File storage** for pages/chunks — stored in Postgres, so no local-folder vs Cloud
-  Storage switch.
-- **Firestore + separate vector DB** — two databases to sync; bookings need SQL transactions.
-- **VMs, Kubernetes** — Cloud Run + managed Postgres are managed and scale on their own.
+---
 
-## Why these two interfaces make migration smooth
+## Stage 1 — Local: understand the principles
 
-**Postgres + pgvector** — the same SQL, extension and migrations run in Docker and in
-any managed Postgres (Neon now, Cloud SQL later). Vectors, full-text search, businesses,
-bookings and conversations live in one database, so there is nothing to keep in sync.
+**Learning goals**
+- Crawling and cleaning a real site; what good chunks look like.
+- Embeddings and vector search — inspect vectors and similarity scores in `psql`.
+- Hybrid retrieval (vector + full-text) and why it beats vector-only.
+- Prompt building, grounding, "I don't know" behaviour, hallucinations.
+- Tool calling: how the model decides to book; why confirmation must be in code.
+- Voice pipeline: STT → LLM → TTS, where latency comes from, barge-in.
 
-**OpenAI-compatible API** — Ollama and Gemini both serve `/chat/completions` and
-`/embeddings` with tool calling, so one client works for both:
+**Optimal setup for learning** (DEC-28)
+- Only Postgres + pgvector runs in Docker; the app, crawler and Ollama run natively —
+  fastest edit/debug loop, breakpoints, print statements.
+- One test business, but with the full `business_id` data model.
+- Debug views: retrieved chunks with scores, the full prompt, LLM call logs.
+- Voice in two steps: browser mic (no call costs) → Twilio trial via ngrok.
+- Gemini used only for comparison (quality of answers and tool calls).
 
-```python
-from openai import OpenAI
-llm = OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
-llm.chat.completions.create(model=settings.llm_model, messages=..., tools=...)
-```
+**Steps** — details in the part files
+1. Foundation: `docker-compose.yml` with Postgres/pgvector, Alembic migrations
+   (`vector`, base tables with `business_id`), FastAPI skeleton, `tenant_session` helper.
+2. Crawler → one real business in Postgres — [01-crawler.md](01-crawler.md).
+3. Index, retrieval, `/chat`, eval questions, debug views — [02-local-rag.md](02-local-rag.md).
+4. Voice: mic test mode, then Twilio + ngrok — [03-voice-channel.md](03-voice-channel.md).
+5. Actions: tool calling, internal bookings, summaries, minimal dashboard (no login) —
+   [04-actions.md](04-actions.md).
+6. Gemini comparison: switch `LLM_*` / `EMBED_*` env vars, re-run eval + booking tests.
+7. Containerize: API `Dockerfile` + `Dockerfile.crawler`; run everything via Compose with
+   the same env vars — proves stage 2 readiness.
+
+**Deliberately not in stage 1:** RLS policies, owner login, calendar OAuth, onboarding
+flow, Places beyond `place_id`, CI/CD, any cloud hosting.
+
+**Exit criteria**
+- Eval questions pass; retrieval and prompts understood and inspectable.
+- A phone call through ngrok answers questions and books a table.
+- App and crawler run from Docker images with env-var config only.
+
+---
+
+## Stage 2 — Cloud: understand the infrastructure
+
+Details: [05-cloud-migration.md](05-cloud-migration.md)
+
+**Learning goals**
+- GCP project, billing, budget alerts, IAM and service accounts.
+- Container images in Artifact Registry.
+- Cloud Run: revisions, env vars, secrets, timeouts, cold starts, WebSockets, logs.
+- Cloud Run Jobs + Cloud Scheduler for batch work (crawler).
+- Secret Manager; connecting to a managed Postgres; Gemini in production.
+
+**Optimal setup for learning**
+- Deploy **by hand with `gcloud`** first so every piece is understood; capture the
+  commands in `deploy.sh` afterwards. No Terraform/CI yet.
+- **Neon free tier** — same Postgres, $0, nothing new to learn about the DB itself.
+- One Cloud Run service, `min-instances=0`, default concurrency — **measure** cold start
+  and call latency instead of optimizing blindly.
+- One pilot business, real phone number, paid Gemini key (real customer data, R12).
+
+**Deliberately not in stage 2:** min-instances, load tests, service split, Cloud SQL,
+Terraform, CI/CD, staging/prod, RLS enforcement (only one business).
+
+**Exit criteria**
+- Pilot business answers real calls from Cloud Run; crawler job runs on schedule.
+- Redeploy from `deploy.sh` in minutes; logs and costs visible.
+- Measured numbers: cold start time, per-turn latency, cost per call minute.
+
+---
+
+## Stage 3 — Scale: many clients, price and reliability
+
+Details: [06-scale.md](06-scale.md)
+
+**Goals**
+- Serve many businesses safely (no data leaks), reliably (no dropped/laggy calls) and
+  with a known, acceptable **cost per business**.
+
+**Optimal path** — introduce each item when its trigger appears, in this order:
+1. **Tenant isolation enforced** — RLS + `app_user` + isolation tests. *Hard gate before
+   the second business.*
+2. **Onboarding without code** — owner login, profile confirmation, phone number mapping,
+   greeting audio, enabled tools.
+3. **Cost visibility** — cost per business (call minutes, speech, tokens) → pricing.
+4. **Call reliability** — `min-instances=1`, load test → `--concurrency`, `--max-instances`.
+5. **Operations** — CI/CD, Terraform, staging/prod, alerts.
+6. **Database growth** — Neon paid vs Cloud SQL, pooling, backups, HNSW index.
+7. **Cost reduction** — Gemini Live vs classic pipeline, telephony provider, prompt size,
+   caching.
+8. **Compliance** — region, retention, recordings policy, calendar OAuth token security.
+
+**Exit criteria**
+- New businesses onboarded without code changes; isolation tests pass.
+- Cost per business measured and below the price charged.
+- Call latency within budget under load.
+
+---
+
+## Configuration (same code in every stage)
 
 ```bash
-# .env.local
-DATABASE_URL=postgresql+psycopg://app_user:app@postgres:5432/app      # app role, RLS applies
-ADMIN_DATABASE_URL=postgresql+psycopg://owner:owner@postgres:5432/app  # migrations only
-LLM_BASE_URL=http://host.docker.internal:11434/v1
+# Stage 1 — .env.local
+DATABASE_URL=postgresql+psycopg://app:app@localhost:5432/app
+LLM_BASE_URL=http://localhost:11434/v1
 LLM_API_KEY=ollama
 LLM_MODEL=llama3.1:8b
-EMBED_BASE_URL=http://host.docker.internal:11434/v1
+EMBED_BASE_URL=http://localhost:11434/v1
 EMBED_MODEL=nomic-embed-text
 EMBED_DIM=768
+# in Docker Compose (end of stage 1): use host.docker.internal / service names instead of localhost
 
-# .env.cloud — same code, different values (secrets from Secret Manager)
-DATABASE_URL=postgresql+psycopg://app_user:<secret>@<neon-pooler-host>/app?sslmode=require
-ADMIN_DATABASE_URL=<secret>      # later Cloud SQL: host=/cloudsql/<project>:<region>:<instance>
+# Stage 2 — Cloud Run env (secrets from Secret Manager)
+DATABASE_URL=postgresql+psycopg://app:<secret>@<neon-pooler-host>/app?sslmode=require
 LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 LLM_API_KEY=<secret>
 LLM_MODEL=gemini-2.5-flash        # use the current Flash model at deploy time
 EMBED_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 EMBED_MODEL=gemini-embedding-001
 EMBED_DIM=768                     # reduced output dimension, keeps the column size
+
+# Stage 3 — adds
+DATABASE_URL=postgresql+psycopg://app_user:<secret>@...   # non-owner role, RLS applies
+ADMIN_DATABASE_URL=<secret>                               # owner role, migrations only (direct connection)
 ```
 
-Gemini is reachable through the Gemini API (API key, simplest) or Vertex AI (IAM/service
-account, regional data residency); both offer OpenAI-compatible endpoints. Start with the
-Gemini API on a **paid** key — free-tier data may be used by Google to improve products,
-which is not acceptable for customer data.
+Gemini is reachable through the Gemini API (API key, simplest) or Vertex AI (IAM, regional
+data residency); both are OpenAI-compatible (OPEN-07). Free-tier Gemini may use submitted
+data — paid key from the first real customer data (R12). Native Google SDKs only for
+Speech and Gemini Live (R5).
 
-Native Google SDKs are used only where the OpenAI-compatible API can't do the job
-(Speech APIs, Gemini Live for voice).
-
-## Local ↔ cloud differences to keep in mind
-
-- **Embeddings:** `nomic-embed-text` and Gemini produce different vectors → re-embed all
-  chunks once when switching (one command; chunk text is in Postgres). Option: use Gemini
-  embeddings locally too, so the tested index is the shipped index — costs almost nothing.
-- **Answer quality:** small local models hallucinate more and are weaker at tool calling.
-  Use them to learn the flow; validate real quality by pointing `LLM_BASE_URL` at Gemini
-  before going live.
-- **Ollama on Mac:** run it natively (uses the GPU), not in Docker.
+What we deliberately **don't** use in any stage: separate vector DB (Qdrant, Vertex AI
+Vector Search), Firestore, LangChain/LlamaIndex, local speech models, file storage for
+pages/chunks, VMs, Kubernetes. Reasons in [DECISIONS.md](DECISIONS.md).
 
 ## Code structure
 
@@ -104,49 +185,19 @@ Native Google SDKs are used only where the OpenAI-compatible API can't do the jo
 app/
   main.py           FastAPI app
   config.py         settings from env (pydantic-settings)
-  db/               SQLAlchemy models + Alembic migrations (incl. pgvector)
+  db/               SQLAlchemy models, Alembic migrations, tenant_session helper
   llm.py            OpenAI-compatible client: chat, embed
   ingest/           crawler, cleaner, chunker, Places client
   rag/              index, retrieve (SQL), prompt, answer
   voice/            Twilio routes, WebSocket session, Google STT/TTS
   actions/          tools: booking, appointment, summary, message, transfer
   dashboard/        owner UI (Jinja + HTMX)
-docker-compose.yml  api + postgres(pgvector) + crawler (run on demand)
+docker-compose.yml  stage 1: postgres only · stage-1 exit: + api + crawler
 Dockerfile          API image
 Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8)
 .env.example
 ```
 
-## Phase 1 — Local
-
-Details: [02-local-rag.md](02-local-rag.md)
-
-1. Foundation: `docker-compose.yml` (api + pgvector Postgres), Ollama installed natively,
-   FastAPI health check, Alembic migrations (`vector`, base tables, RLS, `app_user`).
-2. Crawler → one real business stored in Postgres ([01-crawler.md](01-crawler.md)).
-3. Index + retrieval + `/chat` + eval questions ([02-local-rag.md](02-local-rag.md)).
-   Inspect chunks, vectors and search results directly with `psql`.
-4. Voice via Twilio + ngrok with Google Speech ([03-voice-channel.md](03-voice-channel.md)).
-5. Tools: summary, booking, appointment + minimal dashboard ([04-actions.md](04-actions.md)).
-6. Switch `LLM_*` / `EMBED_*` to Gemini while still local → run eval + booking tests, compare quality.
-
-## Phase 2 — Google Cloud
-
-Details: [05-cloud-migration.md](05-cloud-migration.md)
-
-```
-Twilio ──► Cloud Run: api (FastAPI, WebSockets) ──► Gemini (chat, embeddings)
-                 │                              ──► Google Speech-to-Text / Text-to-Speech
-                 └──► Postgres + pgvector (Neon → Cloud SQL)
-Cloud Scheduler ──► Cloud Run Job: ingest / re-crawl ──► Postgres
-```
-
-Then: onboard a second business with no code changes (M7).
-
-Base cost: database $0 on Neon free tier (≈ $10/month once on Cloud SQL); Cloud Run,
-Scheduler and Jobs are mostly within free tier at low traffic; Gemini and Speech are pay-per-use. Main cost at
-scale: telephony + speech minutes.
-
 ## Open questions
 
-Tracked in [DECISIONS.md](DECISIONS.md) → section 4 "Still considering".
+Tracked in [DECISIONS.md](DECISIONS.md) → section 4 "Still considering", grouped by stage.

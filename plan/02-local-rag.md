@@ -13,7 +13,7 @@ correctly, says "I don't know" for questions not covered by the data, and every 
 
 | Service | How it runs | Purpose | Cloud equivalent |
 |---|---|---|---|
-| `api` | Docker (our image) | FastAPI: RAG, later voice + actions | Cloud Run |
+| `api` | **Natively** (`uv run`, hot reload) → Docker image at stage-1 exit (DEC-28) | FastAPI: RAG, later voice + actions | Cloud Run |
 | `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Managed Postgres + pgvector (Neon → Cloud SQL) |
 | Ollama | **Natively on the Mac** (uses GPU) | LLM + embeddings via OpenAI-compatible API | Gemini via OpenAI-compatible API |
 
@@ -47,8 +47,10 @@ messages         (id, business_id, conversation_id, role, content, created_at)
   Add an HNSW index later if data grows.
 - `tsv` (generated full-text column + GIN index) enables keyword search for hybrid retrieval.
 - `embed_model` records which model produced the vector, so a re-index is detectable.
-- Roles: migrations run as the table owner (`ADMIN_DATABASE_URL`); the app connects as
-  `app_user` (`DATABASE_URL`) and sets `SET LOCAL app.business_id` per transaction.
+- Stages 1–2: one DB role; every query still runs through `tenant_session(business_id)`,
+  which sets `SET LOCAL app.business_id`.
+- Stage 3 (before the 2nd business): RLS policies switched on; migrations run as the table
+  owner (`ADMIN_DATABASE_URL`); the app connects as `app_user` (`DATABASE_URL`).
   A single `tenant_session(business_id)` helper in `app/db/` opens the transaction and
   sets it — no query runs without it. Only `SET LOCAL`, never `SET` (pooler, R20).
 
@@ -120,8 +122,9 @@ docker-compose.yml, Dockerfile, .env.example
 
 - [ ] `docker-compose.yml` (api + pgvector Postgres) + Ollama install notes
 - [ ] Config + `llm.py` (OpenAI-compatible client)
-- [ ] Schema + Alembic migrations (`vector` extension, `tsv` column + GIN index, RLS policies, `app_user` role)
-- [ ] Tenant isolation tests (business A never sees business B)
+- [ ] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
+- [ ] `tenant_session(business_id)` helper — all queries go through it
+- (stage 3: RLS policies, `app_user` role, isolation tests — [06-scale.md](06-scale.md))
 - [ ] Indexer: embed chunks missing an embedding or with a different `embed_model`
 - [ ] Retrieval: vector search → add keyword search → rank fusion
 - [ ] Prompt builder + answer pipeline with streaming

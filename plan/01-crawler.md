@@ -86,12 +86,13 @@ app/ingest/
   store.py          write pages/profile/chunks to Postgres
 ```
 
-Runs in its **own Docker image** (Crawl4AI + headless browser), separate from the API
-image so the API stays small and starts fast (R8, DEC-10). In cloud: Cloud Run Job.
+Stage 1: runs natively (`uv run python -m app.ingest.run ...`, DEC-28). At stage-1 exit it
+gets its **own Docker image** (Crawl4AI + headless browser), separate from the API image
+so the API stays small and starts fast (R8, DEC-10). Stage 2: Cloud Run Job + Scheduler.
 
 ## Tasks
 
-- [ ] CLI skeleton + crawler Docker image (uses tables from the foundation step)
+- [ ] CLI skeleton (uses tables from the foundation step)
 - [ ] Page discovery (sitemap, links, limits, robots.txt)
 - [ ] Fetch with Crawl4AI, fallback fetcher
 - [ ] Cleaning + Markdown output, check on 3 different real sites
@@ -100,6 +101,7 @@ image so the API stays small and starts fast (R8, DEC-10). In cloud: Cloud Run J
 - [ ] Chunker + metadata
 - [ ] Change detection for re-crawls
 - [ ] Unit tests on saved HTML fixtures (no network in tests)
+- [ ] Stage-1 exit: `Dockerfile.crawler`
 
 ## Risks / notes
 

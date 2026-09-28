@@ -5,6 +5,11 @@ Postgres + pgvector → answer by chat and phone (Twilio) → actions (bookings,
 Built locally first (Ollama, Docker Postgres), then moved to Google Cloud (Cloud Run,
 Neon → Cloud SQL, Gemini) by changing env vars only.
 
+Built in three learning stages (DEC-27): **1 Local** — understand the principles;
+**2 Cloud** — understand the infrastructure with one pilot business; **3 Scale** — many
+businesses, safety, reliability, price. Each stage uses the simplest solution that reaches
+its goal; harder problems are deferred to the stage where they become real.
+
 The project is currently in the **planning stage** — no application code yet.
 
 ## Plan files (`plan/`, flat — no subfolders)
@@ -15,7 +20,9 @@ The project is currently in the **planning stage** — no application code yet.
 | `DEVELOPMENT_PLAN.md` | How: stack table local ↔ cloud, principles, env vars, code structure, phases | Stack or phases change |
 | `ARCHITECTURE_DRIVERS.md` | Drivers D1–D7 (principles + priority), wants W1–W9, restrictions R1–R20 that force deviations | A hard limit is found that bends a driver |
 | `DECISIONS.md` | Priorities, build order, decision summary DEC-xx, options tables, open questions OPEN-xx, facts behind decisions | Any decision is made, changed or opened |
-| `01-crawler.md` … `05-cloud-migration.md` | Detailed plan per part: goal, done-when, tech, code layout, tasks | Details of that part change |
+| `01-crawler.md` … `04-actions.md` | Detailed plan per feature part (built in stage 1): goal, done-when, tech, code layout, tasks | Details of that part change |
+| `05-cloud-migration.md` | Stage 2: move to Google Cloud with one pilot business | Cloud setup changes |
+| `06-scale.md` | Stage 3: many businesses — isolation, onboarding, reliability, cost, ops | Scale topics change |
 
 `README.md` links to all plan files — keep it in sync when files are added or renamed.
 
@@ -53,7 +60,10 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
   (Ollama locally, Gemini in cloud). No LangChain/LlamaIndex.
 - Google Speech APIs for STT/TTS, also locally. Native Google SDKs only in the voice module.
 - Crawled pages and chunks stored in Postgres, not files. Crawler in its own Docker image.
-- Cloud Run + Cloud Run Jobs; Neon free tier first, Cloud SQL when live.
+- Cloud Run + Cloud Run Jobs; Neon free tier in stage 2; Neon paid vs Cloud SQL in stage 3.
+- Stage 1: only Postgres in Docker, app/crawler/Ollama native (DEC-28). `business_id`
+  everywhere from stage 1; RLS enforced in stage 3 before the second business.
+- When recording a decision or open question, say which stage it belongs to.
 - Priority when goals conflict: correctness & legal > caller experience > multi-tenancy >
   same tech local/cloud > simplicity > cost > local first.
 

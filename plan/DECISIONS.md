@@ -4,9 +4,9 @@ Single place for **what we decided, why, what we rejected, and what is still ope
 Details live in the part plans; this file is the index of reasoning.
 
 Related files:
-- [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) — drivers (D1–D7), wants (W1–W9), restrictions (R1–R20)
+- [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) — drivers (D1–D7), wants (W1–W9), restrictions (R1–R20), stage focus
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) — what we build · [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — how
-- Parts: [01 crawler](01-crawler.md) · [02 local RAG](02-local-rag.md) · [03 voice](03-voice-channel.md) · [04 actions](04-actions.md) · [05 cloud](05-cloud-migration.md)
+- Parts: [01 crawler](01-crawler.md) · [02 local RAG](02-local-rag.md) · [03 voice](03-voice-channel.md) · [04 actions](04-actions.md) · [05 cloud (stage 2)](05-cloud-migration.md) · [06 scale (stage 3)](06-scale.md)
 
 How to use:
 - New decision → add a row to the summary + a section with options table.
@@ -27,18 +27,32 @@ How to use:
 6. **Scale to zero / low cost** (D5).
 7. **Local first** (D1) — learning and manual testing at ~zero cost.
 
+### Stage focus
+
+The project runs in three learning stages (DEC-27, details in
+[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)). The priority list above always holds for
+correctness & legal; the **focus** below decides trade-offs inside a stage.
+
+| Stage | Goal | Optimize for | Deliberately defer |
+|---|---|---|---|
+| **1. Local** | Understand the principles (crawl, RAG, voice, tools) | Learning & fast debug loop, $0 | RLS, login, OAuth, onboarding, cloud, CI/CD |
+| **2. Cloud** | Understand cloud infrastructure (one pilot business) | Understanding each GCP piece, same tech as local, ~$0 idle | min-instances, load tests, service split, Cloud SQL, Terraform, CI/CD |
+| **3. Scale** | Many businesses: safety, reliability, price | Tenant isolation, caller experience, cost per business | — (items introduced by trigger) |
+
 ### Build order
 
-| Step | What | Why this order |
-|---|---|---|
-| 0 | Foundation: Docker Compose (API + Postgres/pgvector), Alembic, base tables + RLS | Every later part writes into these tables |
-| 1 | Crawler → pages, profile, chunks in Postgres | Need real data before RAG |
-| 2 | Local RAG: index, retrieval, `/chat`, eval questions, debug views | Core value; learn how RAG works |
-| 3 | Voice: Twilio + Google Speech, ngrok | Builds on working RAG |
-| 4 | Actions: tool calling, bookings, summaries, dashboard | Needs RAG + channels |
-| 5 | Quality check with Gemini (env var switch, still local) | Validate before paying for hosting |
-| 6 | Cloud: Cloud Run + Neon + Gemini | Only after it works locally |
-| 7 | Second business with no code changes | Proves multi-tenancy |
+| Step | Stage | What | Why this order |
+|---|---|---|---|
+| 0 | 1 | Foundation: Postgres/pgvector in Docker, Alembic, base tables with `business_id`, `tenant_session` | Every later part writes into these tables |
+| 1 | 1 | Crawler → pages, profile, chunks | Need real data before RAG |
+| 2 | 1 | RAG: index, retrieval, `/chat`, eval, debug views | Core value; learn how RAG works |
+| 3 | 1 | Voice: mic test → Twilio + ngrok | Builds on working RAG |
+| 4 | 1 | Actions: tool calling, bookings, summaries, minimal dashboard | Needs RAG + channels |
+| 5 | 1 | Gemini comparison (env vars) | Validate quality before cloud |
+| 6 | 1 | Containerize (API + crawler images) | Stage 2 readiness |
+| 7 | 2 | Cloud Run + Neon + Gemini, one pilot business, `deploy.sh` | Learn infra on a working system |
+| 8 | 3 | RLS enforcement → second business | Hard gate for multi-tenancy |
+| 9 | 3 | Onboarding, cost per business, reliability, ops, DB growth, cost reduction | By trigger, see [06-scale.md](06-scale.md) |
 
 ---
 
@@ -46,34 +60,36 @@ How to use:
 
 Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section 4)
 
-| ID | Topic | Decision | Status |
-|---|---|---|---|
-| DEC-01 | Tenancy model | One deployment, many businesses (`business_id`) | ✅ |
-| DEC-02 | Vector store | Postgres + pgvector (one DB for everything) | ✅ |
-| DEC-03 | Cloud DB hosting | Neon free tier → Cloud SQL when live | 🔄 |
-| DEC-04 | Tenant isolation | Shared tables + `business_id` + Row-Level Security | ✅ |
-| DEC-05 | LLM interface | `openai` client against OpenAI-compatible endpoints | ✅ |
-| DEC-06 | Local LLM runtime | Ollama, native on Mac, general instruct model | ✅ |
-| DEC-07 | Cloud LLM | Gemini Flash, paid key, Gemini API first | 🔄 |
-| DEC-08 | Embeddings | `nomic-embed-text` local, `gemini-embedding-001` cloud, 768 dims, re-index on switch | 🔄 |
-| DEC-09 | Crawled content storage | Postgres tables, no file storage | ✅ |
-| DEC-10 | Crawler tech | Crawl4AI + httpx fallback, separate crawler image | ✅ |
-| DEC-11 | Google listing data | Website + owner are the stored source of truth; Places = `place_id` + live lookup | 🔄 (OPEN-04) |
-| DEC-12 | Retrieval | Hybrid: pgvector + Postgres full-text, rank fusion, exact search per business | ✅ |
-| DEC-13 | Speech | Google STT/TTS, also locally; Gemini Live evaluated later | ✅ |
-| DEC-14 | Telephony | Twilio Media Streams; ngrok locally | 🔄 |
-| DEC-15 | Compute | Cloud Run (API) + Cloud Run Jobs + Scheduler (crawler) | ✅ |
-| DEC-16 | Voice cold start | `min-instances=1` for voice in production | ✅ |
-| DEC-17 | DB wake-up on call | Lookup in Twilio webhook (caller hears ringing); pre-generated greeting | 🔄 |
-| DEC-18 | Actions | LLM tool calling; confirmation enforced in code; internal bookings first | ✅ |
-| DEC-19 | Dashboard | FastAPI + Jinja + HTMX, no SPA | ✅ |
-| DEC-20 | Frameworks | No LangChain / LlamaIndex | ✅ |
-| DEC-21 | Secrets | `.env` locally, Secret Manager in cloud | ✅ |
-| DEC-22 | Recordings | Transcripts only; audio recording off by default | 🔄 (R16) |
-| DEC-23 | Docs layout | Flat `plan/` folder | ✅ |
-| DEC-24 | Post-call work | Summaries run inside a request (Twilio status callback / end-of-chat), not background tasks | ✅ |
-| DEC-25 | Cloud Run settings for calls | Request-based billing; explicit low `--concurrency` from load test; `--max-instances` cap | 🔄 (load test) |
-| DEC-26 | Number of Cloud Run services | One API service (webhook + voice + chat + dashboard) for now | 🔄 |
+| ID | Topic | Decision | Stage | Status |
+|---|---|---|---|---|
+| DEC-01 | Tenancy model | One deployment, many businesses (`business_id`) | 1 | ✅ |
+| DEC-02 | Vector store | Postgres + pgvector (one DB for everything) | 1 | ✅ |
+| DEC-03 | Cloud DB hosting | Neon free tier in stage 2; Neon paid vs Cloud SQL decided in stage 3 | 2 → 3 | 🔄 |
+| DEC-04 | Tenant isolation | Shared tables + `business_id` (stage 1) + Row-Level Security (stage 3, before 2nd business) | 1 (model) · 3 (RLS) | ✅ |
+| DEC-05 | LLM interface | `openai` client against OpenAI-compatible endpoints | 1 | ✅ |
+| DEC-06 | Local LLM runtime | Ollama, native on Mac, general instruct model | 1 | ✅ |
+| DEC-07 | Cloud LLM | Gemini Flash, paid key, Gemini API first | 1 (compare) · 2 | 🔄 |
+| DEC-08 | Embeddings | `nomic-embed-text` local, `gemini-embedding-001` cloud, 768 dims, re-index on switch | 1 · 2 (re-index) | 🔄 |
+| DEC-09 | Crawled content storage | Postgres tables, no file storage | 1 | ✅ |
+| DEC-10 | Crawler tech | Crawl4AI + httpx fallback, separate crawler image | 1 · 2 (image) | ✅ |
+| DEC-11 | Google listing data | Website + owner are the stored source of truth; Places = `place_id` + live lookup | 1 | 🔄 (OPEN-04) |
+| DEC-12 | Retrieval | Hybrid: pgvector + Postgres full-text, rank fusion, exact search per business | 1 | ✅ |
+| DEC-13 | Speech | Google STT/TTS, also locally; Gemini Live evaluated later | 1 | ✅ |
+| DEC-14 | Telephony | Twilio Media Streams; ngrok locally | 1 | 🔄 |
+| DEC-15 | Compute | Cloud Run (API) + Cloud Run Jobs + Scheduler (crawler) | 2 | ✅ |
+| DEC-16 | Voice cold start | Stage 2: `min-instances=0`, measure; stage 3: `min-instances=1` for calls | 2 · 3 | ✅ |
+| DEC-17 | DB wake-up on call | Lookup in Twilio webhook (caller hears ringing); pre-generated greeting | 2 | 🔄 |
+| DEC-18 | Actions | LLM tool calling; confirmation enforced in code; internal bookings first | 1 | ✅ |
+| DEC-19 | Dashboard | FastAPI + Jinja + HTMX, no SPA | 1 (minimal) · 3 (login) | ✅ |
+| DEC-20 | Frameworks | No LangChain / LlamaIndex | 1 | ✅ |
+| DEC-21 | Secrets | `.env` locally, Secret Manager in cloud | 1 · 2 | ✅ |
+| DEC-22 | Recordings | Transcripts only; audio recording off by default | 1 · 3 (opt-in) | 🔄 (R16) |
+| DEC-23 | Docs layout | Flat `plan/` folder | — | ✅ |
+| DEC-24 | Post-call work | Summaries run inside a request (Twilio status callback / end-of-chat), not background tasks | 1 | ✅ |
+| DEC-25 | Cloud Run settings for calls | Request-based billing; explicit low `--concurrency` from load test; `--max-instances` cap | 3 | 🔄 (load test) |
+| DEC-26 | Number of Cloud Run services | One API service (webhook + voice + chat + dashboard) for now | 2 → 3 | 🔄 |
+| DEC-27 | Project structure | Three learning stages: local → cloud (one business) → scale | all | ✅ |
+| DEC-28 | Stage-1 runtime | Only Postgres in Docker; app, crawler, Ollama native; containerize at stage-1 exit | 1 | ✅ |
 
 ---
 
@@ -122,6 +138,11 @@ Move = `pg_dump`/restore + new `DATABASE_URL`.
 | Database per business | Strongest isolation | Cost and ops per business | ❌ |
 
 Implementation: see R18 in [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md).
+
+Timing (DEC-27): `business_id` on every table and the `tenant_session` helper from
+stage 1 (cheap, avoids a painful data migration later); RLS policies + `app_user` role
+switched on in stage 3 as a hard gate before the second business — a migration, not a
+code rewrite, because all queries already go through `tenant_session`.
 
 ### DEC-05 — LLM interface
 
@@ -227,8 +248,9 @@ Critical facts (hours, address, phone) go into the prompt from `business_profile
 
 ### DEC-16 — Voice cold start
 
-`min-instances=1` for the service handling calls in production (few $/month); cold starts
-tolerated in prototype. Reason: R2 — caller experience ranks above cost.
+Stage 2: `min-instances=0` — measure cold starts on real calls (learning goal).
+Stage 3: `min-instances=1` for the service handling calls (few $/month). Reason: R2 —
+caller experience ranks above cost once real customers depend on it.
 
 ### DEC-17 — Database wake-up on call
 
@@ -300,28 +322,50 @@ Reason: R2, R19, R20.
 The split needs no code changes — same image, different entry routes/settings.
 
 
+
+### DEC-27 — Three learning stages
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Stage 1 local → stage 2 cloud (one business) → stage 3 scale** | Each stage has one learning goal; hard problems solved when real; nothing built "just in case" | Some stage-3 work (RLS, onboarding) comes later | ✅ |
+| Build production-ready multi-tenant cloud system from the start | No later changes | Learning buried under infra; solving scale problems before they exist | ❌ |
+| Local only until everything is "finished" | Cheapest | Cloud surprises (cold starts, WebSockets, IAM) found too late | ❌ |
+
+What stays constant across stages so transitions are cheap: Postgres + pgvector,
+OpenAI-compatible LLM API, env-var configuration, `business_id` data model.
+
+### DEC-28 — Stage-1 runtime
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Only Postgres in Docker; app, crawler, Ollama native (`uv run`)** | Fastest edit/debug loop; breakpoints; Ollama uses the Mac GPU | Not the final runtime | ✅ |
+| Everything in Docker Compose from day one | Same as cloud | Slower debug loop; rebuilds; no GPU for Ollama (R7) | ❌ for learning |
+
+At stage-1 exit the app and crawler are containerized and run via Compose with the same
+env vars — that is the proof of stage-2 readiness (D2 applies from then on).
 ---
 
 ## 4. Still considering (open questions)
 
-| ID | Question | Options | Depends on / trigger | Needed before |
-|---|---|---|---|---|
-| OPEN-01 | Which business type first? | Restaurant (table booking) · appointment-based (salon, clinic) | Access to a real pilot business | Part 4 |
-| OPEN-02 | Target country / region | EU (`europe-west1`) · US (`us-central1`) · other | Where pilot businesses are | Part 5, legal (R16) |
-| OPEN-03 | Languages for voice | English only · + local language(s) | OPEN-02 | Part 3 (STT/TTS/model choice) |
-| OPEN-04 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) | Part 1 |
-| OPEN-15 | Voice concurrency per instance | 10 · 20 · 40 … | Load test with real call audio (DEC-25) | Go-live |
-| OPEN-05 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Whether offline learning matters more than index parity | Part 2 |
-| OPEN-06 | Specific local model | `llama3.1:8b` · Qwen instruct · other | Laptop RAM/GPU, eval results | Part 2 |
-| OPEN-07 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs | Part 5 |
-| OPEN-08 | Classic voice pipeline vs Gemini Live | STT→LLM→TTS · Gemini Live | Latency/quality measured in Part 3 | After Part 3 works |
-| OPEN-09 | Telephony provider | Twilio · Telnyx · Vonage · Plivo | OPEN-02 (price, number availability) | Part 5 |
-| OPEN-10 | Neon → Cloud SQL | Stay on Neon (paid) · Cloud SQL | First live business / call latency | Go-live |
-| OPEN-11 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Public repo? commercial plans? | Before making repo public |
-| OPEN-12 | Owner login for dashboard | Google sign-in · magic link | — | Before first real business |
-| OPEN-13 | CI/CD + Terraform timing | From start · after first cloud deploy | Setup stability | Part 5 |
-| OPEN-14 | Call recordings | Never · opt-in per business | OPEN-02, legal review | Go-live |
+Grouped by the stage in which the answer is needed.
 
+| ID | Stage | Question | Options | Depends on / trigger |
+|---|---|---|---|---|
+| OPEN-01 | 1 | Which business type first? | Restaurant (table booking) · appointment-based (salon, clinic) | Access to a real pilot business |
+| OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
+| OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) |
+| OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
+| OPEN-06 | 1 | Specific local model | `llama3.1:8b` · Qwen instruct · other | Laptop RAM/GPU, eval results |
+| OPEN-02 | 2 | Target country / region | EU (`europe-west1`) · US (`us-central1`) · other | Where the pilot business is (R16) |
+| OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
+| OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
+| OPEN-08 | 3 | Classic voice pipeline vs Gemini Live | STT→LLM→TTS · Gemini Live | Latency/cost measured in stages 1–2 |
+| OPEN-09 | 3 | Telephony provider | Twilio · Telnyx · Vonage · Plivo | OPEN-02 (price, number availability) |
+| OPEN-10 | 3 | Database after Neon free tier | Neon paid · Cloud SQL | Free-tier limits, measured wake-up latency, GCP-native needs |
+| OPEN-12 | 3 | Owner login for dashboard | Google sign-in · magic link | Before the second business |
+| OPEN-13 | 3 | CI/CD + Terraform timing | When deploys get frequent/risky or >1 person deploys | Stage 2 `deploy.sh` experience |
+| OPEN-14 | 3 | Call recordings | Never · opt-in per business | OPEN-02, legal review |
+| OPEN-15 | 3 | Voice concurrency per instance | 10 · 20 · 40 … | Load test with real call audio (DEC-25) |
 ---
 
 ## 5. Knowledge from the discussion (facts behind decisions)

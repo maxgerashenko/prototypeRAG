@@ -1,34 +1,47 @@
-# Part 5 — Move to Google Cloud
+# Part 5 — Stage 2: Move to Google Cloud (one business)
 
-**Goal:** run the same system on Google Cloud as a service for many businesses, with
-managed services only, scaling to near zero when idle.
+**Goal:** understand cloud infrastructure by running the stage-1 system on Google Cloud
+for **one pilot business**, with managed services only and near-zero idle cost.
 
-**Done when:** the Docker images built locally run on Cloud Run against cloud Postgres and
-Gemini, answers chat and phone calls for two businesses, and the base infrastructure
-costs around $10–20/month.
+**Starts when:** stage 1 exit criteria are met — app and crawler run from Docker images
+with env-var config only ([DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)).
+
+**Done when:**
+- The pilot business answers real calls and chat from Cloud Run against Neon and Gemini.
+- The crawler runs as a scheduled Cloud Run Job.
+- Redeploy from `deploy.sh` takes minutes; logs, budget alert and costs are visible.
+- Measured numbers exist: cold start time, per-turn latency, cost per call minute.
+
+Scaling to many businesses, min-instances, load tests, Cloud SQL, CI/CD and Terraform
+are **stage 3** → [06-scale.md](06-scale.md).
 
 ---
 
-## Principles
+## What to learn in this stage
 
-1. **Same Docker images** locally and in cloud — only environment variables differ
-   (one API image, one crawler image — see ARCHITECTURE_DRIVERS R8).
-2. **Managed services only:** Cloud Run, managed Postgres, Gemini, Speech APIs, Secret Manager.
-   No VMs, no Kubernetes, no separate vector database to operate.
-3. **Scale to zero** wherever possible (Cloud Run, Cloud Run Jobs, pay-per-use APIs).
-4. **One deployment for all businesses.** Adding a business = database rows + a phone
-   number, not new infrastructure.
-5. **Budget alerts from day one.**
+| Area | What to understand | Where |
+|---|---|---|
+| Project & billing | Projects, APIs, budget alerts | Step 1 |
+| IAM | Service accounts, least-privilege roles | Step 1 |
+| Images | Artifact Registry, building with Cloud Build | Step 5 |
+| Cloud Run | Revisions, env vars, secrets, timeout, cold starts, WebSockets, logs | Step 6 |
+| Batch | Cloud Run Jobs + Cloud Scheduler | Step 7 |
+| Secrets | Secret Manager → env vars | Steps 2–3 |
+| Managed Postgres | Connection strings, pooling, SSL | Step 3 |
+| Observability | Cloud Logging, latency per stage, cost reports | Step 9 |
+
+**Approach:** run every step **by hand with `gcloud`** first so each piece is understood;
+then capture the commands in `deploy.sh`. No Terraform or CI/CD yet.
 
 ## Local → cloud mapping
 
-| Component | Local | Google Cloud | Change needed |
+| Component | Stage 1 (local) | Stage 2 (cloud) | Change needed |
 |---|---|---|---|
-| API + voice + dashboard | FastAPI container | **Cloud Run** service | none (same image) |
-| Crawler / re-crawl | CLI | **Cloud Run Job** + **Cloud Scheduler** | none (same crawler image as local) |
-| Vectors + app data | Postgres + pgvector container | Managed Postgres + pgvector: **Neon** free tier → **Cloud SQL** | `DATABASE_URL` |
-| LLM | Ollama (OpenAI-compatible) | **Gemini** (OpenAI-compatible) | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
-| Embeddings | Ollama `nomic-embed-text` | **Gemini embeddings** (768 dims) | `EMBED_*` vars + **re-index** |
+| API + voice + dashboard | API Docker image | **Cloud Run** service (one service, DEC-26) | none (same image) |
+| Crawler | crawler Docker image | **Cloud Run Job** + **Cloud Scheduler** | none (same image) |
+| Vectors + app data | Postgres + pgvector in Docker | **Neon** free tier + pgvector (DEC-03) | `DATABASE_URL` |
+| LLM | Ollama (OpenAI-compatible) | **Gemini** paid key (OpenAI-compatible) | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
+| Embeddings | `nomic-embed-text` | **Gemini embeddings** (768 dims) | `EMBED_*` vars + **re-index** |
 | STT / TTS | Google Speech APIs | same | none |
 | Secrets | `.env` | **Secret Manager** | mounted as env vars |
 | Webhooks | ngrok | Cloud Run HTTPS URL | update Twilio number config |
@@ -44,8 +57,8 @@ costs around $10–20/month.
 
 ## Where to host Postgres
 
-Because the app only sees a standard `DATABASE_URL`, the host can be chosen (and
-changed later with `pg_dump`/restore) without code changes.
+The app only sees a standard `DATABASE_URL`, so the host can be changed later with
+`pg_dump`/restore without code changes.
 
 | Host | Cost | Pros | Cons |
 |---|---|---|---|
@@ -53,88 +66,74 @@ changed later with `pg_dump`/restore) without code changes.
 | Supabase (Postgres, pgvector) | Free tier, then ~$25/month | Generous free tier, dashboard, backups | Free projects **pause after ~1 week of inactivity**; not in GCP billing |
 | **Cloud SQL for PostgreSQL** (pgvector) | ~$10/month smallest instance | Inside GCP: IAM, private connection from Cloud Run, one bill, backups/HA | Always-on cost even with zero traffic |
 
-**Decision (DEC-03):** prototype on **Neon free tier** (≈ $0). Supabase rejected because
-free projects pause when idle — bad for a phone line. Move to **Cloud SQL**
-when there are paying businesses or when everything should live in one GCP project —
-a `pg_dump` + restore and a new `DATABASE_URL`. Check current free-tier limits before
-choosing; they change.
+**Decision (DEC-03):** stage 2 uses the **Neon free tier** (≈ $0) — same Postgres,
+nothing new to learn about the database itself, so the stage focuses on Cloud Run,
+IAM and secrets. Supabase rejected because free projects pause when idle — bad for a
+phone line. Neon paid vs Cloud SQL is a stage-3 decision (OPEN-10). Check current
+free-tier limits; they change.
 
 Considered and rejected:
-- **Firestore (metadata) + Qdrant (vectors)** — two databases with different data models
-  to keep in sync, bookings without SQL transactions/joins, and no single-query hybrid
-  (vector + keyword) search. Firestore scales to zero, but so does serverless Postgres.
-- **Qdrant on a Compute Engine Spot VM** — cheap, but self-managed, and Spot VMs can be
-  stopped at any time: the database disappears mid-phone-call. Not suitable for a live
-  service.
-- **Qdrant Cloud free tier** — fine technically, but only solves vectors; app data would
-  still need a second database.
+- **Firestore (metadata) + Qdrant (vectors)** — two databases to keep in sync, bookings
+  without SQL transactions/joins, no single-query hybrid search.
+- **Qdrant on a Compute Engine Spot VM** — self-managed; Spot VMs can be stopped at any
+  time, taking the database down mid-call.
+- **Qdrant Cloud free tier** — only solves vectors; app data would still need a second DB.
 
-## Cost notes
+## Stage-2 settings (keep simple, measure)
 
-- **Database:** $0 on Neon free tier; ~$10/month once moved to Cloud SQL (the only always-on cost).
-- **Cloud Run:** free tier covers a lot of low traffic; chat/dashboard `min-instances=0`.
-- **Voice latency vs cost:** a cold start during a phone call is bad UX →
-  `min-instances=1` for the service handling calls in production (DEC-16; a few $/month
-  with request-based billing), cold starts tolerated in the prototype. Request timeout
-  3600 s so WebSocket calls aren't cut. An open WebSocket counts as an active request,
-  so CPU stays allocated during the call; work after a response (e.g. summaries) must
-  run inside its own request (DEC-24, R19).
+| Setting | Stage 2 value | Why | Stage 3 change |
+|---|---|---|---|
+| Services | one (`api`) | Simplest to learn | split voice/web if justified (DEC-26) |
+| `min-instances` | 0 | $0 idle; **measure** cold starts on calls | 1 for the call-handling service (DEC-16) |
+| `--concurrency` | default | One business, little traffic | from load test (DEC-25, OPEN-15) |
+| `--timeout` | 3600 s | WebSocket calls must not be cut (R19) | same |
+| Billing | request-based | CPU is allocated while a call's WebSocket is open | same (DEC-25) |
+| DB role | single app role | One business; no RLS yet | `app_user` + RLS (DEC-04) |
+| Region | one region for everything (OPEN-02) | Latency, no egress | same |
+
+## Cost notes (stage 2)
+
+- **Database:** $0 on Neon free tier.
+- **Cloud Run, Jobs, Scheduler:** mostly within free tier at pilot traffic.
 - **Gemini:** pay per token; keep context small (top 5 chunks, short history).
-- **Biggest cost at scale is telephony + speech minutes**, not the database. Track cost
-  per call minute per business.
-- Keep everything in **one region** (e.g. `europe-west1` or `us-central1`).
+- **Twilio + speech:** per minute — the main cost even at pilot scale. Record cost per
+  call minute as an input for stage 3 pricing.
+- **Budget alert** from day one.
 
-## Deployment steps
+## Deployment steps (by hand first, then `deploy.sh`)
 
 1. **Project setup:** create GCP project, enable APIs (Cloud Run, Artifact Registry,
-   Secret Manager, Cloud Scheduler, Speech-to-Text, Text-to-Speech; Cloud SQL Admin only
-   when moving to Cloud SQL), set a **budget alert**, create a service account for the app
-   with minimal roles (Secret Accessor, Speech user; + Cloud SQL Client later).
-2. **Gemini key:** create a paid Gemini API key (or use Vertex AI with the service
-   account); store it in Secret Manager. Test locally first by pointing `LLM_*` at Gemini.
-3. **Database:** create the Neon project/database (same region as Cloud Run); run Alembic
-   migrations (`vector` extension, tables, RLS policies, `app_user` role) with the admin
-   connection. Store both connection strings in Secret Manager. Use Neon's pooled
-   connection string for the app (R20).
-4. **Data:** either re-run ingestion in cloud, or `pg_dump` the local database →
-   import into the cloud database, then run the indexer to re-embed chunks with Gemini embeddings.
+   Secret Manager, Cloud Scheduler, Speech-to-Text, Text-to-Speech), set a **budget
+   alert**, create a service account for the app with minimal roles (Secret Accessor,
+   Speech user).
+2. **Gemini key:** create a paid Gemini API key (or Vertex AI with the service account,
+   OPEN-07); store it in Secret Manager. Already tested locally in stage 1 step 6.
+3. **Database:** create the Neon project in the same region as Cloud Run; run Alembic
+   migrations; store the pooled connection string (app) and the direct one (migrations)
+   in Secret Manager (R20).
+4. **Data:** re-run the crawler in cloud, or `pg_dump` the local database → restore into
+   Neon; then run the indexer to re-embed chunks with Gemini embeddings (R6).
 5. **Build & push images:** Artifact Registry repo; build the **API** image
    (`.../app/api`) and the **crawler** image (`.../app/crawler`) with `gcloud builds submit`.
 6. **Deploy API:**
-   `gcloud run deploy api --image .../app/api --set-secrets ... --timeout 3600 --concurrency <from load test> --max-instances <cap>`
-   (request-based billing; add `--add-cloudsql-instances <conn-name>` only after moving
-   to Cloud SQL; one service for now, split voice vs web later — DEC-25, DEC-26).
+   `gcloud run deploy api --image .../app/api --set-secrets ... --timeout 3600`
 7. **Deploy crawler job:**
    `gcloud run jobs deploy ingest --image .../app/crawler --command python --args -m,app.ingest.run`
    + Cloud Scheduler trigger (e.g. weekly re-crawl).
-8. **Twilio:** point the numbers' voice webhooks to the Cloud Run URL; test a call.
-9. **Observability:** structured logs in Cloud Logging, latency per voice stage, error
-   alerts, cost per business.
-
-## Later improvements
-
-- CI/CD: GitHub Actions → tests → build → deploy on merge to `main`
-  (Workload Identity Federation, no JSON keys).
-- Infrastructure as code (Terraform) once the setup is stable.
-- Separate `staging` and `prod`.
-- Self-service onboarding: owner enters URL → job crawls → number assigned → live.
-
-## Onboarding a new business
-
-1. Create business row (name, website, timezone, settings).
-2. Trigger ingest job for its URL (+ Google Places ID).
-3. Buy/assign a Twilio number, map it to `business_id`; generate greeting audio (DEC-17).
-4. Owner reviews test answers, adds custom replies, connects calendar, enables tools.
+8. **Twilio:** point the pilot number's voice webhook to the Cloud Run URL; test calls;
+   generate the pilot's greeting audio (DEC-17).
+9. **Observability:** structured logs in Cloud Logging; log latency per voice stage and
+   cold starts; check the billing report after the first week.
+10. **Capture** all commands in `deploy.sh`; redeploy from it once to prove it works.
 
 ## Tasks
 
 - [ ] GCP project + budget alert + service account
-- [ ] Gemini API key in Secret Manager; local run against Gemini
-- [ ] Neon database + migrations + RLS roles (Cloud SQL later — OPEN-10)
+- [ ] Gemini paid key in Secret Manager
+- [ ] Neon database + migrations + secrets
 - [ ] Data load + re-embed with Gemini embeddings
-- [ ] Artifact Registry + both images + Cloud Run deploy (API)
-- [ ] Cloud Run Job + Scheduler (crawler)
-- [ ] Load test concurrent calls → set `--concurrency` (OPEN-15)
-- [ ] Twilio cutover + test calls
-- [ ] Logging, latency metrics, alerts
-- [ ] CI/CD pipeline
+- [ ] Artifact Registry + both images
+- [ ] Cloud Run deploy (API) + Cloud Run Job + Scheduler (crawler)
+- [ ] Twilio cutover + test calls with the pilot business
+- [ ] Measure cold starts, per-turn latency, cost per call minute
+- [ ] `deploy.sh`

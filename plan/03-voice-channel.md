@@ -113,6 +113,7 @@ web/mic-test.html    browser mic test client
 - Phone audio is 8 kHz — test STT on real call audio, not just clean mic audio.
 - Twilio charges per minute (number rental + inbound minutes); keep test calls short.
 - WebSocket calls need the server to stay up for the call's duration — relevant for
-  Cloud Run settings in Part 5 (timeout 3600 s, `min-instances=1` in production, DEC-16, R19).
+  Cloud Run settings (timeout 3600 s; stage 2 measures cold starts with `min-instances=0`,
+  stage 3 sets `min-instances=1` — DEC-16, R19).
 - No generic "please wait while I load the assistant" message: the DB wake-up happens
   during ringing (DEC-17, R3).

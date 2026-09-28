@@ -26,6 +26,18 @@ bending the rule.
 
 Priority when drivers conflict: **correctness & legal > caller experience > D6 > D2 > D4 > D5 > D1**.
 
+### Driver emphasis per stage (DEC-27)
+
+| Driver | Stage 1 — Local | Stage 2 — Cloud | Stage 3 — Scale |
+|---|---|---|---|
+| D1 Local first | **primary** | — | — |
+| D2 Same tech local/cloud | prepared (standard interfaces), images at exit | **primary** | holds |
+| D3 Standard interfaces | **primary** | holds | holds |
+| D4 Managed & simple | simplest dev loop (app native, DEC-28) | **primary** (one service, manual deploy) | bent where scale needs it (R18, R20) |
+| D5 Scale to zero | $0 | **~$0 idle**, measure cold starts | bent for caller experience (R2) |
+| D6 One deployment, many businesses | data model only (`business_id`) | data model only | **primary**, enforced (RLS) |
+| D7 One database | holds | holds | holds |
+
 ## 2. Wants
 
 | ID | Want |
@@ -62,7 +74,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Breaks: D5 (scale to zero) — a Cloud Run cold start (seconds) during a call is unacceptable.
 - Forced choice: `min-instances=1` for the service handling calls (a few $/month);
   streaming everywhere; possibly Gemini Live to cut stages.
-- Status: **Accepted** for production; cold starts tolerated in prototype.
+- Status: **Accepted** for stage 3; in stage 2 cold starts are tolerated and measured.
 
 **R3 — Serverless database wake-up time**
 - Why unavoidable: Neon (scale-to-zero Postgres) needs ~0.5 s to wake after idle; the first
@@ -166,7 +178,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Breaks: D4 (simple) — adds token storage, refresh and encryption.
 - Forced choice: store encrypted refresh tokens in Postgres (key in Secret Manager);
   internal booking table first, integrations later.
-- Status: **Accepted** (for Part 4, later stage).
+- Status: **Accepted** — stage 3.
 
 ### Legal and data protection
 
@@ -212,7 +224,8 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
   - Admin/migrations/crawler-orchestration use a separate role that bypasses RLS.
   - Tests assert that business A can never read business B's rows.
 - Breaks: D4 slightly (roles + policies), but removes a whole class of data-leak bugs.
-- Status: **Accepted**.
+- Status: **Accepted** — `business_id` + `tenant_session` from stage 1; RLS enforced in
+  stage 3 before the second business.
 
 **R19 — Cloud Run limits for calls**
 - Why unavoidable: max request timeout 60 min; each call holds a WebSocket; with
