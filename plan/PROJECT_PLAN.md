@@ -88,7 +88,7 @@ Details: [02-local-rag.md](02-local-rag.md)
   conversation history. Instruct the model to say "I don't know, let me connect you /
   take a message" instead of guessing.
 - **Storage:** Postgres + pgvector for vectors and all data (Docker locally; Neon free tier, later Cloud SQL, in cloud).
-- **LLM:** one OpenAI-compatible client — Ollama locally, Gemini in cloud; switch by env vars.
+- **LLM:** one OpenAI-compatible client — LM Studio locally, Gemini in cloud; switch by env vars.
 - **Custom replies:** per-business overrides stored in the DB (greeting, tone, answers
   the owner wants phrased a specific way, forbidden topics). These are retrieved with
   priority over scraped content.

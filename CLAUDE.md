@@ -2,7 +2,7 @@
 
 Prototype of a multi-business voice/chat assistant: crawl a business's website → RAG over
 Postgres + pgvector → answer by chat and phone (Twilio) → actions (bookings, summaries).
-Built locally first (Ollama, Docker Postgres), then moved to Google Cloud (Cloud Run,
+Built locally first (LM Studio on a 64 GB Mac, Docker Postgres), then moved to Google Cloud (Cloud Run,
 Neon → Cloud SQL, Gemini) by changing env vars only.
 
 Built in three learning stages (DEC-27): **1 Local** — understand the principles;
@@ -57,11 +57,11 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
 - One deployment for all businesses; isolation via `business_id` + Postgres Row-Level Security.
 - One database: Postgres + pgvector for vectors and all app data. No Qdrant/Firestore.
 - LLM calls through the `openai` client against OpenAI-compatible endpoints
-  (Ollama locally, Gemini in cloud). No LangChain/LlamaIndex.
+  (LM Studio locally, Gemini in cloud). No LangChain/LlamaIndex.
 - Google Speech APIs for STT/TTS, also locally. Native Google SDKs only in the voice module.
 - Crawled pages and chunks stored in Postgres, not files. Crawler in its own Docker image.
 - Cloud Run + Cloud Run Jobs; Neon free tier in stage 2; Neon paid vs Cloud SQL in stage 3.
-- Stage 1: only Postgres in Docker, app/crawler/Ollama native (DEC-28). `business_id`
+- Stage 1: only Postgres in Docker, app/crawler/LM Studio native (DEC-28). `business_id`
   everywhere from stage 1; RLS enforced in stage 3 before the second business.
 - When recording a decision or open question, say which stage it belongs to.
 - Priority when goals conflict: correctness & legal > caller experience > multi-tenancy >

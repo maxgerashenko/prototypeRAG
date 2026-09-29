@@ -67,9 +67,9 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-03 | Cloud DB hosting | Neon free tier in stage 2; Neon paid vs Cloud SQL decided in stage 3 | 2 → 3 | 🔄 |
 | DEC-04 | Tenant isolation | Shared tables + `business_id` (stage 1) + Row-Level Security (stage 3, before 2nd business) | 1 (model) · 3 (RLS) | ✅ |
 | DEC-05 | LLM interface | `openai` client against OpenAI-compatible endpoints | 1 | ✅ |
-| DEC-06 | Local LLM runtime | Ollama, native on Mac, general instruct model | 1 | ✅ |
+| DEC-06 | Local LLM runtime | ~~Ollama~~ — **Superseded by DEC-29** | 1 | — |
 | DEC-07 | Cloud LLM | Gemini Flash, paid key, Gemini API first | 1 (compare) · 2 | 🔄 |
-| DEC-08 | Embeddings | `nomic-embed-text` local, `gemini-embedding-001` cloud, 768 dims, re-index on switch | 1 · 2 (re-index) | 🔄 |
+| DEC-08 | Embeddings | `nomic-embed-text-v1.5` (LM Studio) local, `gemini-embedding-001` cloud, 768 dims, re-index on switch | 1 · 2 (re-index) | 🔄 |
 | DEC-09 | Crawled content storage | Postgres tables, no file storage | 1 | ✅ |
 | DEC-10 | Crawler tech | Crawl4AI + httpx fallback, separate crawler image | 1 · 2 (image) | ✅ |
 | DEC-11 | Google listing data | Website + owner are the stored source of truth; Places = `place_id` + live lookup | 1 | 🔄 (OPEN-04) |
@@ -89,7 +89,8 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-25 | Cloud Run settings for calls | Request-based billing; explicit low `--concurrency` from load test; `--max-instances` cap | 3 | 🔄 (load test) |
 | DEC-26 | Number of Cloud Run services | One API service (webhook + voice + chat + dashboard) for now | 2 → 3 | 🔄 |
 | DEC-27 | Project structure | Three learning stages: local → cloud (one business) → scale | all | ✅ |
-| DEC-28 | Stage-1 runtime | Only Postgres in Docker; app, crawler, Ollama native; containerize at stage-1 exit | 1 | ✅ |
+| DEC-28 | Stage-1 runtime | Only Postgres in Docker; app, crawler, LM Studio native; containerize at stage-1 exit | 1 | ✅ |
+| DEC-29 | Local LLM runtime | LM Studio on the 64 GB Mac; 20–32B-class instruct models; fast MoE for voice | 1 | ✅ |
 
 ---
 
@@ -148,12 +149,14 @@ code rewrite, because all queries already go through `tenant_session`.
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **`openai` client, OpenAI-compatible endpoints** | Ollama and Gemini both support it (chat, embeddings, tools); switch = env vars | Doesn't cover Speech / Gemini Live (R5) | ✅ |
+| **`openai` client, OpenAI-compatible endpoints** | LM Studio, Ollama and Gemini all support it (chat, embeddings, tools); switch = env vars | Doesn't cover Speech / Gemini Live (R5) | ✅ |
 | LangChain / LlamaIndex | Many integrations | Heavy, hides what happens (bad for learning), version churn | ❌ |
 | Own provider classes per vendor | Full control | Custom code to maintain | ❌ |
 | LiteLLM proxy | Many providers | Extra layer not needed for 2 providers | ❌ |
 
-### DEC-06 — Local LLM runtime
+### DEC-06 — Local LLM runtime — **Superseded by DEC-29**
+
+Original decision (kept for history):
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
@@ -163,6 +166,26 @@ code rewrite, because all queries already go through `tenant_session`.
 
 Model: general instruct model with tool calling (e.g. `llama3.1:8b`, Qwen instruct).
 **Not** a coding model like `qwen2.5-coder`.
+
+### DEC-29 — Local LLM runtime (supersedes DEC-06)
+
+Context: development Mac has **64 GB unified memory** and **LM Studio** installed.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **LM Studio (native)** | Already installed; OpenAI-compatible server (chat, embeddings, tools, JSON-schema output); MLX + GGUF; model browser; `lms` CLI | GUI-first app (CLI available) | ✅ |
+| Ollama (native) | Simple CLI | Second runtime to install; no advantage here | ❌ (still compatible — only env vars differ) |
+| llama.cpp server / MLX server directly | Maximum control | More setup | ❌ |
+
+Models with 64 GB (compare in OPEN-06):
+- **Fast profile (voice):** mixture-of-experts with few active parameters — high tokens/s.
+- **Quality profile:** dense 24–32B — reference for answer quality and tool calls.
+- 70B at 4-bit fits (~40 GB) but is too slow for voice — optional quality ceiling.
+- Not coding models. 4–6-bit quantizations; MLX builds usually fastest.
+
+Effect on other decisions: R1 softened — tools can be developed locally; Gemini is used
+for final validation. Runtime choice is invisible to the code (DEC-05): switching LM
+Studio ↔ Ollama ↔ Gemini is env vars only.
 
 ### DEC-07 — Cloud LLM
 
@@ -178,7 +201,7 @@ Model name is checked at deploy time (current Flash model).
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **Local `nomic-embed-text`, cloud `gemini-embedding-001`, both 768 dims** | Fully local learning; same column size | Re-index on migration (R6) | ✅ current |
+| **Local `nomic-embed-text-v1.5` (LM Studio), cloud `gemini-embedding-001`, both 768 dims** | Fully local learning; same column size | Re-index on migration (R6) | ✅ current |
 | Gemini embeddings everywhere (also locally) | Tested index = shipped index; no re-index | Small cloud cost/dependency locally | ❓ considering |
 
 Re-index is cheap: chunk text is in Postgres; indexer re-embeds rows where `embed_model` differs.
@@ -262,11 +285,11 @@ caller experience ranks above cost once real customers depend on it.
 
 ### DEC-18 — Actions
 
-- LLM **tool calling** (same `tools=[...]` for Ollama and Gemini).
+- LLM **tool calling** (same `tools=[...]` for LM Studio and Gemini).
 - Confirmation before any booking is enforced **in code**, not only in the prompt.
 - Caller phone from caller ID; availability re-checked in a DB transaction (R17).
 - Booking backends in order: internal Postgres table → Google Calendar → Cal.com → OpenTable etc.
-- Tool testing mainly with Gemini — small local models are unreliable at tool calls (R1).
+- Tools developed with 20–32B local models (DEC-29); final booking tests against Gemini (R1).
 
 ### DEC-19 — Dashboard
 
@@ -338,8 +361,8 @@ OpenAI-compatible LLM API, env-var configuration, `business_id` data model.
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **Only Postgres in Docker; app, crawler, Ollama native (`uv run`)** | Fastest edit/debug loop; breakpoints; Ollama uses the Mac GPU | Not the final runtime | ✅ |
-| Everything in Docker Compose from day one | Same as cloud | Slower debug loop; rebuilds; no GPU for Ollama (R7) | ❌ for learning |
+| **Only Postgres in Docker; app, crawler, LM Studio native (`uv run`)** | Fastest edit/debug loop; breakpoints; LM Studio uses the Mac GPU | Not the final runtime | ✅ |
+| Everything in Docker Compose from day one | Same as cloud | Slower debug loop; rebuilds; no GPU for a local LLM in Docker (R7) | ❌ for learning |
 
 At stage-1 exit the app and crawler are containerized and run via Compose with the same
 env vars — that is the proof of stage-2 readiness (D2 applies from then on).
@@ -355,7 +378,7 @@ Grouped by the stage in which the answer is needed.
 | OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
 | OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
-| OPEN-06 | 1 | Specific local model | `llama3.1:8b` · Qwen instruct · other | Laptop RAM/GPU, eval results |
+| OPEN-06 | 1 | Specific local models (64 GB Mac) | Fast MoE (e.g. Qwen3-30B-A3B, gpt-oss-20b) · dense 24–32B (e.g. Qwen3-32B, Gemma 3 27B, Mistral Small) | Eval: quality, tool calls, tokens/s, time to first token |
 | OPEN-02 | 2 | Target country / region | EU (`europe-west1`) · US (`us-central1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
@@ -388,7 +411,10 @@ Corrections to external advice (Gemini) and facts we rely on:
 | RLS pitfall | RLS doesn't apply to the table owner unless `FORCE ROW LEVEL SECURITY`; app must use a non-owner role | DEC-04 |
 | Supabase free tier | Projects pause after ~1 week idle | DEC-03 |
 | Spot VMs | Can be stopped at any time — unsuitable for a live database | DEC-03 |
-| Ollama on Mac in Docker | No GPU access → CPU only | DEC-06 |
+| Local LLM in Docker on Mac | No GPU access → CPU only | DEC-28, DEC-29 |
+| 64 GB Mac memory | GPU can use ~70–75% of unified memory by default (~45–48 GB) for weights + KV cache | DEC-29 |
+| MoE vs dense locally | MoE models with few active parameters give much higher tokens/s at similar size — key for voice latency | DEC-29 |
+| `nomic-embed-text` prefixes | Needs `search_document: ` / `search_query: ` prefixes for best retrieval | DEC-08 |
 | Piper TTS | Maintained fork (`piper1-gpl`) is GPL-3.0; voices have separate licences | DEC-13 |
 | Llama licence | Commercial use allowed with conditions ("Built with Llama", acceptable use policy) | OPEN-06 |
 | Places API | Scraping Google Maps violates ToS; API data has storage limits | DEC-11 |

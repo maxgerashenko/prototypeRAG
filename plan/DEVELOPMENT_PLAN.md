@@ -36,8 +36,8 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 | Crawler | Python CLI natively | Separate crawler image → **Cloud Run Job** + Scheduler | same, per-business schedules |
 | Database | Postgres 16 + pgvector in **Docker** (the only container) | **Neon** free tier (same region) | Neon paid or **Cloud SQL** (OPEN-10), pooling, backups, HNSW if needed |
 | Tenant isolation | `business_id` + `tenant_session` helper | same | **RLS policies + `app_user` role + isolation tests** |
-| LLM | **Ollama** native (OpenAI-compatible); Gemini for comparison | **Gemini** paid key (OpenAI-compatible) | + cost controls; Gemini Live if cheaper/faster (OPEN-08) |
-| Embeddings | `nomic-embed-text` (or Gemini, OPEN-05) | Gemini embeddings, one re-index | same |
+| LLM | **LM Studio** native, 64 GB Mac, 20–32B-class models (OpenAI-compatible); Gemini for comparison | **Gemini** paid key (OpenAI-compatible) | + cost controls; Gemini Live if cheaper/faster (OPEN-08) |
+| Embeddings | `nomic-embed-text-v1.5` in LM Studio (or Gemini, OPEN-05) | Gemini embeddings, one re-index | same |
 | Speech | Google STT/TTS from laptop | same | voice/cost choice per OPEN-08 |
 | Telephony | Browser mic first, then Twilio trial + **ngrok** | Twilio → Cloud Run URL | provider per country/price (OPEN-09) |
 | Secrets | `.env` | **Secret Manager** | same + rotation |
@@ -57,7 +57,7 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 - Voice pipeline: STT → LLM → TTS, where latency comes from, barge-in.
 
 **Optimal setup for learning** (DEC-28)
-- Only Postgres + pgvector runs in Docker; the app, crawler and Ollama run natively —
+- Only Postgres + pgvector runs in Docker; the app, crawler and LM Studio run natively —
   fastest edit/debug loop, breakpoints, print statements.
 - One test business, but with the full `business_id` data model.
 - Debug views: retrieved chunks with scores, the full prompt, LLM call logs.
@@ -148,11 +148,11 @@ Details: [06-scale.md](06-scale.md)
 ```bash
 # Stage 1 — .env.local
 DATABASE_URL=postgresql+psycopg://app:app@localhost:5432/app
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_API_KEY=ollama
-LLM_MODEL=llama3.1:8b
-EMBED_BASE_URL=http://localhost:11434/v1
-EMBED_MODEL=nomic-embed-text
+LLM_BASE_URL=http://localhost:1234/v1       # LM Studio server
+LLM_API_KEY=lm-studio                        # any value; LM Studio doesn't check it
+LLM_MODEL=<model id as shown by LM Studio>   # e.g. a Qwen3 30B-A3B build (OPEN-06)
+EMBED_BASE_URL=http://localhost:1234/v1
+EMBED_MODEL=text-embedding-nomic-embed-text-v1.5
 EMBED_DIM=768
 # in Docker Compose (end of stage 1): use host.docker.internal / service names instead of localhost
 

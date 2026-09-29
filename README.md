@@ -8,7 +8,7 @@ Voice assistant
 
 Detailed plan per part:
 1. [Crawler](plan/01-crawler.md) — scrape website + Google listing into chunks
-2. [Local RAG](plan/02-local-rag.md) — local LLM (Ollama) + Postgres/pgvector, same tech as in cloud
+2. [Local RAG](plan/02-local-rag.md) — local LLM (LM Studio) + Postgres/pgvector, same tech as in cloud
 3. [Voice channel](plan/03-voice-channel.md) — phone calls via Twilio, STT/TTS
 4. [Actions](plan/04-actions.md) — bookings, calendar, conversation summaries
 5. [Cloud — stage 2](plan/05-cloud-migration.md) — Cloud Run + Neon + Gemini for one pilot business, only env vars change

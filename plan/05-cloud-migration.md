@@ -40,8 +40,8 @@ then capture the commands in `deploy.sh`. No Terraform or CI/CD yet.
 | API + voice + dashboard | API Docker image | **Cloud Run** service (one service, DEC-26) | none (same image) |
 | Crawler | crawler Docker image | **Cloud Run Job** + **Cloud Scheduler** | none (same image) |
 | Vectors + app data | Postgres + pgvector in Docker | **Neon** free tier + pgvector (DEC-03) | `DATABASE_URL` |
-| LLM | Ollama (OpenAI-compatible) | **Gemini** paid key (OpenAI-compatible) | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
-| Embeddings | `nomic-embed-text` | **Gemini embeddings** (768 dims) | `EMBED_*` vars + **re-index** |
+| LLM | LM Studio (OpenAI-compatible) | **Gemini** paid key (OpenAI-compatible) | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
+| Embeddings | `nomic-embed-text-v1.5` (LM Studio) | **Gemini embeddings** (768 dims) | `EMBED_*` vars + **re-index** |
 | STT / TTS | Google Speech APIs | same | none |
 | Secrets | `.env` | **Secret Manager** | mounted as env vars |
 | Webhooks | ngrok | Cloud Run HTTPS URL | update Twilio number config |

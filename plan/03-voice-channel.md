@@ -37,7 +37,7 @@ Caller ──PSTN──► Twilio number
 
 Speech runs on Google's APIs **also locally** — no local speech models (Whisper, Piper).
 They would be local-only tech to replace later, and speech costs only cents while
-testing. The LLM behind the voice still follows Part 2 (Ollama locally, Gemini in cloud).
+testing. The LLM behind the voice still follows Part 2 (LM Studio locally, Gemini in cloud).
 Google Speech uses native Google SDKs (not the OpenAI-compatible API); authenticate
 locally with `gcloud auth application-default login`, in cloud with the service account.
 

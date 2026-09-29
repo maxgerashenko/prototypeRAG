@@ -61,12 +61,14 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 
 ### Quality and performance
 
-**R1 — Small local LLMs are weak at answers and tool calling**
-- Why unavoidable: 8B-class models on a laptop hallucinate more and produce unreliable
-  tool calls (bookings). Booking mistakes are real-world errors.
-- Breaks: D1 (fully local).
-- Forced choice: use Gemini (paid API) for quality checks and for all Part 4 action
-  testing, even during local development. Local model = for learning the flow.
+**R1 — Local LLMs are weaker than Gemini at answers and tool calling**
+- Hardware: 64 GB Mac with LM Studio → 20–32B-class models run well; they are much
+  better than 8B models, so the whole flow incl. tool calling can be developed locally.
+- Why still unavoidable: the local model is not the production model — quality, tool-call
+  format and speed differ. Booking mistakes are real-world errors.
+- Breaks: D1 (fully local) — only for final validation.
+- Forced choice: develop everything (incl. tools) locally; run the eval and booking tests
+  against Gemini before stage 2 (stage-1 step 6) and after prompt changes.
 - Status: **Accepted**.
 
 **R2 — Voice latency budget (~1.5 s end-to-end)**
@@ -116,11 +118,11 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
   re-embeds rows where `embed_model` differs). Alternative: use Gemini embeddings locally too.
 - Status: **Accepted**.
 
-**R7 — Ollama in Docker on macOS has no GPU access**
+**R7 — Local LLM in Docker on macOS has no GPU access**
 - Why unavoidable: Docker Desktop on Mac can't pass through the Apple GPU → CPU-only, very slow.
 - Breaks: "everything in Docker" (D3/D1).
-- Forced choice: Ollama runs natively on the Mac; the container reaches it via
-  `host.docker.internal`.
+- Forced choice: LM Studio runs natively on the Mac (DEC-29); the container reaches it via
+  `host.docker.internal:1234`.
 - Status: **Accepted** (local only; irrelevant in cloud).
 
 **R8 — Crawler needs a headless browser**
@@ -262,7 +264,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 | Driver | Bent by | What we do instead |
 |---|---|---|
 | D1 Local first | R1, R4, R11, R12 | Gemini, Google Speech and Twilio are used during local development (small cost) |
-| D2 Same tech local/cloud | R6, R7 | One re-index on migration; Ollama native on Mac |
+| D2 Same tech local/cloud | R6, R7 | One re-index on migration; LM Studio native on Mac |
 | D3 Standard interfaces | R5 | Native Google SDKs in the voice module only |
 | D4 Managed & simple | R8, R14, R18, R20 | Separate crawler image, OAuth token storage, tenant guard, connection pooling |
 | D5 Scale to zero | R2, R3, R13, R19 | Warm voice instance, possibly always-on DB once live |

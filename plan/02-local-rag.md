@@ -15,14 +15,32 @@ correctly, says "I don't know" for questions not covered by the data, and every 
 |---|---|---|---|
 | `api` | **Natively** (`uv run`, hot reload) → Docker image at stage-1 exit (DEC-28) | FastAPI: RAG, later voice + actions | Cloud Run |
 | `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Managed Postgres + pgvector (Neon → Cloud SQL) |
-| Ollama | **Natively on the Mac** (uses GPU) | LLM + embeddings via OpenAI-compatible API | Gemini via OpenAI-compatible API |
+| **LM Studio** | **Natively on the Mac** (Apple GPU, MLX/GGUF), 64 GB unified memory | LLM + embeddings via OpenAI-compatible API (`:1234/v1`) | Gemini via OpenAI-compatible API |
 
-The container reaches Ollama at `http://host.docker.internal:11434/v1`.
+The app reaches LM Studio at `http://localhost:1234/v1` (natively) or
+`http://host.docker.internal:1234/v1` (from Docker at stage-1 exit; enable "Serve on
+Local Network" if the container can't connect). Start the server in the LM Studio app or
+with the `lms` CLI (`lms server start`, `lms load <model>`); keep the chat model and the
+embedding model loaded at the same time.
 
-Models (via Ollama):
-- **Embeddings:** `nomic-embed-text` (768 dims).
-- **LLM:** a general chat/instruct model sized to the hardware with tool-calling support,
-  e.g. `llama3.1:8b` or a Qwen instruct model. Not a coding model.
+Models (via LM Studio, 64 GB Mac — DEC-29):
+- **Embeddings:** `nomic-embed-text-v1.5` (768 dims). Uses task prefixes:
+  `search_document: ` for chunks, `search_query: ` for questions — part of the indexer
+  and retriever, and dropped when switching to Gemini embeddings.
+- **LLM:** general instruct models with tool-calling support — not coding models.
+  64 GB allows 20–32B-class models (much better than 8B at grounding and tool calls).
+  Compare two profiles with the eval (OPEN-06):
+  - **Fast (voice):** a mixture-of-experts model with few active parameters
+    (e.g. Qwen3-30B-A3B, gpt-oss-20b) — high tokens/s, needed for the voice latency budget.
+  - **Quality (reference):** a dense 24–32B model (e.g. Qwen3-32B, Gemma 3 27B,
+    Mistral Small) — slower, closer to Gemini quality.
+  - 70B at 4-bit (~40 GB) fits but is too slow for voice — optional quality ceiling only.
+  Model names are examples; check the current LM Studio catalog.
+- **Memory budget:** macOS lets the GPU use roughly 70–75% of unified memory by default
+  (~45–48 GB) → model weights + context (KV cache) must fit there; Docker Postgres and
+  the app need little. Prefer 4–6-bit quantizations; MLX builds are usually fastest on Mac.
+- **Structured output:** LM Studio supports `response_format` with a JSON schema — used
+  for business-profile extraction (Part 1).
 
 ## Data model (Postgres)
 
@@ -120,7 +138,8 @@ docker-compose.yml, Dockerfile, .env.example
 
 ## Tasks
 
-- [ ] `docker-compose.yml` (api + pgvector Postgres) + Ollama install notes
+- [ ] `docker-compose.yml` (pgvector Postgres) + LM Studio setup notes (models, server, `lms` CLI)
+- [ ] Model comparison: fast MoE vs dense 24–32B on the eval (quality, tokens/s, time to first token)
 - [ ] Config + `llm.py` (OpenAI-compatible client)
 - [ ] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
 - [ ] `tenant_session(business_id)` helper — all queries go through it

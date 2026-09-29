@@ -11,7 +11,7 @@ has a saved summary.
 
 ## How actions work: LLM tool calling
 
-The LLM (local via Ollama, or Gemini in cloud) gets a list of tools with JSON schemas.
+The LLM (local via LM Studio, or Gemini in cloud) gets a list of tools with JSON schemas.
 When the caller asks to book, the model returns a tool call; our code executes it and
 gives the result back to the model, which then speaks the answer.
 
@@ -126,7 +126,7 @@ app/dashboard/       routes + Jinja templates
 
 ## Notes
 
-- Small local models are unreliable at tool calling — expect to test this part mostly
-  with Gemini, or use a local model known for good tool use.
+- Local tool calling: 20–32B-class models on the 64 GB Mac are usable for developing
+  and testing tools; 8B models are not. Final booking tests still run against Gemini (R1).
 - Double-booking: check availability again inside `create_booking` in a DB transaction.
 - Store times in UTC with the business timezone in its profile.
