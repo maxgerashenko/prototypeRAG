@@ -4,7 +4,7 @@ Single place for **what we decided, why, what we rejected, and what is still ope
 Details live in the part plans; this file is the index of reasoning.
 
 Related files:
-- [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) — drivers (D1–D7), wants (W1–W9), restrictions (R1–R20), stage focus
+- [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) — drivers (D1–D7), wants (W1–W9), restrictions (R1–R21), stage focus
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) — what we build · [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — how
 - Parts: [01 crawler](01-crawler.md) · [02 local RAG](02-local-rag.md) · [03 voice](03-voice-channel.md) · [04 actions](04-actions.md) · [05 cloud (stage 2)](05-cloud-migration.md) · [06 scale (stage 3)](06-scale.md)
 
@@ -74,7 +74,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-10 | Crawler tech | Crawl4AI + httpx fallback, separate crawler image | 1 · 2 (image) | ✅ |
 | DEC-11 | Google listing data | Website + owner are the stored source of truth; Places = `place_id` + live lookup | 1 | 🔄 (OPEN-04) |
 | DEC-12 | Retrieval | Hybrid: pgvector + Postgres full-text, rank fusion, exact search per business | 1 | ✅ |
-| DEC-13 | Speech | Google STT/TTS, also locally; Gemini Live evaluated later | 1 | ✅ |
+| DEC-13 | Speech | Google STT/TTS, also locally; Gemini Live compared in stage 2 (DEC-30) | 1 | ✅ |
 | DEC-14 | Telephony | Twilio Media Streams; ngrok locally | 1 | 🔄 |
 | DEC-15 | Compute | Cloud Run (API) + Cloud Run Jobs + Scheduler (crawler) | 2 | ✅ |
 | DEC-16 | Voice cold start | Stage 2: `min-instances=0`, measure; stage 3: `min-instances=1` for calls | 2 · 3 | ✅ |
@@ -91,6 +91,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-27 | Project structure | Three learning stages: local → cloud (one business) → scale | all | ✅ |
 | DEC-28 | Stage-1 runtime | Only Postgres in Docker; app, crawler, LM Studio native; containerize at stage-1 exit | 1 | ✅ |
 | DEC-29 | Local LLM runtime | LM Studio on the 64 GB Mac; 20–32B-class instruct models; fast MoE for voice | 1 | ✅ |
+| DEC-30 | Models for voice, aligned with cloud | Two voice modes, shared tools (RAG = `search_business_info` tool); local Qwen3-30B-A3B (thinking off) + Gemma 3 27B comparison; cloud Gemini Flash (pipeline) vs Gemini Live, decided in stage 2 | 1 · 2 | 🔄 (OPEN-08) |
 
 ---
 
@@ -187,6 +188,37 @@ Effect on other decisions: R1 softened — tools can be developed locally; Gemin
 for final validation. Runtime choice is invisible to the code (DEC-05): switching LM
 Studio ↔ Ollama ↔ Gemini is env vars only.
 
+### DEC-30 — Models for voice, aligned with the cloud target
+
+Context: stage 2 moves to Google Cloud and the product needs **voice in and out**. The
+local model should prepare for the cloud setup, not be optimized on its own.
+
+Voice architecture:
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Pipeline mode (STT → LLM → TTS) everywhere + Gemini Live spike in stage 2; shared tools** | Learn every stage locally; Live evaluated with real numbers; business logic identical in both modes | Two voice code paths to maintain | ✅ |
+| Gemini Live only | Lowest latency, fewest parts | No local development of voice (R21); less visibility for learning | ❌ as only mode |
+| Pipeline only | One path | May be slower/more expensive than Live at scale | ❌ without comparison |
+| Local omni/native-audio models (e.g. Qwen-Omni) | Local speech-to-speech | Not supported by LM Studio; local-only tech; nothing like it to deploy cheaply | ❌ |
+| Self-host Gemma on Cloud Run GPU | Same model local and cloud | GPU cost, cold starts, ops — against D4/D5 | ❌ |
+
+Key design: **RAG is a tool** (`search_business_info`) alongside the action tools, and the
+business profile is always in the system instruction → the same definitions serve
+pipeline mode (OpenAI-compatible tools) and Live mode (function calling).
+
+Local model (stands in for Gemini Flash in pipeline mode):
+
+| Model | Why | Verdict |
+|---|---|---|
+| **Qwen3-30B-A3B** (or current successor), thinking off | MoE → fast first token; strong native tool calling; multilingual | ✅ primary |
+| Gemma 3 27B | Gemini's open relative — answer style closest to production | ✅ comparison (weaker tools, slower) |
+| gpt-oss-20b, low reasoning effort | Fast, good tools | optional |
+| Dense 70B (4-bit) | Quality ceiling | ❌ too slow for voice |
+
+Cloud model: Gemini Flash with thinking off for pipeline mode; Gemini Live native-audio
+model for Live mode (current model names at deploy time). Final choice of mode: OPEN-08.
+
 ### DEC-07 — Cloud LLM
 
 | Option | Pros | Cons | Verdict |
@@ -251,7 +283,7 @@ Critical facts (hours, address, phone) go into the prompt from `business_profile
 |---|---|---|---|
 | **Google Speech-to-Text / Text-to-Speech (also locally)** | Same local/cloud; good on phone audio; cents while testing | Cloud dependency in local dev (R4) | ✅ |
 | Whisper + Piper locally | Free, offline | Local-only tech; weaker on 8 kHz audio; Piper fork is GPL | ❌ |
-| Gemini Live API (audio in/out) | Fewer stages, lower latency | Newer; less control per stage | ❓ spike after classic pipeline works |
+| Gemini Live API (audio in/out) | Fewer stages, lower latency | Cloud only (R21); less control per stage | 🔄 compared in stage 2 (DEC-30, OPEN-08) |
 
 ### DEC-14 — Telephony
 
@@ -378,11 +410,11 @@ Grouped by the stage in which the answer is needed.
 | OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
 | OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
-| OPEN-06 | 1 | Specific local models (64 GB Mac) | Fast MoE (e.g. Qwen3-30B-A3B, gpt-oss-20b) · dense 24–32B (e.g. Qwen3-32B, Gemma 3 27B, Mistral Small) | Eval: quality, tool calls, tokens/s, time to first token |
+| OPEN-06 | 1 | Confirm local models | Primary Qwen3-30B-A3B · Gemma 3 27B · gpt-oss-20b (DEC-30) | Eval: quality, tool calls, time to first token, tokens/s |
 | OPEN-02 | 2 | Target country / region | EU (`europe-west1`) · US (`us-central1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
-| OPEN-08 | 3 | Classic voice pipeline vs Gemini Live | STT→LLM→TTS · Gemini Live | Latency/cost measured in stages 1–2 |
+| OPEN-08 | 2 | Voice mode in cloud | Pipeline (Google STT → Gemini Flash → Google TTS) · Gemini Live | Stage-2 comparison: latency, quality, cost per minute, session limits |
 | OPEN-09 | 3 | Telephony provider | Twilio · Telnyx · Vonage · Plivo | OPEN-02 (price, number availability) |
 | OPEN-10 | 3 | Database after Neon free tier | Neon paid · Cloud SQL | Free-tier limits, measured wake-up latency, GCP-native needs |
 | OPEN-12 | 3 | Owner login for dashboard | Google sign-in · magic link | Before the second business |
@@ -414,6 +446,10 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Local LLM in Docker on Mac | No GPU access → CPU only | DEC-28, DEC-29 |
 | 64 GB Mac memory | GPU can use ~70–75% of unified memory by default (~45–48 GB) for weights + KV cache | DEC-29 |
 | MoE vs dense locally | MoE models with few active parameters give much higher tokens/s at similar size — key for voice latency | DEC-29 |
+| LM Studio and audio | Serves text/vision models; no speech in/out | DEC-30, R21 |
+| Gemma 3 tool calling | No dedicated tool-call format — prompt-based, less reliable than Qwen3/gpt-oss | DEC-30 |
+| Thinking modes | Reasoning/thinking adds seconds of latency — off for chat/voice (Qwen3, Gemini Flash thinking budget 0, gpt-oss low effort) | DEC-30 |
+| Gemini Live audio | 16 kHz PCM in, 24 kHz PCM out; Twilio is 8 kHz μ-law → resample; sessions have duration limits (check current) | DEC-30 |
 | `nomic-embed-text` prefixes | Needs `search_document: ` / `search_query: ` prefixes for best retrieval | DEC-08 |
 | Piper TTS | Maintained fork (`piper1-gpl`) is GPL-3.0; voices have separate licences | DEC-13 |
 | Llama licence | Commercial use allowed with conditions ("Built with Llama", acceptable use policy) | OPEN-06 |

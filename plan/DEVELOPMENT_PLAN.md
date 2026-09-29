@@ -36,9 +36,9 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 | Crawler | Python CLI natively | Separate crawler image → **Cloud Run Job** + Scheduler | same, per-business schedules |
 | Database | Postgres 16 + pgvector in **Docker** (the only container) | **Neon** free tier (same region) | Neon paid or **Cloud SQL** (OPEN-10), pooling, backups, HNSW if needed |
 | Tenant isolation | `business_id` + `tenant_session` helper | same | **RLS policies + `app_user` role + isolation tests** |
-| LLM | **LM Studio** native, 64 GB Mac, 20–32B-class models (OpenAI-compatible); Gemini for comparison | **Gemini** paid key (OpenAI-compatible) | + cost controls; Gemini Live if cheaper/faster (OPEN-08) |
+| LLM | **LM Studio** native: Qwen3-30B-A3B (thinking off), Gemma 3 27B for comparison; Gemini Flash for comparison | **Gemini Flash** paid key (OpenAI-compatible), thinking off for voice | + cost controls |
 | Embeddings | `nomic-embed-text-v1.5` in LM Studio (or Gemini, OPEN-05) | Gemini embeddings, one re-index | same |
-| Speech | Google STT/TTS from laptop | same | voice/cost choice per OPEN-08 |
+| Voice | **Pipeline mode**: Google STT → local LLM → Google TTS | Pipeline mode on Cloud Run, then **Gemini Live spike** → decide (OPEN-08, DEC-30) | chosen mode, tuned for cost |
 | Telephony | Browser mic first, then Twilio trial + **ngrok** | Twilio → Cloud Run URL | provider per country/price (OPEN-09) |
 | Secrets | `.env` | **Secret Manager** | same + rotation |
 | Deploy | — | Manual `gcloud` → `deploy.sh` | **CI/CD** (GitHub Actions + WIF), **Terraform**, staging/prod |
@@ -132,7 +132,7 @@ Details: [06-scale.md](06-scale.md)
 4. **Call reliability** — `min-instances=1`, load test → `--concurrency`, `--max-instances`.
 5. **Operations** — CI/CD, Terraform, staging/prod, alerts.
 6. **Database growth** — Neon paid vs Cloud SQL, pooling, backups, HNSW index.
-7. **Cost reduction** — Gemini Live vs classic pipeline, telephony provider, prompt size,
+7. **Cost reduction** — voice mode cost per minute (decided in stage 2), telephony provider, prompt size,
    caching.
 8. **Compliance** — region, retention, recordings policy, calendar OAuth token security.
 

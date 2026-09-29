@@ -110,9 +110,10 @@ Details: [03-voice-channel.md](03-voice-channel.md)
   to a number; the incoming number tells us which `business_id` to use.
 - **Audio streaming:** Twilio Media Streams → WebSocket → our voice service.
 - **Speech-to-Text / Text-to-Speech:** Google Speech APIs, both locally and in cloud.
-- **Alternative:** Gemini Live API (native audio in/out) to replace STT + LLM + TTS with
-  one streaming call — lower latency, fewer moving parts. Spike after the classic
-  STT → RAG → TTS pipeline works.
+- **Two voice modes, same tools:** pipeline mode (STT → LLM → TTS, local + cloud) and
+  Gemini Live (native audio in/out in one streaming session, cloud only) — compared in
+  stage 2 on latency, quality and cost (DEC-30). RAG is a tool (`search_business_info`)
+  shared by both modes.
 - **Latency target:** < ~1.5 s from end of caller speech to start of reply. Use
   streaming everywhere, voice-activity detection, and barge-in (caller can interrupt).
 - **Fallbacks:** transfer to a human number or take a message when the bot can't help.

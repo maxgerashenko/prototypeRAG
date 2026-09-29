@@ -257,6 +257,19 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
   - **Cloud SQL (later):** connector + small pools, or a pooler if instances grow.
 - Status: **Accepted** (details verified when implementing the foundation).
 
+
+### Models
+
+**R21 — Native-audio models have no local equivalent**
+- Why unavoidable: Gemini Live (audio in → audio out) is cloud-only; LM Studio serves
+  text/vision models, not speech in/out; open "omni" audio models need other runtimes
+  (local-only tech).
+- Breaks: D2 (same tech local and cloud) for the voice path.
+- Forced choice (DEC-30): pipeline mode (Google STT → LLM → Google TTS) locally and in
+  cloud; Live mode only in cloud, compared in stage 2. Both modes share the same tool
+  definitions (`search_business_info` + actions) and system instruction, so business
+  logic is identical.
+- Status: **Accepted**.
 ---
 
 ## 4. Summary: where we deliberately bend the drivers
@@ -265,6 +278,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 |---|---|---|
 | D1 Local first | R1, R4, R11, R12 | Gemini, Google Speech and Twilio are used during local development (small cost) |
 | D2 Same tech local/cloud | R6, R7 | One re-index on migration; LM Studio native on Mac |
+| D2 Same tech local/cloud (voice) | R21 | Pipeline mode locally; Gemini Live only in cloud, shared tools |
 | D3 Standard interfaces | R5 | Native Google SDKs in the voice module only |
 | D4 Managed & simple | R8, R14, R18, R20 | Separate crawler image, OAuth token storage, tenant guard, connection pooling |
 | D5 Scale to zero | R2, R3, R13, R19 | Warm voice instance, possibly always-on DB once live |

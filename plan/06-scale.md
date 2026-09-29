@@ -92,7 +92,7 @@ Trigger: cost per business (§3) too close to the price.
 
 | Lever | Expected effect | Decision/open item |
 |---|---|---|
-| Gemini Live instead of STT → LLM → TTS | Fewer services, lower latency, possibly cheaper | OPEN-08 |
+| Voice mode (pipeline vs Gemini Live, decided in stage 2) | Re-check cost per minute at volume | OPEN-08, DEC-30 |
 | Telephony provider per country | Per-minute price differences | OPEN-09 |
 | Smaller prompts (top 5 chunks, short history), cached business profile | Fewer tokens per turn | DEC-12 |
 | Cheaper TTS voice tier | Lower speech cost | DEC-13 |
@@ -118,5 +118,5 @@ Trigger: first business in a regulated market / before go-live.
 - [ ] Split voice / web services (if justified)
 - [ ] CI/CD + Terraform + staging
 - [ ] Database move decision (Neon paid vs Cloud SQL)
-- [ ] Cost-reduction experiments (Gemini Live, telephony provider)
+- [ ] Cost-reduction experiments (voice mode at volume, telephony provider)
 - [ ] Retention jobs, region choice, recordings policy

@@ -29,6 +29,7 @@ are **stage 3** → [06-scale.md](06-scale.md).
 | Secrets | Secret Manager → env vars | Steps 2–3 |
 | Managed Postgres | Connection strings, pooling, SSL | Step 3 |
 | Observability | Cloud Logging, latency per stage, cost reports | Step 9 |
+| Voice models | Gemini Flash in pipeline mode vs Gemini Live (native audio) | Step 11 |
 
 **Approach:** run every step **by hand with `gcloud`** first so each piece is understood;
 then capture the commands in `deploy.sh`. No Terraform or CI/CD yet.
@@ -125,6 +126,9 @@ Considered and rejected:
 9. **Observability:** structured logs in Cloud Logging; log latency per voice stage and
    cold starts; check the billing report after the first week.
 10. **Capture** all commands in `deploy.sh`; redeploy from it once to prove it works.
+11. **Voice mode comparison:** enable Live mode (same tools, DEC-30) on the pilot
+    number or a test number; measure latency, answer quality, cost per minute against
+    pipeline mode; record the decision (OPEN-08).
 
 ## Tasks
 
@@ -136,4 +140,5 @@ Considered and rejected:
 - [ ] Cloud Run deploy (API) + Cloud Run Job + Scheduler (crawler)
 - [ ] Twilio cutover + test calls with the pilot business
 - [ ] Measure cold starts, per-turn latency, cost per call minute
+- [ ] Gemini Live spike (live mode, same tools) → compare with pipeline mode: latency, quality, cost per minute → decide OPEN-08
 - [ ] `deploy.sh`

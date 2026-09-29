@@ -41,9 +41,29 @@ testing. The LLM behind the voice still follows Part 2 (LM Studio locally, Gemin
 Google Speech uses native Google SDKs (not the OpenAI-compatible API); authenticate
 locally with `gcloud auth application-default login`, in cloud with the service account.
 
-**Recommended path:** build the classic pipeline (STT → RAG → TTS) first to understand
-every piece, then try Gemini Live as a replacement: it removes two services and usually
-cuts latency, while RAG context and tools are still passed in.
+## Two voice modes, one set of tools (DEC-30)
+
+| | **Pipeline mode** | **Live mode** |
+|---|---|---|
+| Flow | Google STT → LLM (text) → Google TTS | Gemini Live: audio in → audio out in one streaming session |
+| Where | Stage 1 local (LM Studio model) and cloud (Gemini Flash) | Cloud only — no local equivalent (R21) |
+| VAD / barge-in | ours (Silero/webrtcvad) | built into Live |
+| Latency | sum of stages (budget below) | usually lower — fewer hops |
+| Control / debugging | every stage visible (transcripts, timings) | less visible per stage |
+| SDK | Google Speech SDK + OpenAI-compatible LLM client | native Gemini Live SDK (R5) |
+
+- **RAG is exposed as a tool** — `search_business_info(query)` — next to the action
+  tools (Part 4). The same tool definitions work in pipeline mode (OpenAI-compatible
+  `tools=[...]`) and in Live mode (function calling), so switching modes doesn't change
+  business logic. The business profile (hours, address, rules) is small and always goes
+  into the system instruction.
+- **Stage 1** builds pipeline mode locally — the learning goal is to see every stage.
+- **Stage 2** runs pipeline mode on Cloud Run with Gemini Flash (thinking off), then
+  spikes Live mode on the same number and **decides by measurement** (latency, quality,
+  cost per minute — OPEN-08).
+- Live mode audio formats: Twilio sends 8 kHz μ-law; Live expects 16 kHz PCM input and
+  returns 24 kHz PCM → resample both ways in `audio.py`. Live sessions have duration
+  limits — check current limits and session-resumption options for long calls.
 
 Telephony alternatives: Telnyx, Vonage, Plivo — compare per-minute price and number
 availability in the target country. Keep telephony behind an interface so the provider
@@ -91,7 +111,8 @@ app/voice/
   vad.py
   stt.py             Google Speech-to-Text streaming
   tts.py             Google Text-to-Speech
-  live.py            Gemini Live implementation (later)
+  live.py            Live mode: Gemini Live session, same tools (stage 2)
+  tools.py           shared tool definitions: search_business_info + Part 4 actions
 web/mic-test.html    browser mic test client
 ```
 
@@ -106,7 +127,8 @@ web/mic-test.html    browser mic test client
 - [ ] Call transfer + take-a-message fallback
 - [ ] Save transcript at call end; summary runs in the Twilio status callback (DEC-24)
 - [ ] Measure latency per stage and log it per turn
-- [ ] Spike: Gemini Live API version
+- [ ] `search_business_info` tool + shared tool definitions (used by both modes)
+- [ ] Stage 2: Live mode spike on Cloud Run; compare with pipeline mode (OPEN-08)
 
 ## Notes
 

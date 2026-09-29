@@ -29,13 +29,17 @@ Models (via LM Studio, 64 GB Mac — DEC-29):
   and retriever, and dropped when switching to Gemini embeddings.
 - **LLM:** general instruct models with tool-calling support — not coding models.
   64 GB allows 20–32B-class models (much better than 8B at grounding and tool calls).
-  Compare two profiles with the eval (OPEN-06):
-  - **Fast (voice):** a mixture-of-experts model with few active parameters
-    (e.g. Qwen3-30B-A3B, gpt-oss-20b) — high tokens/s, needed for the voice latency budget.
-  - **Quality (reference):** a dense 24–32B model (e.g. Qwen3-32B, Gemma 3 27B,
-    Mistral Small) — slower, closer to Gemini quality.
-  - 70B at 4-bit (~40 GB) fits but is too slow for voice — optional quality ceiling only.
-  Model names are examples; check the current LM Studio catalog.
+  Chosen with the cloud target in mind (DEC-30) — the local model stands in for **Gemini
+  Flash in pipeline mode**, so it must be fast, good at native tool calling and follow
+  short spoken-style instructions:
+  - **Primary: Qwen3-30B-A3B** (or its current successor) — mixture-of-experts, few
+    active parameters → fast; native tool calling; multilingual. Run with **thinking off**.
+  - **Google-family comparison: Gemma 3 27B** — closest open relative of Gemini for
+    answer style; weaker tool calling (no dedicated tool-call format), slower (dense).
+  - Optional: gpt-oss-20b (fast, good tools; reasoning effort low).
+  - 70B at 4-bit fits (~40 GB) but is too slow for voice — not used.
+  - Voice in/out stays with Google Speech locally; local native-audio models are not
+    used (R21). Model names are examples; check the current LM Studio catalog.
 - **Memory budget:** macOS lets the GPU use roughly 70–75% of unified memory by default
   (~45–48 GB) → model weights + context (KV cache) must fit there; Docker Postgres and
   the app need little. Prefer 4–6-bit quantizations; MLX builds are usually fastest on Mac.
@@ -91,6 +95,8 @@ Prompt rules:
 - Answer only from the provided profile and context.
 - If the answer isn't there: say so and offer to take a message / transfer (Part 4).
 - Keep answers short (they will also be spoken in Part 3).
+- Thinking/reasoning modes off for chat and voice (latency); allowed for offline jobs
+  (profile extraction, summaries).
 - Answer in the caller's language.
 
 ## LLM client — one client for local and cloud
@@ -139,7 +145,7 @@ docker-compose.yml, Dockerfile, .env.example
 ## Tasks
 
 - [ ] `docker-compose.yml` (pgvector Postgres) + LM Studio setup notes (models, server, `lms` CLI)
-- [ ] Model comparison: fast MoE vs dense 24–32B on the eval (quality, tokens/s, time to first token)
+- [ ] Model comparison on the eval: Qwen3-30B-A3B vs Gemma 3 27B vs Gemini Flash (quality, tool calls, time to first token, tokens/s)
 - [ ] Config + `llm.py` (OpenAI-compatible client)
 - [ ] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
 - [ ] `tenant_session(business_id)` helper — all queries go through it
