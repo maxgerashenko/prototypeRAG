@@ -26,6 +26,15 @@ Stage 1 build is in progress — see the build order in `DECISIONS.md` for what 
 
 `README.md` links to all plan files — keep it in sync when files are added or renamed.
 
+## Commit messages carry implementation context
+
+There's no separate changelog file — git history is the implementation log. Write
+commit messages that a future agent can rely on without re-reading the diff: file by
+file, and *why*, including any bug caught and fixed during review that the diff alone
+wouldn't explain (the crawler commit's message is a good example of the level of
+detail to aim for). `DECISIONS.md` stays the place for *what was decided and why*;
+commit messages are the place for *what changed and why*, per change.
+
 ## Workflow for architecture discussions
 
 When the user discusses architecture or pastes external advice (e.g. from Gemini):
