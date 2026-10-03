@@ -16,7 +16,7 @@ server-rendered HTML, `sitemap.xml` present, `robots.txt` permits crawling.
 | Source | What we get | How |
 |---|---|---|
 | Company website | Menu, prices, services, hours, FAQ, contacts, about, policies | Crawl internal pages |
-| Google business listing | Name, address, phone, opening hours, rating, reviews, categories | **Google Places API** (not scraping Google Maps — against ToS and breaks often) |
+| Google business listing | Stored: `place_id` only. Live lookup (display, never stored): name, address, phone, opening hours. No ratings/reviews (R9) | **Google Places API** (not scraping Google Maps — against ToS and breaks often) |
 | PDFs linked on the site | Menus, price lists, brochures | Download + extract text (`pypdf` / `pymupdf`) |
 | Owner uploads (later) | Anything missing from the site | Admin upload endpoint |
 
@@ -25,7 +25,7 @@ server-rendered HTML, `sitemap.xml` present, `robots.txt` permits crawling.
 ```
 URL ─► discover pages ─► fetch/render ─► clean to Markdown ─► extract profile ─► chunk ─► save
                                                                                         │
-Google Places API ─► business profile (hours, address, phone, reviews) ─────────────────┘
+Google Places API ─► place_id only (live lookup for display, R9) ───────────────────────┘
 ```
 
 1. **Discover pages**
@@ -35,8 +35,8 @@ Google Places API ─► business profile (hours, address, phone, reviews) ─�
    - Respect `robots.txt` and add a delay between requests.
 
 2. **Fetch / render**
-   - **Crawl4AI** as the default (renders JavaScript, outputs Markdown).
-   - Fallback: `httpx` + BeautifulSoup for simple static sites.
+   - `httpx` + BeautifulSoup first — enough for server-rendered sites like the pilot (DEC-33).
+   - **Crawl4AI** (renders JavaScript) added when a JS-rendered site is hit.
 
 3. **Clean**
    - Remove navigation, footer, cookie banners, repeated boilerplate across pages.
@@ -44,10 +44,13 @@ Google Places API ─► business profile (hours, address, phone, reviews) ─�
    - One Markdown document per page with its source URL (stored in `pages`, step 6).
 
 4. **Extract business profile** (structured facts)
-   - Merge Places API data with facts found on the site into one record:
-     `name, address, phone, email, opening_hours, booking_policy, price_range, languages`.
+   - Extract facts found on the site into one record:
+     `name, address, phone, email, opening_hours, booking_policy, price_range, languages`
+     (+ `place_id`, the only Places field we store).
    - Use the LLM with a JSON schema to extract fields from the site text; conflicts
-     between website and Places are shown to the owner to resolve.
+     with a live Places lookup are shown to the owner to resolve.
+   - Once the owner has confirmed the profile (`confirmed_at`), a re-crawl no longer
+     overwrites it; a re-crawl also keeps the stored `place_id`.
    - **Sources of truth (DEC-11, R9):** stored facts come from the **website** and are
      **confirmed/edited by the owner** in the dashboard. From Places we store only
      `place_id`; Places fields are a live lookup, not stored or cached. Reviews are not
@@ -91,7 +94,8 @@ app/ingest/
 
 Stage 1: runs natively (`uv run python -m app.ingest.run ...`, DEC-28). At stage-1 exit it
 gets its **own Docker image** (Crawl4AI + headless browser), separate from the API image
-so the API stays small and starts fast (R8, DEC-10). Stage 2: Cloud Run Job + Scheduler.
+so the API stays small and starts fast (R8, DEC-33) — needed only once Crawl4AI is added;
+while the crawler is httpx-only it can run from the API image. Stage 2: Cloud Run Job + Scheduler.
 
 ## Tasks
 
@@ -105,7 +109,9 @@ so the API stays small and starts fast (R8, DEC-10). Stage 2: Cloud Run Job + Sc
 - [x] Change detection for re-crawls — `store.py` (`content_hash` on upsert; full chunk replace per page)
 - [x] Unit tests on saved HTML fixtures (no network in tests) — `tests/test_crawler.py`
 - [ ] Unit tests on 3 different real sites (only the pilot business so far)
-- [ ] Stage-1 exit: `Dockerfile.crawler`
+- [ ] PDF menus: `fetch.extract_pdf_text` exists but isn't wired in — `discover.is_skippable` drops `.pdf` links
+- [ ] Honour `Crawl-delay` from robots.txt (fixed 0.5 s delay today)
+- [ ] Stage-1 exit: `Dockerfile.crawler` — only if Crawl4AI was added by then (DEC-33)
 
 ## Risks / notes
 

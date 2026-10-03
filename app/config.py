@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     llm_base_url: str = "http://localhost:1234/v1"
     llm_api_key: str = "lm-studio"
-    llm_model: str = "qwen3-30b-a3b"
+    llm_model: str = "google/gemma-4-12b"  # chat/voice model (DEC-32)
     embed_base_url: str = "http://localhost:1234/v1"
     embed_api_key: str = "lm-studio"
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"

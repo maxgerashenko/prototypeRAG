@@ -1,7 +1,7 @@
 """Write pages and chunks to Postgres (plan/01-crawler.md step 6 "Save").
 
-Every function here takes an already-open `session` — the caller (`run.py`) wraps a
-whole crawl in one `tenant_session(business_id)` transaction.
+Every function here takes an already-open `session` — the caller (`run.py`) opens one
+`tenant_session(business_id)` transaction per page, so one bad page can't roll back the rest.
 """
 
 import uuid

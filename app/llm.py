@@ -25,15 +25,25 @@ def get_embed_client() -> OpenAI:
 
 
 def embed(texts: list[str]) -> list[list[float]]:
+    settings = get_settings()
     client = get_embed_client()
-    response = client.embeddings.create(model=get_settings().embed_model, input=texts)
-    return [d.embedding for d in response.data]
+    response = client.embeddings.create(model=settings.embed_model, input=texts)
+    vectors = [d.embedding for d in response.data]
+    # the chunks.embedding column is fixed at EMBED_DIM; fail here with a clear message
+    # rather than deep inside pgvector (e.g. a cloud model's default size isn't 768)
+    if vectors and len(vectors[0]) != settings.embed_dim:
+        raise ValueError(
+            f"{settings.embed_model} returned {len(vectors[0])}-dim vectors, EMBED_DIM is {settings.embed_dim}"
+        )
+    return vectors
 
 
 def chat(messages: list[dict], **kwargs) -> str:
     client = get_chat_client()
     response = client.chat.completions.create(model=get_settings().llm_model, messages=messages, **kwargs)
-    return response.choices[0].message.content
+    # content can be None (e.g. a thinking model that spent its output on reasoning) --
+    # callers store it in NOT NULL columns, so normalize to ""
+    return response.choices[0].message.content or ""
 
 
 def chat_json(messages: list[dict], schema: dict, schema_name: str = "result") -> dict:

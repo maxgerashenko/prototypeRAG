@@ -17,8 +17,8 @@ import sys
 import urllib.request
 
 BASE_URL = "http://localhost:1234/v1"
-DEFAULT_MODEL = "qwen3-30b-a3b"  # project's primary local model (DEC-29); override with argv[2]
-                                  # if a different one is actually loaded (`lms ps`)
+DEFAULT_MODEL = "google/gemma-4-12b"  # the chat model, normally loaded (DEC-32); override with
+                                       # argv[2] if a different one is actually loaded (`lms ps`)
 
 SYSTEM = """You draft exactly one command for the prototypeRAG git repository.
 

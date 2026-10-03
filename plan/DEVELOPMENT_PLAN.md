@@ -73,15 +73,16 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 5. Actions: tool calling, internal bookings, summaries, minimal dashboard (no login) —
    [04-actions.md](04-actions.md).
 6. Gemini comparison: switch `LLM_*` / `EMBED_*` env vars, re-run eval + booking tests.
-7. Containerize: API `Dockerfile` + `Dockerfile.crawler`; run everything via Compose with
-   the same env vars — proves stage 2 readiness.
+7. Containerize: API `Dockerfile` (+ `Dockerfile.crawler` only if Crawl4AI was added,
+   DEC-33); run everything via Compose with the same env vars — proves stage 2 readiness.
 
 **Deliberately not in stage 1:** RLS policies, owner login, calendar OAuth, onboarding
 flow, Places beyond `place_id`, CI/CD, any cloud hosting.
 
 **Exit criteria**
 - Eval questions pass; retrieval and prompts understood and inspectable.
-- A phone call through ngrok answers questions and books a table.
+- A phone call through ngrok answers questions and books an appointment (the pilot is a
+  spa, DEC-31; consent question OPEN-18).
 - App and crawler run from Docker images with env-var config only.
 
 ---
@@ -104,6 +105,9 @@ Details: [05-cloud-migration.md](05-cloud-migration.md)
 - One Cloud Run service, `min-instances=0`, default concurrency — **measure** cold start
   and call latency instead of optimizing blindly.
 - One pilot business, real phone number, paid Gemini key (real customer data, R12).
+
+**Must be in stage 2 before going public:** access control on owner/debug routes and
+Twilio signature checks (OPEN-17).
 
 **Deliberately not in stage 2:** min-instances, load tests, service split, Cloud SQL,
 Terraform, CI/CD, staging/prod, RLS enforcement (only one business).
@@ -146,12 +150,13 @@ Details: [06-scale.md](06-scale.md)
 ## Configuration (same code in every stage)
 
 ```bash
-# Stage 1 — .env.local
+# Stage 1 — .env (copy of .env.example)
 DATABASE_URL=postgresql+psycopg://app:app@localhost:5432/app
 LLM_BASE_URL=http://localhost:1234/v1       # LM Studio server
 LLM_API_KEY=lm-studio                        # any value; LM Studio doesn't check it
-LLM_MODEL=<model id as shown by LM Studio>   # e.g. a Qwen3 30B-A3B build (OPEN-06)
+LLM_MODEL=google/gemma-4-12b                 # chat/voice (DEC-32); id as shown by `lms ps`
 EMBED_BASE_URL=http://localhost:1234/v1
+EMBED_API_KEY=lm-studio
 EMBED_MODEL=text-embedding-nomic-embed-text-v1.5
 EMBED_DIM=768
 # in Docker Compose (end of stage 1): use host.docker.internal / service names instead of localhost
@@ -162,8 +167,11 @@ LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 LLM_API_KEY=<secret>
 LLM_MODEL=gemini-2.5-flash        # use the current Flash model at deploy time
 EMBED_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+EMBED_API_KEY=<secret>
 EMBED_MODEL=gemini-embedding-001
-EMBED_DIM=768                     # reduced output dimension, keeps the column size
+EMBED_DIM=768                     # reduced output dimension, keeps the column size —
+                                  # the request must ask for it (default is larger);
+                                  # app/llm.py fails fast on a mismatch
 
 # Stage 3 — adds
 DATABASE_URL=postgresql+psycopg://app_user:<secret>@...   # non-owner role, RLS applies
@@ -194,7 +202,7 @@ app/
   dashboard/        owner UI (Jinja + HTMX)
 docker-compose.yml  stage 1: postgres only · stage-1 exit: + api + crawler
 Dockerfile          API image
-Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8)
+Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8) — once needed (DEC-33)
 .env.example
 ```
 

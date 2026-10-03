@@ -52,14 +52,14 @@ Details: [01-crawler.md](01-crawler.md)
 Sources:
 - **Company website** — crawl all internal pages (menu, prices, services, hours, FAQ,
   contacts, about).
-- **Google business listing** — hours, address, phone, rating, reviews, categories.
-  Use the **Google Places API** (not scraping Google Maps pages — that breaks Google's
+- **Google business listing** — only `place_id` is stored; hours, address, phone are a
+  live lookup for display (R9, DEC-11); ratings and reviews are not used. Use the **Google Places API** (not scraping Google Maps pages — that breaks Google's
   ToS and is fragile).
 - Optional later: PDFs on the site (menus, price lists), social pages, manual uploads
   by the owner.
 
 Pipeline:
-1. **Crawl** — Crawl4AI (renders JS; `httpx` + BeautifulSoup fallback for static sites). Respect
+1. **Crawl** — `httpx` + BeautifulSoup first; Crawl4AI (renders JS) when a JS-rendered site needs it (DEC-33). Respect
    `robots.txt`, limit depth/page count, dedupe URLs.
 2. **Clean** — strip nav, footer, cookie banners; convert to Markdown so headings
    (e.g. "Pricing", "Opening hours") are preserved.
@@ -67,9 +67,9 @@ Pipeline:
 4. **Metadata** — every chunk gets `business_id`, `source_url`, `section`, `scraped_at`.
 5. **Structured facts** — extract key fields (hours, address, phone, booking policy)
    into a separate structured record; these are too important to leave to vector search.
-   What Places API data may be stored is still open (OPEN-04, R9).
+   From Places only `place_id` is stored; open details in OPEN-04 (R9).
 6. **Store + embed** — pages, profile and chunks in Postgres with `business_id`
-   (isolation by Row-Level Security); the indexer embeds chunks into pgvector.
+   (isolation by `tenant_session` now, Row-Level Security from stage 3); the indexer embeds chunks into pgvector.
 7. **Refresh** — re-crawl on a schedule; replace changed chunks.
 
 Deliverable: `ingest <url>` command that produces a populated knowledge base for one business.

@@ -3,9 +3,10 @@
 **Goal:** the assistant doesn't only answer — it books tables, makes appointments, takes
 messages, and gives the business owner a summary of every conversation.
 
-**Done when:** in one phone call, a caller books a table; the booking appears in the
-owner dashboard (or Google Calendar), the caller gets an SMS confirmation, and the call
-has a saved summary.
+**Done when:** in one phone call, a caller books an appointment (the stage-1 pilot is a
+spa, DEC-31 — table booking uses the same tools); the booking appears in the owner
+dashboard (or Google Calendar), the caller gets an SMS confirmation, and the call has a
+saved summary.
 
 ---
 

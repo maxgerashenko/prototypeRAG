@@ -11,6 +11,7 @@ import uuid
 import pytest
 from sqlalchemy import delete, select
 
+from app.api.chat import _sse
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, Chunk, CustomReply, Page
 from app.rag.index import chunks_needing_embedding, index_business
@@ -93,6 +94,13 @@ def test_build_prompt_order_system_history_question():
     messages = build_prompt(None, [], [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}], "q?")
     assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
     assert messages[-1]["content"] == "q?"
+
+
+def test_sse_frame_keeps_multiline_answers():
+    """Regression: a raw newline inside `data:` ended the SSE field, so the client
+    silently dropped the rest of a piece (lists, paragraphs)."""
+    assert _sse("Hours:\n- Mon 9-5") == "data: Hours:\ndata: - Mon 9-5\n\n"
+    assert _sse("x", event="meta") == "event: meta\ndata: x\n\n"
 
 
 # --- retrieve.py's keyword_search: the AND-vs-OR fix ----------------------------------

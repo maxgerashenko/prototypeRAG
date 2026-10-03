@@ -68,8 +68,8 @@ messages         (id, business_id, conversation_id, role, content, created_at)
   or message can never point at another business's row (DB-enforced already in stage 1).
 - `tsv` uses the `simple` text-search config (no stemming): sites and callers may use any
   language. Revisit if keyword recall is weak for one language.
-- Every table has `business_id`; isolation is enforced by Postgres Row-Level Security
-  (see [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) R18).
+- Every table has `business_id`; isolation will be enforced by Postgres Row-Level Security
+  from stage 3 (see [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) R18).
 - Every query filters by `business_id`. A business has hundreds to a few thousand chunks,
   so exact vector search within one business is fast — no ANN index needed at first.
   Add an HNSW index later if data grows.
@@ -165,14 +165,19 @@ docker-compose.yml, Dockerfile, .env.example
 - [x] Custom replies CRUD + indexing — `api/custom_replies.py`
 - [x] Eval script: run test questions, check expected facts appear, report score — `rag/eval.py`
 - [ ] Run the eval with Gemini (only env vars changed) and compare to the local model
+- [ ] Show the full prompt in the chat page / a debug endpoint (only sources are shown today)
+- [ ] Log every LLM call (prompt size, response, tokens, latency) — needed to explain
+  DEC-32's 10–17 s turns: measure time-to-first-token with streaming, not total time
+- [x] `/chat/stream` saves the turn when the stream ends; multi-line SSE framing fixed
+- [x] Vector search only uses chunks embedded by the configured `EMBED_MODEL` (safe mid re-index, R6)
 
 ## Notes
 
 - Stage-1 "done when" criteria met (2026-10-03): `POST /chat` answers eval questions
   correctly (7/7 on `tests/eval/bathhouse.yaml`), correctly refuses out-of-scope
   questions, and every step is inspectable (`/debug/retrieve`, `psql`, `web/chat.html`'s
-  sources panel). Model comparison (Gemma, Gemini) and `Dockerfile`/LM Studio setup
-  notes are the only tasks left open for this part.
+  sources panel). Left open for this part: Gemini comparison, LM Studio setup notes,
+  prompt view + LLM call log (below), `Dockerfile` at stage-1 exit.
 - Measure retrieval separately from generation: for each eval question, check that the
   right chunk is in the top 5 before tuning prompts.
 - Changing the embedding model means re-embedding all chunks; the indexer handles it

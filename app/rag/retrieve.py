@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import func, select
 
+from app.config import get_settings
 from app.db.models import Chunk
 from app.llm import embed
 
@@ -23,10 +24,18 @@ class RetrievedChunk:
 
 
 def vector_search(session, business_id: uuid.UUID, query_embedding: list[float], top_k: int = 10) -> list[tuple[uuid.UUID, int]]:
-    """Chunk ids ordered by cosine distance to `query_embedding`; 1-based rank, best first."""
+    """Chunk ids ordered by cosine distance to `query_embedding`; 1-based rank, best first.
+
+    Only chunks embedded by the currently configured model: vectors from another model
+    live in a different space (R6), so mid re-index they'd be ranked as noise.
+    """
     stmt = (
         select(Chunk.id)
-        .where(Chunk.business_id == business_id, Chunk.embedding.isnot(None))
+        .where(
+            Chunk.business_id == business_id,
+            Chunk.embedding.isnot(None),
+            Chunk.embed_model == get_settings().embed_model,
+        )
         .order_by(Chunk.embedding.cosine_distance(query_embedding))
         .limit(top_k)
     )
