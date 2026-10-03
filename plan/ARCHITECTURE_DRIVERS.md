@@ -20,7 +20,7 @@ bending the rule.
 | D2 | **Same tech local and cloud** | Only technology that exists both locally and as a managed Google Cloud (or equivalent managed) service. Migration = env vars. |
 | D3 | **Standard interfaces** | Postgres/SQL for data, OpenAI-compatible API for LLM calls, Docker for runtime. No custom abstraction layers, no heavy frameworks. |
 | D4 | **Managed and simple** | No VMs, no Kubernetes, no servers we patch. As few services as possible. |
-| D5 | **Scale to zero / pay per use** | Near $0 when idle; cost grows with usage, not with number of businesses. |
+| D5 | **Scale to zero / pay per use** | $0 when idle: only free or pay-per-use services — no monthly fees, no minimums, no trials that turn paid (DEC-33). Cost grows with usage, not with number of businesses. |
 | D6 | **One deployment, many businesses** | A business = rows with `business_id` + a phone number, never new infrastructure. |
 | D7 | **One database** | Vectors, full-text, business data, bookings, conversations in one Postgres. |
 
@@ -34,7 +34,7 @@ Priority when drivers conflict: **correctness & legal > caller experience > D6 >
 | D2 Same tech local/cloud | prepared (standard interfaces), images at exit | **primary** | holds |
 | D3 Standard interfaces | **primary** | holds | holds |
 | D4 Managed & simple | simplest dev loop (app native, DEC-28) | **primary** (one service, manual deploy) | bent where scale needs it (R18, R20) |
-| D5 Scale to zero | $0 | **~$0 idle**, measure cold starts | bent for caller experience (R2) |
+| D5 Scale to zero | $0 | **$0 idle**, measure cold starts | holds — cold start hidden in ringing (DEC-35); only fixed cost: a business's own number (DEC-34) |
 | D6 One deployment, many businesses | data model only (`business_id`) | data model only | **primary**, enforced (RLS) |
 | D7 One database | holds | holds | holds |
 
@@ -50,7 +50,7 @@ Priority when drivers conflict: **correctness & legal > caller experience > D6 >
 | W6 | Summary of every conversation + owner dashboard. |
 | W7 | Onboard a new business without code changes. |
 | W8 | Understand every step (inspect chunks, vectors, prompts) — learning project first. |
-| W9 | Base infrastructure cost ≈ $0–20/month. |
+| W9 | Base infrastructure cost $0/month fixed — pay only for usage (DEC-33). |
 
 ---
 
@@ -74,9 +74,11 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 **R2 — Voice latency budget (~1.5 s end-to-end)**
 - Why unavoidable: longer pauses feel broken on a phone call; callers hang up.
 - Breaks: D5 (scale to zero) — a Cloud Run cold start (seconds) during a call is unacceptable.
-- Forced choice: `min-instances=1` for the service handling calls (a few $/month);
-  streaming everywhere; possibly Gemini Live to cut stages.
-- Status: **Accepted** for stage 3; in stage 2 cold starts are tolerated and measured.
+- Forced choice (DEC-35, replaces `min-instances=1`): `min-instances=0`; the cold start
+  happens in the Twilio webhook while the caller still hears ringing; pre-generated
+  greeting; streaming everywhere; possibly Gemini Live to cut stages.
+- Status: **Watch** — measure in stage 2 (ring delay after idle, per-turn latency).
+  An always-on instance would need a DEC-33 exception.
 
 **R3 — Serverless database wake-up time**
 - Why unavoidable: Neon (scale-to-zero Postgres) needs ~0.5 s to wake after idle; the first
@@ -89,7 +91,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
   itself; that query wakes Neon, so the DB is warm for the rest of the call. Greeting
   audio per business is pre-generated (TTS at onboarding) so the first words play
   instantly. No generic "please wait while I load the assistant" message.
-  Move to always-on Cloud SQL (~$10/month) if measured latency is still a problem.
+  An always-on database is ruled out by DEC-33 (was: Cloud SQL ~$10/month).
 - Note: Cloud Run's own cold start (seconds) is the bigger risk — see R2.
 - Status: **Watch** — measure on real calls.
 
@@ -158,8 +160,10 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Why unavoidable: Twilio must reach our server from the internet; phone numbers are
   a paid, regulated resource (some countries require business registration/ID).
 - Breaks: D1 (local, zero cost).
-- Forced choice: ngrok tunnel locally; paid Twilio number and per-minute costs during
-  testing; number availability may dictate provider per country.
+- Forced choice: ngrok tunnel locally; Twilio Voice SDK browser calls (per minute, no
+  number) in stages 1–2 (DEC-34). Every phone number has a monthly rental with every
+  provider — the one fixed cost, rented only when a pilot business pays for it. Number
+  availability may dictate provider per country.
 - Status: **Accepted**.
 
 **R12 — Gemini free tier may use submitted data**
@@ -171,8 +175,9 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 **R13 — Free database tiers have pause rules and limits**
 - Why unavoidable: Supabase free projects pause after ~1 week idle; free tiers cap storage.
 - Breaks: D5 when we upgrade.
-- Forced choice: Neon free tier for prototype; Cloud SQL or paid tier once a business is
-  live. Database outside GCP means a second vendor/bill until then (breaks D4 slightly).
+- Forced choice: Neon free tier for prototype; Neon Launch (usage-based, no monthly
+  minimum) when outgrown — Cloud SQL ruled out by DEC-33. Database outside GCP means a
+  second vendor/bill (breaks D4 slightly).
 - Status: **Watch**.
 
 **R14 — Calendar/booking integrations need per-business OAuth**
@@ -197,7 +202,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Breaks: D5/D7 partially — may require an EU region, retention jobs, data deletion on
   request; recordings (audio) would require object storage (Cloud Storage), i.e. a
   second storage service.
-- Forced choice: pick region by target market (e.g. `europe-west1`) for Cloud Run,
+- Forced choice: pick region by target market (e.g. `europe-west3`, next to Neon Frankfurt) for Cloud Run,
   database and Gemini/Vertex; retention policy + scheduled cleanup; transcripts only
   (no audio) until needed.
 - Status: **Open** — depends on target country.
@@ -256,7 +261,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
   - Transaction mode rules: only `SET LOCAL` inside a transaction (never session `SET`),
     no session state (advisory locks, `LISTEN`, temp tables) across transactions;
     check prepared-statement support of the driver/pooler.
-  - **Cloud SQL (later):** connector + small pools, or a pooler if instances grow.
+  - ~~**Cloud SQL (later)**~~ — ruled out by DEC-33 (fixed monthly cost).
 - Status: **Accepted** (details verified when implementing the foundation).
 
 
@@ -283,7 +288,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 | D2 Same tech local/cloud (voice) | R21 | Pipeline mode locally; Gemini Live only in cloud, shared tools |
 | D3 Standard interfaces | R5 | Native Google SDKs in the voice module only |
 | D4 Managed & simple | R8, R14, R18, R20 | Separate crawler image, OAuth token storage, tenant guard, connection pooling |
-| D5 Scale to zero | R2, R3, R13, R19 | Warm voice instance, possibly always-on DB once live |
+| D5 Scale to zero | R2, R3, R11, R13, R19 | No always-on instance or DB (DEC-33/35): cold start during ringing; a phone number's monthly rental only once a business pays for it (DEC-34) |
 | D7 One database | R16 (if audio recordings) | Cloud Storage only when recordings are required |
 
 ## 5. Open decisions

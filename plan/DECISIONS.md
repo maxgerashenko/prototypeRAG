@@ -36,7 +36,7 @@ correctness & legal; the **focus** below decides trade-offs inside a stage.
 | Stage | Goal | Optimize for | Deliberately defer |
 |---|---|---|---|
 | **1. Local** | Understand the principles (crawl, RAG, voice, tools) | Learning & fast debug loop, $0 | RLS, login, OAuth, onboarding, cloud, CI/CD |
-| **2. Cloud** | Understand cloud infrastructure (one pilot business) | Understanding each GCP piece, same tech as local, ~$0 idle | min-instances, load tests, service split, Cloud SQL, Terraform, CI/CD |
+| **2. Cloud** | Understand cloud infrastructure (one pilot business) | Understanding each GCP piece, same tech as local, $0 idle (DEC-33) | load tests, service split, Terraform, CI/CD |
 | **3. Scale** | Many businesses: safety, reliability, price | Tenant isolation, caller experience, cost per business | — (items introduced by trigger) |
 
 ### Build order
@@ -46,7 +46,7 @@ correctness & legal; the **focus** below decides trade-offs inside a stage.
 | 0 | 1 | Foundation: Postgres/pgvector in Docker, Alembic, base tables with `business_id`, `tenant_session` | Every later part writes into these tables |
 | 1 | 1 | Crawler → pages, profile, chunks | Need real data before RAG |
 | 2 | 1 | RAG: index, retrieval, `/chat`, eval, debug views | Core value; learn how RAG works |
-| 3 | 1 | Voice: mic test → Twilio + ngrok | Builds on working RAG |
+| 3 | 1 | Voice: mic test → Twilio browser calls (Voice SDK, no number — DEC-34) + ngrok | Builds on working RAG |
 | 4 | 1 | Actions: tool calling, bookings, summaries, minimal dashboard | Needs RAG + channels |
 | 5 | 1 | Gemini comparison (env vars) | Validate quality before cloud |
 | 6 | 1 | Containerize (API + crawler images) | Stage 2 readiness |
@@ -64,7 +64,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 |---|---|---|---|---|
 | DEC-01 | Tenancy model | One deployment, many businesses (`business_id`) | 1 | ✅ |
 | DEC-02 | Vector store | Postgres + pgvector (one DB for everything) | 1 | ✅ |
-| DEC-03 | Cloud DB hosting | Neon free tier in stage 2; Neon paid vs Cloud SQL decided in stage 3 | 2 → 3 | 🔄 |
+| DEC-03 | Cloud DB hosting | Neon free tier in stage 2; Neon Launch (pay-per-use, no monthly minimum) when outgrown — Cloud SQL ruled out by DEC-33 | 2 → 3 | 🔄 |
 | DEC-04 | Tenant isolation | One shared database: shared tables + `business_id` (stage 1) + Row-Level Security (stage 3, before 2nd business); dedicated database only as a per-region cell (OPEN-16) | 1 (model) · 3 (RLS) | ✅ |
 | DEC-05 | LLM interface | `openai` client against OpenAI-compatible endpoints | 1 | ✅ |
 | DEC-06 | Local LLM runtime | ~~Ollama~~ — **Superseded by DEC-29** | 1 | — |
@@ -75,9 +75,9 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-11 | Google listing data | Website + owner are the stored source of truth; Places = `place_id` + live lookup | 1 | 🔄 (OPEN-04) |
 | DEC-12 | Retrieval | Hybrid: pgvector + Postgres full-text, rank fusion, exact search per business | 1 | ✅ |
 | DEC-13 | Speech | Google STT/TTS, also locally; Gemini Live compared in stage 2 (DEC-30) | 1 | ✅ |
-| DEC-14 | Telephony | Twilio Media Streams; ngrok locally | 1 | 🔄 |
+| DEC-14 | Telephony | Twilio Media Streams; ngrok locally; test calls via Voice SDK, no number (DEC-34) | 1 | 🔄 |
 | DEC-15 | Compute | Cloud Run (API) + Cloud Run Jobs + Scheduler (crawler) | 2 | ✅ |
-| DEC-16 | Voice cold start | Stage 2: `min-instances=0`, measure; stage 3: `min-instances=1` for calls | 2 · 3 | ✅ |
+| DEC-16 | Voice cold start | ~~Stage 3: `min-instances=1` for calls~~ — **Superseded by DEC-35** | 2 · 3 | — |
 | DEC-17 | DB wake-up on call | Lookup in Twilio webhook (caller hears ringing); pre-generated greeting | 2 | 🔄 |
 | DEC-18 | Actions | LLM tool calling; confirmation enforced in code; internal bookings first | 1 | ✅ |
 | DEC-19 | Dashboard | FastAPI + Jinja + HTMX, no SPA | 1 (minimal) · 3 (login) | ✅ |
@@ -93,6 +93,9 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-29 | Local LLM runtime | LM Studio on the 64 GB Mac; 20–32B-class instruct models; fast MoE for voice | 1 | ✅ |
 | DEC-31 | Stage-1 pilot business | Bathhouse Williamsburg (abathhouse.com) — spa/sauna, appointment+membership-based | 1 | ✅ |
 | DEC-30 | Models for voice, aligned with cloud | Two voice modes, shared tools (RAG = `search_business_info` tool); local model pick **superseded by DEC-32**; cloud Gemini Flash (pipeline) vs Gemini Live, decided in stage 2 | 1 · 2 | 🔄 (OPEN-08) |
+| DEC-33 | Cost model | Only free or pay-per-use services: no monthly fees, no minimums, no trials that turn paid; $0 when idle | all | ✅ |
+| DEC-34 | Test calls without a phone number | Stages 1–2: Twilio Voice SDK browser calls (per minute, no number); rent a real number only when a pilot business pays for it | 1 · 2 | ✅ |
+| DEC-35 | Voice cold start (supersedes DEC-16) | `min-instances=0` in every stage; Cloud Run starts while the caller hears ringing; measure in stage 2 | 2 · 3 | 🔄 (measure) |
 | DEC-32 | Local models split by role | `google/gemma-4-12b` for chat/voice; `qwen/qwen3.6-35b-a3b` (thinking on) for code-drafting delegation — both fit in memory together | 1 | ✅ |
 
 ---
@@ -131,10 +134,14 @@ Reason: D5, D6, W7. Onboarding = DB rows + phone number.
 | **Postgres + pgvector** | Docker | Neon / Supabase / Cloud SQL | One DB for vectors + data; SQL transactions; full-text for hybrid; same everywhere | Not built for 100M+ vectors | ✅ |
 | Qdrant | Docker | Qdrant Cloud / self-hosted VM | Fast, great filtering | Second DB; not GCP-managed; data sync | ❌ |
 | Firestore + Qdrant | Emulator + Docker | Firestore + Qdrant Cloud | Firestore scales to zero | Two DBs; no SQL transactions for bookings; no single-query hybrid search | ❌ |
-| Vertex AI Vector Search | — | Vertex | Massive scale | No local version; always-on endpoint cost | ❌ |
+| Firestore alone (Enterprise edition, re-checked 2026) | Emulator (lags new features) | Firestore | Pay-per-use, no wake-up delay, all-GCP; vector search GA, joins via pipeline subqueries GA, text search in preview | Server SDK bypasses Security Rules → tenant isolation only in app code (no RLS equivalent); no exclusion constraint for double bookings; text search still preview; local ≠ cloud (D2); rewrite of the built data layer; Google-only | ❌ |
+| Vertex AI Vector Search | — | Vertex | Massive scale; 2.0 adds keyword + hybrid modes (2026) | No local version; always-on endpoint cost (classic; 2.0 billing not confirmed) | ❌ |
+| Vertex AI Search (managed search/RAG: crawls a website, chunks, embeds, hybrid search) | — | Vertex AI Search | Google's "don't build it" answer — could replace crawler + RAG; mostly usage-based (≈ 10k queries/month free, then ≈ $1.50/1k; index storage ≈ $1/GB-month — re-check, DEC-33) | Black box — against W8 (inspect chunks/scores/prompts); no local version (D1, D2); one data store per business; less control over chunking and custom replies; voice latency unmeasured | 🔄 **compare in stage 2, not adopt** — run the eval questions against it, note answer quality and latency |
 | Chroma / FAISS | Embedded | — | Zero setup | No managed cloud equivalent; no relational data | ❌ |
 
 Reason: D2, D4, D7, R17. Scale fits: hundreds–thousands of chunks per business.
+Google's own recommended hybrid pattern for Postgres (AlloyDB/Cloud SQL: pgvector + full-text + RRF)
+is the same design as ours (DEC-12) — only the host differs (always-on vs Neon). Keyword ranking: see BM25 note in DEC-12.
 
 ### DEC-03 — Cloud database hosting
 
@@ -142,11 +149,22 @@ Reason: D2, D4, D7, R17. Scale fits: hundreds–thousands of chunks per business
 |---|---|---|---|---|
 | **Neon** | Free tier → usage | Scales to zero; branching; pooler | ~0.5 s wake after idle; outside GCP | ✅ start here |
 | Supabase | Free → ~$25/mo | Generous tier, dashboard | Free projects pause after ~1 week idle — bad for a phone line | ❌ |
-| **Cloud SQL** | ~$10/mo min | Inside GCP (IAM, one bill), HA, backups | Always-on cost | ✅ later |
+| Neon Launch (paid) | Usage only, no monthly minimum (≈, 2026) | Same provider, no move; higher limits | Still outside GCP billing | ✅ when free tier is outgrown (DEC-33) |
+| **Cloud SQL** | ~$10/mo min; production start ≈ $50/mo (1 dedicated vCPU, 3.75 GB, 99.95% SLA); HA ≈ $100/mo (≈ 2026) | Inside GCP (IAM, one bill), HA, backups; no wake-up delay | Always-on cost | ~~✅ later~~ ❌ now (DEC-33); 🔄 possible production upgrade once a paying client covers it (OPEN-17) |
+| AlloyDB AI | ≈ $114/mo min (1 vCPU/8 GB), ≈ $227/mo at 2 vCPU/16 GB; 30-day free trial cluster (≈ 2026) | Google's recommended Postgres for AI: ScaNN vector index, columnar engine, hybrid search | Always-on, no free tier; extras only matter at millions of vectors | ❌ fixed monthly cost (DEC-33) |
 | Postgres/Qdrant on Spot VM | ~$5/mo | Cheapest | Self-managed; Spot can be stopped mid-call | ❌ |
 
 Revisit trigger: first live business, or measured wake-up latency hurts calls (R3, R13).
 Move = `pg_dump`/restore + new `DATABASE_URL`.
+
+**Keep the database portable (Neon → Cloud SQL, OPEN-17)** — rules that hold from now on:
+- Plain Postgres only: extensions available on both Neon and Cloud SQL (pgvector,
+  pg_trgm, btree_gist); no Neon-only features in the app (branching for dev is fine).
+- Same Postgres major version on both (16 today).
+- Configuration only via `DATABASE_URL` (+ `ADMIN_DATABASE_URL` for migrations).
+- Switch (≈ 1 h at our size): create Cloud SQL in the Cloud Run region + enable pgvector →
+  pause writes → `pg_dump`/`pg_restore` → `DATABASE_URL` to the Cloud SQL connector socket,
+  deploy with `--add-cloudsql-instances` → eval + test call → retire Neon. No code change.
 
 ### DEC-04 — Tenant isolation
 
@@ -335,6 +353,7 @@ owner's profile form at onboarding.
 | **Hybrid: pgvector cosine + Postgres full-text (`tsvector`), reciprocal rank fusion, custom replies boosted** | ✅ |
 | Vector only | ❌ misses exact names, prices, dish names |
 | HNSW index | Later — exact search within one business is fast enough |
+| BM25 keyword ranking instead of `ts_rank` | 🔄 later — only if the eval shows weak keyword ranking. Google's native BM25 is AlloyDB/Cloud SQL only (not on Neon); check open-source Postgres BM25 extensions and whether Neon supports them |
 
 Critical facts (hours, address, phone) go into the prompt from `business_profile`, not via search.
 
@@ -351,7 +370,8 @@ Critical facts (hours, address, phone) go into the prompt from `business_profile
 | Option | Verdict |
 |---|---|
 | **Twilio + Media Streams (WebSocket)** | ✅ start — best docs, easy local testing with ngrok |
-| Telnyx / Vonage / Plivo | 🔄 compare price & number availability for target country |
+| Telnyx / Vonage / Plivo | 🔄 compare price & number availability for target country (all charge monthly number rental too) |
+| Twilio Voice SDK (browser → our TwiML app → same Media Stream) for testing | ✅ stages 1–2, no number needed (DEC-34) |
 
 ### DEC-15 — Compute
 
@@ -361,12 +381,66 @@ Critical facts (hours, address, phone) go into the prompt from `business_profile
 | Compute Engine VM | Full control | Always-on, self-managed | ❌ |
 | GKE (Kubernetes) | Powerful | Overkill | ❌ |
 | Cloud Functions | Cheap | Poor fit for WebSockets / long calls | ❌ |
+| Move to AWS (next to Neon) | DB in the same cloud | No Cloud Run equivalent under DEC-33: App Runner has no scale-to-zero/WebSockets and is closed to new customers (Apr 2026); Fargate needs a load balancer (≈ $16+/month idle); Lambda + API Gateway WebSocket is per-message (no streaming session state, 15 min max). Voice traffic is mostly to Google Speech/Gemini — keep the app next to it; DB queries are small | ❌ (re-checked 2026) |
 
 ### DEC-16 — Voice cold start
 
-Stage 2: `min-instances=0` — measure cold starts on real calls (learning goal).
+**Superseded by DEC-35** (stage-3 always-on instance conflicts with DEC-33's no-fixed-cost rule).
+Original: Stage 2: `min-instances=0` — measure cold starts on real calls (learning goal).
 Stage 3: `min-instances=1` for the service handling calls (few $/month). Reason: R2 —
 caller experience ranks above cost once real customers depend on it.
+
+### DEC-33 — Cost model: free or pay-per-use only (all stages)
+
+User requirement: every service must be free, or charged only for actual usage. No
+monthly fees, no minimum spend, no free trial/subscription that turns into a payment
+later. Idle system = $0. Tightens D5 (was "near $0 idle") and W9 (was $0–20/month).
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Free or pay-per-use only** | $0 when nobody uses it; no surprise bills; cost = usage, easy to price per business | Rules out always-on DB/instances; phone numbers need an exception (DEC-34) | ✅ |
+| Small fixed budget ($0–20/month, old W9) | Always-on instance and DB allowed | Pays when idle | ❌ |
+
+Consequences:
+- Cloud SQL dropped (always-on ≈ $10/month); database stays Neon: free plan, then
+  Launch (usage-based, no monthly minimum ≈ 2026 — re-check). Resolves OPEN-10.
+- `min-instances=1` dropped → DEC-35.
+- Phone numbers always carry a monthly rental → DEC-34.
+- Google Cloud: use a pay-as-you-go billing account (no fee). The $300 trial doesn't
+  auto-charge, but it's optional. Budget alerts only warn — they don't cap spend.
+- Twilio: auto-recharge off. Stay inside free quotas for Secret Manager, Artifact
+  Registry and Cloud Scheduler (per-item monthly fees beyond them).
+- Docker Desktop is free only for personal use / small companies — check if that changes.
+
+### DEC-34 — Test calls without a phone number (stages 1–2)
+
+Every PSTN phone number has a monthly recurring charge with every provider (Twilio ≈
+$1.15/month; Telnyx, Plivo, Vonage similar), and leaving the Twilio trial needs a $20
+prepaid deposit (≈ 2026 — re-check). That breaks DEC-33, so the number is postponed.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Twilio Voice SDK browser call → TwiML app → `<Connect><Stream>`** | ≈ $0.004/min, no number; same webhook, same 8 kHz μ-law Media Stream, same code as a phone call | Not the PSTN network (no real phone audio path, no caller ID) | ✅ stages 1–2 |
+| Browser mic to our own WebSocket only | $0, no Twilio account | Twilio path untested | ✅ first (mic test), then Voice SDK |
+| Rent a Twilio number now | Real phone calls | Monthly fee | ❌ until a pilot business pays for its number |
+
+A Twilio trial's free number may be used for demos while the trial lasts; it's released at
+the end rather than kept at a monthly fee. After that, demos use the direct browser mode
+($0, no Twilio) or Voice SDK calls — see the demo modes in [03-voice-channel.md](03-voice-channel.md).
+
+When a pilot business goes live, its number is the only fixed cost; it's charged to
+that business (one number per business, DEC-01 data model unchanged).
+
+### DEC-35 — Voice cold start with scale to zero (supersedes DEC-16)
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **`min-instances=0`; the Twilio webhook request starts the instance while the caller hears ringing (Twilio waits up to 15 s); greeting audio pre-generated (DEC-17)** | $0 idle (DEC-33); cold start is a longer ring, not dead air | Ring a few seconds longer after idle; WebSocket might land on a second cold instance — measure | ✅ |
+| `min-instances=1` for calls (old DEC-16) | No cold start at all | Fixed monthly cost | ❌ (DEC-33) |
+
+Stage 2 measures: ring delay after idle, whether the WebSocket reuses the warm instance,
+per-turn latency. Revisit if callers notice — any always-on fix must be raised as a
+DEC-33 exception first.
 
 ### DEC-17 — Database wake-up on call
 
@@ -374,7 +448,7 @@ caller experience ranks above cost once real customers depend on it.
 |---|---|
 | **Business lookup inside the Twilio webhook (caller hears ringing), pre-generated greeting audio per business** | ✅ |
 | Generic "please wait while I load the assistant" message (Gemini suggestion) | ❌ worsens every call to hide a delay the caller doesn't hear |
-| Always-on Cloud SQL | 🔄 if measured latency is still a problem |
+| Always-on Cloud SQL | ~~🔄 if measured latency is still a problem~~ ❌ fixed monthly cost (DEC-33) |
 
 ### DEC-18 — Actions
 
@@ -431,7 +505,7 @@ Reason: R2, R19, R20.
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **One API service** (Twilio webhook, voice WebSocket, chat, dashboard) | Simplest; one deploy | `min-instances=1` keeps the whole app warm; dashboard traffic shares instances with calls | ✅ now |
+| **One API service** (Twilio webhook, voice WebSocket, chat, dashboard) | Simplest; one deploy | Dashboard traffic shares instances and scaling settings with calls | ✅ now |
 | Split: voice service (webhook + WebSocket) vs web service (chat, dashboard) | Voice tuned separately (concurrency, min-instances); dashboard scales to zero | Two deploys from the same image | 🔄 when call volume or dashboard load justifies it |
 | Separate webhook and voice services (Gemini diagram) | — | Extra hop in the call path; no benefit | ❌ |
 
@@ -470,16 +544,16 @@ Grouped by the stage in which the answer is needed.
 | OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
 | OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
-| OPEN-02 | 2 | Target country / region | EU (`europe-west1`) · US (`us-central1`) · other | Where the pilot business is (R16) |
+| OPEN-02 | 2 | Target country / region | EU (`europe-west3` Frankfurt — next to Neon `aws-eu-central-1`) · US (`us-east4` — next to Neon `aws-us-east-1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
 | OPEN-08 | 2 | Voice mode in cloud | Pipeline (Google STT → Gemini Flash → Google TTS) · Gemini Live | Stage-2 comparison: latency, quality, cost per minute, session limits |
 | OPEN-09 | 3 | Telephony provider | Twilio · Telnyx · Vonage · Plivo | OPEN-02 (price, number availability) |
-| OPEN-10 | 3 | Database after Neon free tier | Neon paid · Cloud SQL | Free-tier limits, measured wake-up latency, GCP-native needs |
 | OPEN-12 | 3 | Owner login for dashboard | Google sign-in · magic link | Before the second business |
 | OPEN-13 | 3 | CI/CD + Terraform timing | When deploys get frequent/risky or >1 person deploys | Stage 2 `deploy.sh` experience |
 | OPEN-14 | 3 | Call recordings | Never · opt-in per business | OPEN-02, legal review |
 | OPEN-15 | 3 | Voice concurrency per instance | 10 · 20 · 40 … | Load test with real call audio (DEC-25) |
+| OPEN-17 | 3 | Production database upgrade | Stay on Neon (free → Launch) · Cloud SQL Enterprise, 1 dedicated vCPU ≈ $50/month (no wake-up, SLA), HA later | First paying client; whether DEC-33's no-fixed-cost rule gets a production exception; measured Neon wake-up on calls (R3) |
 | OPEN-16 | 3 | Dedicated database for some businesses? | No — everything in one shared DB · a full cell (Cloud Run + DB) per region · dedicated DB for a business that requires it by contract | Clients in a second region (OPEN-02, R16); a future clinic/health client with stricter data rules; a business whose traffic slows others |
 ---
 
@@ -494,7 +568,7 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Gemini 1.5 Flash "2M context" | Was 1M (2M was Pro); model generations change — check current model at deploy | DEC-07 |
 | Qdrant snapshot migration | Doesn't help when switching embedding models — vectors must be recomputed anyway | DEC-08 |
 | Twilio webhook timing | While our webhook runs, the caller hears ringing (Twilio waits up to 15 s) — no dead air | DEC-17 |
-| Cloud Run CPU | With request-based billing CPU is throttled when no request is active; an open WebSocket counts as active — so "CPU always allocated" doesn't fix streaming | DEC-16, DEC-24, DEC-25 |
+| Cloud Run CPU | With request-based billing CPU is throttled when no request is active; an open WebSocket counts as active — so "CPU always allocated" doesn't fix streaming | DEC-35, DEC-24, DEC-25 |
 | Cloud Run concurrency | Default 80 requests per instance (max 1000, not 250); voice needs a lower, load-tested value | DEC-25 |
 | Neon pooler | Separate `-pooler` hostname, PgBouncer transaction mode; `SET LOCAL` works, session `SET` doesn't; migrations use the direct connection | R20 |
 | One database per business | A Postgres database lives in one region; data residency forces a split **per region**, not per business. Scale-to-zero makes idle per-business DBs cheap but adds a wake-up (R3) to more first calls | DEC-04, OPEN-16 |
@@ -518,6 +592,17 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Places API | Scraping Google Maps violates ToS; API data has storage limits | DEC-11 |
 | Gemini free tier | Submitted data may be used to improve Google products | DEC-07 |
 | Cost at scale | Telephony + speech minutes dominate, not the database | DEC-03, DEC-14 |
+| Phone number rental | Every provider charges a monthly fee per number (Twilio ≈ $1.15/month); Twilio upgrade needs a $20 prepaid deposit (≈ 2026) | DEC-34 |
+| Twilio Voice SDK | Browser/app calls ≈ $0.004/min, no phone number needed; TwiML app can return `<Connect><Stream>` like a number's webhook | DEC-34 |
+| Neon paid plan | Launch plan is usage-based with no monthly minimum (≈ 2026) | DEC-03, DEC-33 |
+| Google Speech free usage | Recurring monthly allowance, not a trial: ≈ 60 min STT, ≈ 1M WaveNet / 4M Standard TTS characters | DEC-13, DEC-33 |
+| Neon on Google Cloud | Neon runs on AWS only (Azure deprecated); no GCP regions (≈ 2026). Pair by city: `aws-us-east-1` ↔ `us-east4` (Virginia), `aws-eu-central-1` ↔ `europe-west3` (Frankfurt). Cross-cloud ≈ 1–3 ms; GCP egress billed per GB (usage) | DEC-03, OPEN-02 |
+| Firestore capabilities (2026) | Has transactions (always); Enterprise edition added joins via subqueries (GA) and full-text search (preview, Apr 2026); vector KNN search GA. Earlier "no joins / no full-text" is outdated. Server/Admin SDKs bypass Security Rules | DEC-02 |
+| AWS Aurora Serverless v2 auto-pause | Scales Postgres to 0 ACU, but resume ≈ 15 s (30 s+ after > 24 h idle) — at Twilio's ~15 s webhook limit; Neon wakes in ≈ 0.5 s | DEC-03, DEC-15 |
+| Google's hybrid search recommendation | AlloyDB AI / Cloud SQL: pgvector + full-text (GIN/BM25) merged with Reciprocal Rank Fusion — same as DEC-12; native BM25 added to AlloyDB and Cloud SQL (2026) | DEC-02, DEC-12 |
+| Vertex AI Search | Managed search/RAG over a website data store; ≈ 10k queries/month free, then ≈ $1.50 per 1k (Standard); storage ≈ $1/GB-month | DEC-02 |
+| GCP equivalent of Neon | None scales Postgres to zero: Cloud SQL and AlloyDB bill an always-on instance, Spanner has a capacity minimum; Firestore is pay-per-use but not Postgres (rejected, DEC-02) | DEC-03, DEC-33 |
+| Google Cloud free trial | $300 / 90 days; ends without charging unless upgraded by hand. Budget alerts warn but don't cap spend | DEC-33 |
 
 Free-tier limits, model names and pricing change — re-check before each decision that
 depends on them.

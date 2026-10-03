@@ -3,15 +3,16 @@
 **Goal:** a customer calls a phone number and has a spoken conversation with the
 assistant, which answers from the business's RAG (Part 2) and can trigger actions (Part 4).
 
-**Done when:** calling a real test number, asking "what time do you close on Saturday?"
-returns a correct spoken answer with under ~1.5 s response delay.
+**Done when:** a Twilio call (Voice SDK from the browser — no phone number, DEC-34)
+asking "what time do you close on Saturday?" returns a correct spoken answer with under
+~1.5 s response delay. A real phone number is rented only when a pilot business pays for it.
 
 ---
 
 ## Call flow
 
 ```
-Caller ──PSTN──► Twilio number
+Caller ──PSTN──► Twilio number   (stages 1–2: browser ──Voice SDK──► TwiML App, no number — DEC-34)
                     │ 1. HTTP webhook POST /twilio/voice  (which number was called → business_id;
                     │    caller still hears ringing here, and this query wakes the DB)
                     │    ◄── TwiML: <Connect><Stream url="wss://.../voice/ws"/>
@@ -29,7 +30,7 @@ Caller ──PSTN──► Twilio number
 
 | Step | Local | Cloud |
 |---|---|---|
-| Telephony | Twilio trial number + **ngrok** tunnel to local API | Twilio → Cloud Run URL |
+| Telephony | Twilio **Voice SDK** browser call (no number) + **ngrok** tunnel to local API | same → Cloud Run URL; real number once a business pays for it |
 | VAD | webrtcvad (`webrtcvad-wheels`; Silero would add onnxruntime — not needed in stage 1) | same |
 | Speech-to-Text | **Google Speech-to-Text** (streaming), called from the laptop | same |
 | Text-to-Speech | **Google Text-to-Speech** (Neural2/Chirp voices), called from the laptop | same |
@@ -93,38 +94,63 @@ short, short spoken-style answers, play a filler ("one moment…") when a tool c
 - Fallback: transfer to the business's human number (Twilio `<Dial>`) or take a message.
 - End of call → transcript saved to `conversations` → Part 4 summary.
 
+## Ways to connect (demo modes) — one pipeline behind all of them
+
+| Mode | Caller connects by | Reaches our server as | Business identified by | Cost (≈ 2026) |
+|---|---|---|---|---|
+| **A. Phone** | Dialling a Twilio number | `POST /twilio/voice` → WebSocket `/voice/ws` (8 kHz μ-law) | Dialled number (`To`) → `businesses.phone_numbers` | Per minute + number rental (≈ $1.15/month) — only during a Twilio trial or once a business pays (DEC-34) |
+| **B. Browser via Twilio** (Voice SDK) | "Call" button on a web page → TwiML App | **Same** `POST /twilio/voice` → `/voice/ws` | Custom parameter sent by the page (`business_id`) | ≈ $0.004/min, no number; needs an active Twilio account |
+| **C. Browser direct** (mic test page) | "Talk" button on `web/mic-test.html` | Our own WebSocket `/voice/browser` (PCM16) — no Twilio | Query parameter on the WebSocket URL | $0 (only Google Speech usage) |
+
+Design rule: **transport adapters are thin; the call loop doesn't know which one is used.**
+`session.py` runs the pipeline (VAD → STT → LLM + tools → TTS) on PCM16 frames in and out.
+Each adapter only converts its wire format to/from those frames and resolves `business_id`:
+`ws.py` (Twilio Media Streams JSON + base64 μ-law, modes A and B) and `browser_ws.py`
+(binary PCM16, mode C). Switching demo mode = using a different number/page/URL — no code.
+
+Twilio trial: use its number for mode-A demos while the trial lasts (check in the Twilio
+console what ends when). After it ends, demo with mode C ($0); upgrade (≈ $20 prepaid,
+usage credit) only to show mode B; rent a number again when a business pays. A new number
+will differ from the trial one — don't publish the trial number.
+
 ## Local development setup
 
-1. Twilio trial account, buy a number (trial can only call verified numbers).
-2. `ngrok http 8000` → set the number's voice webhook to `https://<ngrok>/twilio/voice`.
-3. Before phone: a **local mic test mode** (browser WebRTC or CLI) using the same voice
-   pipeline, so STT/TTS can be tuned without spending call minutes.
+1. Twilio account (trial credit is enough to start; auto-recharge off — DEC-33). No
+   phone number: create a **TwiML App** + API key, and a page using the Twilio Voice
+   JS SDK that calls it (≈ $0.004/min, DEC-34).
+2. `ngrok http 8000` → set the TwiML App's voice URL to `https://<ngrok>/twilio/voice`.
+   The same webhook later serves a real number unchanged.
+3. Before phone: a **local mic test mode** (mode C: `web/mic-test.html` → `/voice/browser`)
+   using the same voice pipeline, so STT/TTS can be tuned without spending call minutes.
 
 ## Code layout
 
 ```
 app/voice/
   twilio_routes.py   POST /twilio/voice (TwiML), POST /twilio/status (call end → summary)
-  ws.py              WebSocket /voice/ws — call session loop
-  session.py         per-call state: business_id, history, audio buffers
+  ws.py              WebSocket /voice/ws — Twilio Media Streams adapter (modes A, B)
+  browser_ws.py      WebSocket /voice/browser — direct browser adapter (mode C), no Twilio
+  session.py         per-call state + call loop on PCM16 frames, transport-agnostic
   audio.py           μ-law ↔ PCM, resampling 8k ↔ 16k
   vad.py
   stt.py             Google Speech-to-Text streaming
   tts.py             Google Text-to-Speech
   live.py            Live mode: Gemini Live session, same tools (stage 2)
   tools.py           shared tool definitions: search_business_info + Part 4 actions
-web/mic-test.html    browser mic test client
+web/mic-test.html    browser mic test client (mode C)
+web/call.html        Twilio Voice SDK call page (mode B)
 ```
 
 ## Tasks
 
 - [x] Audio utilities (μ-law/PCM, resampling) + tests
 - [ ] Google STT/TTS streaming (local auth via gcloud ADC)
-- [ ] Local mic test mode end-to-end with Part 2 RAG
-- [ ] Twilio webhook + TwiML + media stream WebSocket
+- [ ] Transport-agnostic call loop in `session.py` (PCM16 in/out)
+- [ ] Local mic test mode end-to-end with Part 2 RAG (mode C, `browser_ws.py`)
+- [ ] Twilio webhook + TwiML + media stream WebSocket — tested with the trial number (mode A) and a Voice SDK browser call (mode B)
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [ ] Turn-taking, barge-in in the call loop
-- [ ] Phone number → business_id mapping from Postgres
+- [ ] Called number / TwiML App → business_id mapping from Postgres
 - [ ] Call transfer + take-a-message fallback
 - [ ] Save transcript at call end; summary runs in the Twilio status callback (DEC-24)
 - [ ] Measure latency per stage and log it per turn
@@ -134,9 +160,10 @@ web/mic-test.html    browser mic test client
 ## Notes
 
 - Phone audio is 8 kHz — test STT on real call audio, not just clean mic audio.
-- Twilio charges per minute (number rental + inbound minutes); keep test calls short.
+- Twilio charges per minute; a phone number adds a monthly rental (any provider) —
+  that's why testing uses Voice SDK calls (DEC-34). Keep test calls short.
 - WebSocket calls need the server to stay up for the call's duration — relevant for
-  Cloud Run settings (timeout 3600 s; stage 2 measures cold starts with `min-instances=0`,
-  stage 3 sets `min-instances=1` — DEC-16, R19).
+  Cloud Run settings (timeout 3600 s; `min-instances=0` in every stage, cold start
+  happens during ringing — measured in stage 2, DEC-35, R19).
 - No generic "please wait while I load the assistant" message: the DB wake-up happens
   during ringing (DEC-17, R3).

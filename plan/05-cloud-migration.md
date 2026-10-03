@@ -1,18 +1,19 @@
 # Part 5 — Stage 2: Move to Google Cloud (one business)
 
 **Goal:** understand cloud infrastructure by running the stage-1 system on Google Cloud
-for **one pilot business**, with managed services only and near-zero idle cost.
+for **one pilot business**, with managed services only and **$0 idle cost** (DEC-33).
 
 **Starts when:** stage 1 exit criteria are met — app and crawler run from Docker images
 with env-var config only ([DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)).
 
 **Done when:**
-- The pilot business answers real calls and chat from Cloud Run against Neon and Gemini.
+- The pilot business answers calls (Voice SDK; its own number once it pays for it, DEC-34)
+  and chat from Cloud Run against Neon and Gemini.
 - The crawler runs as a scheduled Cloud Run Job.
 - Redeploy from `deploy.sh` takes minutes; logs, budget alert and costs are visible.
 - Measured numbers exist: cold start time, per-turn latency, cost per call minute.
 
-Scaling to many businesses, min-instances, load tests, Cloud SQL, CI/CD and Terraform
+Scaling to many businesses, load tests, CI/CD and Terraform
 are **stage 3** → [06-scale.md](06-scale.md).
 
 ---
@@ -45,7 +46,7 @@ then capture the commands in `deploy.sh`. No Terraform or CI/CD yet.
 | Embeddings | `nomic-embed-text-v1.5` (LM Studio) | **Gemini embeddings** (768 dims) | `EMBED_*` vars + **re-index** |
 | STT / TTS | Google Speech APIs | same | none |
 | Secrets | `.env` | **Secret Manager** | mounted as env vars |
-| Webhooks | ngrok | Cloud Run HTTPS URL | update Twilio number config |
+| Webhooks | ngrok | Cloud Run HTTPS URL | update the TwiML App (and the number, once rented) |
 
 ## Why one Postgres + pgvector (and not a vector DB service)
 
@@ -65,15 +66,19 @@ The app only sees a standard `DATABASE_URL`, so the host can be changed later wi
 |---|---|---|---|
 | **Neon** (serverless Postgres, pgvector) | Free tier, then usage-based | Scales compute to zero; branching for dev/test | Wakes from idle in ~0.5 s (first query after idle); not in GCP billing |
 | Supabase (Postgres, pgvector) | Free tier, then ~$25/month | Generous free tier, dashboard, backups | Free projects **pause after ~1 week of inactivity**; not in GCP billing |
-| **Cloud SQL for PostgreSQL** (pgvector) | ~$10/month smallest instance | Inside GCP: IAM, private connection from Cloud Run, one bill, backups/HA | Always-on cost even with zero traffic |
+| Cloud SQL for PostgreSQL (pgvector) — ❌ DEC-33 | ~$10/month smallest instance | Inside GCP: IAM, private connection from Cloud Run, one bill, backups/HA | Always-on cost even with zero traffic |
 
 **Decision (DEC-03):** stage 2 uses the **Neon free tier** (≈ $0) — same Postgres,
 nothing new to learn about the database itself, so the stage focuses on Cloud Run,
 IAM and secrets. Supabase rejected because free projects pause when idle — bad for a
-phone line. Neon paid vs Cloud SQL is a stage-3 decision (OPEN-10). Check current
-free-tier limits; they change.
+phone line. Cloud SQL ruled out by DEC-33 (fixed monthly cost); when the free tier is
+outgrown, move to Neon Launch (usage-based, no monthly minimum). Check current limits
+and prices; they change.
 
 Considered and rejected:
+- **Firestore alone** (2026: vector search, joins, text search in preview) — server SDK
+  bypasses Security Rules, so no database-enforced tenant isolation like RLS; no
+  exclusion constraint for bookings; local emulator ≠ cloud (DEC-02).
 - **Firestore (metadata) + Qdrant (vectors)** — two databases to keep in sync, bookings
   without SQL transactions/joins, no single-query hybrid search.
 - **Qdrant on a Compute Engine Spot VM** — self-managed; Spot VMs can be stopped at any
@@ -85,7 +90,7 @@ Considered and rejected:
 | Setting | Stage 2 value | Why | Stage 3 change |
 |---|---|---|---|
 | Services | one (`api`) | Simplest to learn | split voice/web if justified (DEC-26) |
-| `min-instances` | 0 | $0 idle; **measure** cold starts on calls | 1 for the call-handling service (DEC-16) |
+| `min-instances` | 0 | $0 idle; **measure** cold starts on calls | stays 0; cold start during ringing (DEC-35) |
 | `--concurrency` | default | One business, little traffic | from load test (DEC-25, OPEN-15) |
 | `--timeout` | 3600 s | WebSocket calls must not be cut (R19) | same |
 | Billing | request-based | CPU is allocated while a call's WebSocket is open | same (DEC-25) |
@@ -98,8 +103,11 @@ Considered and rejected:
 - **Cloud Run, Jobs, Scheduler:** mostly within free tier at pilot traffic.
 - **Gemini:** pay per token; keep context small (top 5 chunks, short history).
 - **Twilio + speech:** per minute — the main cost even at pilot scale. Record cost per
-  call minute as an input for stage 3 pricing.
-- **Budget alert** from day one.
+  call minute as an input for stage 3 pricing. Speech has a recurring free monthly allowance.
+- **Phone number:** the only fixed cost (monthly rental) — rented only when the pilot
+  business pays for it (DEC-34).
+- **Secret Manager, Artifact Registry, Scheduler:** stay inside their free quotas.
+- **Budget alert** from day one (it warns, it doesn't cap spend).
 
 ## Deployment steps (by hand first, then `deploy.sh`)
 
@@ -109,7 +117,8 @@ Considered and rejected:
    Speech user).
 2. **Gemini key:** create a paid Gemini API key (or Vertex AI with the service account,
    OPEN-07); store it in Secret Manager. Already tested locally in stage 1 step 6.
-3. **Database:** create the Neon project in the same region as Cloud Run; run Alembic
+3. **Database:** create the Neon project in the AWS region in the same city as Cloud Run
+   (Neon has no GCP regions — e.g. `aws-eu-central-1` ↔ `europe-west3`); run Alembic
    migrations; store the pooled connection string (app) and the direct one (migrations)
    in Secret Manager (R20).
 4. **Data:** re-run the crawler in cloud, or `pg_dump` the local database → restore into
@@ -121,8 +130,8 @@ Considered and rejected:
 7. **Deploy crawler job:**
    `gcloud run jobs deploy ingest --image .../app/crawler --command python --args -m,app.ingest.run`
    + Cloud Scheduler trigger (e.g. weekly re-crawl).
-8. **Twilio:** point the pilot number's voice webhook to the Cloud Run URL; test calls;
-   generate the pilot's greeting audio (DEC-17).
+8. **Twilio:** point the TwiML App's voice URL (and the pilot's number, once it pays for
+   one — DEC-34) to the Cloud Run URL; test calls; generate the pilot's greeting audio (DEC-17).
 9. **Observability:** structured logs in Cloud Logging; log latency per voice stage and
    cold starts; check the billing report after the first week.
 10. **Capture** all commands in `deploy.sh`; redeploy from it once to prove it works.
@@ -142,3 +151,4 @@ Considered and rejected:
 - [ ] Measure cold starts, per-turn latency, cost per call minute
 - [ ] Gemini Live spike (live mode, same tools) → compare with pipeline mode: latency, quality, cost per minute → decide OPEN-08
 - [ ] `deploy.sh`
+- [ ] Compare with Vertex AI Search (DEC-02): pilot's website as a data store, run `tests/eval/bathhouse.yaml` questions, note answer quality and latency vs our RAG — benchmark only, not adopt
