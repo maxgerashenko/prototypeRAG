@@ -49,7 +49,12 @@ def _expand_by_links(
                 continue
             fetched[url] = html
             for link in discover_links(html, url):
-                if link not in seen and len(all_urls) + len(next_frontier) < max_pages:
+                # robots check here too, not only before fetching the frontier: every URL in
+                # all_urls is fetched later by crawl_business, so a disallowed link added here
+                # would be fetched anyway (R10)
+                if robots_checker and not robots_checker.can_fetch(link):
+                    continue
+                if link not in seen and len(all_urls) < max_pages:
                     seen.add(link)
                     next_frontier.append(link)
                     all_urls.append(link)
@@ -80,6 +85,9 @@ def crawl_business(
             urls_to_crawl, fetched = sitemap_urls, {}
         else:
             urls_to_crawl, fetched = _expand_by_links(start_url, client, robots_checker, max_pages, max_depth)
+        if robots_checker:
+            # last guard for both paths -- e.g. a disallowed start_url stays in the BFS list
+            urls_to_crawl = [u for u in urls_to_crawl if robots_checker.can_fetch(u)]
 
         pages_crawled = 0
         pages_changed = 0
@@ -118,9 +126,19 @@ def crawl_business(
             deleted_pages = delete_pages_not_in(session, business_id, keep_urls=urls_to_crawl)
 
         profile_extracted = False
-        if extract_profile and all_markdown:
+        with tenant_session(business_id) as session:
+            existing = session.get(BusinessProfile, business_id)
+            confirmed = existing is not None and existing.confirmed_at is not None
+            place_id = existing.place_id if existing is not None else None
+        if confirmed:
+            # DEC-11: once the owner has confirmed the profile it's the source of truth --
+            # a re-crawl must not overwrite it (changes go to the owner for review, step 5)
+            print("profile confirmed by owner, not re-extracted")
+        elif extract_profile and all_markdown:
             try:
-                merged = merge_profile(extract_profile_from_text(all_markdown), place_id=None)
+                # keep the stored place_id: the website extraction never produces one, so
+                # passing None here would wipe it on every re-crawl
+                merged = merge_profile(extract_profile_from_text(all_markdown), place_id=place_id)
                 with tenant_session(business_id) as session:
                     profile = session.get(BusinessProfile, business_id)
                     if profile is None:

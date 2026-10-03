@@ -133,7 +133,8 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Breaks: "same image for everything" / small fast image (D4, R2 cold starts).
 - Forced choice: separate Docker build target (or image) for the crawler job with
   Crawl4AI/Playwright; the API image stays small.
-- Status: **Accepted**.
+- Status: **Accepted** — applies once a JS-rendered site is hit; the stage-1 pilot is
+  server-rendered, so the crawler is httpx-only until then (DEC-36).
 
 ### Vendor terms and external services
 

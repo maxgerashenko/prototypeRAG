@@ -43,16 +43,19 @@ correctness & legal; the **focus** below decides trade-offs inside a stage.
 
 | Step | Stage | What | Why this order |
 |---|---|---|---|
-| 0 | 1 | Foundation: Postgres/pgvector in Docker, Alembic, base tables with `business_id`, `tenant_session` | Every later part writes into these tables |
-| 1 | 1 | Crawler → pages, profile, chunks | Need real data before RAG |
-| 2 | 1 | RAG: index, retrieval, `/chat`, eval, debug views | Core value; learn how RAG works |
-| 3 | 1 | Voice: mic test → Twilio browser calls (Voice SDK, no number — DEC-34) + ngrok | Builds on working RAG |
-| 4 | 1 | Actions: tool calling, bookings, summaries, minimal dashboard | Needs RAG + channels |
-| 5 | 1 | Gemini comparison (env vars) | Validate quality before cloud |
-| 6 | 1 | Containerize (API + crawler images) | Stage 2 readiness |
-| 7 | 2 | Cloud Run + Neon + Gemini, one pilot business, `deploy.sh` | Learn infra on a working system |
-| 8 | 3 | RLS enforcement → second business | Hard gate for multi-tenancy |
-| 9 | 3 | Onboarding, cost per business, reliability, ops, DB growth, cost reduction | By trigger, see [06-scale.md](06-scale.md) |
+| 1 | 1 | ✅ Foundation: Postgres/pgvector in Docker, Alembic, base tables with `business_id`, `tenant_session` | Every later part writes into these tables |
+| 2 | 1 | ✅ Crawler → pages, profile, chunks | Need real data before RAG |
+| 3 | 1 | ✅ RAG: index, retrieval, `/chat`, eval, debug views | Core value; learn how RAG works |
+| 4 | 1 | Voice: mic test → Twilio browser calls (Voice SDK, no number — DEC-34) + ngrok | Builds on working RAG |
+| 5 | 1 | Actions: tool calling, bookings, summaries, minimal dashboard | Needs RAG + channels |
+| 6 | 1 | Gemini comparison (env vars) | Validate quality before cloud |
+| 7 | 1 | Containerize (API + crawler images) | Stage 2 readiness |
+| 8 | 2 | Cloud Run + Neon + Gemini, one pilot business, `deploy.sh` | Learn infra on a working system |
+| 9 | 3 | RLS enforcement → second business | Hard gate for multi-tenancy |
+| 10 | 3 | Onboarding, cost per business, reliability, ops, DB growth, cost reduction | By trigger, see [06-scale.md](06-scale.md) |
+
+Step numbers match [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) and the commit messages
+("Stage 1 step 3") — stage 1 is steps 1–7.
 
 ---
 
@@ -71,7 +74,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-07 | Cloud LLM | Gemini Flash, paid key, Gemini API first | 1 (compare) · 2 | 🔄 |
 | DEC-08 | Embeddings | `nomic-embed-text-v1.5` (LM Studio) local, `gemini-embedding-001` cloud, 768 dims, re-index on switch | 1 · 2 (re-index) | 🔄 |
 | DEC-09 | Crawled content storage | Postgres tables, no file storage | 1 | ✅ |
-| DEC-10 | Crawler tech | Crawl4AI + httpx fallback, separate crawler image | 1 · 2 (image) | ✅ |
+| DEC-10 | Crawler tech | ~~Crawl4AI + httpx fallback~~ — **Superseded by DEC-36** | 1 · 2 (image) | — |
 | DEC-11 | Google listing data | Website + owner are the stored source of truth; Places = `place_id` + live lookup | 1 | 🔄 (OPEN-04) |
 | DEC-12 | Retrieval | Hybrid: pgvector + Postgres full-text, rank fusion, exact search per business | 1 | ✅ |
 | DEC-13 | Speech | Google STT/TTS, also locally; Gemini Live compared in stage 2 (DEC-30) | 1 | ✅ |
@@ -97,6 +100,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-34 | Test calls without a phone number | Stages 1–2: Twilio Voice SDK browser calls (per minute, no number); rent a real number only when a pilot business pays for it | 1 · 2 | ✅ |
 | DEC-35 | Voice cold start (supersedes DEC-16) | `min-instances=0` in every stage; Cloud Run starts while the caller hears ringing; measure in stage 2 | 2 · 3 | 🔄 (measure) |
 | DEC-32 | Local models split by role | `google/gemma-4-12b` for chat/voice; `qwen/qwen3.6-35b-a3b` (thinking on) for code-drafting delegation — both fit in memory together | 1 | ✅ |
+| DEC-36 | Crawler fetcher order | httpx first (stage 1, pilot site is server-rendered); Crawl4AI + separate crawler image added when a JS-rendered site is hit | 1 · 2 | 🔄 (first JS site) |
 
 ---
 
@@ -115,7 +119,7 @@ Reason: unblocks building the crawler now instead of waiting on a real client re
 Fine as a **stage-1 technical fixture** — local crawling for learning, data stays in the
 local Postgres, nothing published, no calls or bookings placed against the real
 business. Before any public deployment, Twilio number, or live booking test
-(stage 1 steps 3–4 onward) against a real business, get the owner's written consent
+(stage 1 steps 4–5 onward) against a real business, get the owner's written consent
 (R10) — swap in a consenting pilot business at that point if this one hasn't given it.
 
 ### DEC-01 — Tenancy model
@@ -295,7 +299,7 @@ Decision: **`google/gemma-4-12b` for chat/voice** (`.env`'s `LLM_MODEL`); **`qwe
 
 Not solved by this decision: per-turn latency for *both* models is 10–20s, far from
 natural phone-call pacing (~2–3s). That's a separate problem for the voice step
-(`04-actions.md`) — prompt size, context length, and streaming TTS overlap — not fixed
+([03-voice-channel.md](03-voice-channel.md)) — prompt size, context length, and streaming TTS overlap — not fixed
 by picking a smaller chat model.
 
 ### DEC-07 — Cloud LLM
@@ -324,7 +328,9 @@ Re-index is cheap: chunk text is in Postgres; indexer re-embeds rows where `embe
 | **Postgres tables (`pages`, `business_profile`, `chunks`)** | Same local/cloud; re-embed without re-crawl; queryable | Raw HTML not kept | ✅ |
 | Local files → Cloud Storage | Keeps raw HTML | Storage switch local/cloud; second system | ❌ (add GCS later only if needed) |
 
-### DEC-10 — Crawler
+### DEC-10 — Crawler — **Superseded by DEC-36**
+
+Original decision (kept for history):
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
@@ -333,6 +339,22 @@ Re-index is cheap: chunk text is in Postgres; indexer re-embeds rows where `embe
 | Owner uploads | Works when crawling is blocked | Manual | ✅ fallback (R10) |
 
 Runs in a **separate crawler image** as a Cloud Run Job, so the API image stays small (R8).
+
+### DEC-36 — Crawler fetcher order (supersedes DEC-10's primary/fallback order)
+
+Context: the stage-1 pilot site (DEC-31) is server-rendered; `app/ingest/fetch.py` was
+built with httpx only, and that already passes the crawler's "done when". DEC-27 says
+use the simplest thing that reaches the stage goal.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **httpx + BeautifulSoup first; Crawl4AI added when a JS-rendered site is hit** | Tiny dependency set; fast tests; one image is enough while it lasts | A JS-only site returns near-empty pages until Crawl4AI is added | ✅ |
+| Crawl4AI primary from day one (DEC-10) | Handles JS sites immediately | Headless browser in the dev loop and the image for a site that doesn't need it | ❌ for now |
+
+Consequences: the separate crawler image (R8) is needed only once Crawl4AI is added;
+until then the crawler job can run from the API image (`python -m app.ingest.run`).
+Trigger to revisit: the first site whose fetched Markdown is near-empty, or the
+"3 different real sites" crawler task (01-crawler.md). Stage: 1 (fetcher) · 2 (image).
 
 ### DEC-11 — Google listing data
 
@@ -544,10 +566,12 @@ Grouped by the stage in which the answer is needed.
 | OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
 | OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
+| OPEN-18 | 1 | Phone/booking tests with the pilot (DEC-31) | Browser test calls by the developer only (Voice SDK, DEC-34), with the pilot's data as a fixture · swap in a consenting business first | DEC-31 caveat (R10) — needed before stage 1 step 4 (Twilio) |
 | OPEN-02 | 2 | Target country / region | EU (`europe-west3` Frankfurt — next to Neon `aws-eu-central-1`) · US (`us-east4` — next to Neon `aws-us-east-1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
 | OPEN-08 | 2 | Voice mode in cloud | Pipeline (Google STT → Gemini Flash → Google TTS) · Gemini Live | Stage-2 comparison: latency, quality, cost per minute, session limits |
+| OPEN-19 | 2 | API access control for the pilot | Shared secret header / IAP / Cloud Run IAM for owner routes, Twilio signature check for webhooks; public only: chat widget | Needed before stage 2 step 8 (public Cloud Run URL): today every route trusts the `business_id` in the request, and `/businesses/{id}/custom-replies` lets anyone rewrite what the phone bot says; `/debug/retrieve` dumps chunk text |
 | OPEN-09 | 3 | Telephony provider | Twilio · Telnyx · Vonage · Plivo | OPEN-02 (price, number availability) |
 | OPEN-12 | 3 | Owner login for dashboard | Google sign-in · magic link | Before the second business |
 | OPEN-13 | 3 | CI/CD + Terraform timing | When deploys get frequent/risky or >1 person deploys | Stage 2 `deploy.sh` experience |
@@ -591,6 +615,8 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Llama licence | Commercial use allowed with conditions ("Built with Llama", acceptable use policy) | OPEN-06 |
 | Places API | Scraping Google Maps violates ToS; API data has storage limits | DEC-11 |
 | Gemini free tier | Submitted data may be used to improve Google products | DEC-07 |
+| Gemini embedding size | `gemini-embedding-001` returns 3072 dims by default (approx., re-check); a reduced output dimension must be requested to fit `vector(768)` — `app/llm.py` now fails fast on a size mismatch | DEC-08, R6 |
+| SSE framing | A raw newline inside a `data:` field ends it; multi-line text must be sent as several `data:` lines | `/chat/stream` |
 | Cost at scale | Telephony + speech minutes dominate, not the database | DEC-03, DEC-14 |
 | Phone number rental | Every provider charges a monthly fee per number (Twilio ≈ $1.15/month); Twilio upgrade needs a $20 prepaid deposit (≈ 2026) | DEC-34 |
 | Twilio Voice SDK | Browser/app calls ≈ $0.004/min, no phone number needed; TwiML app can return `<Connect><Stream>` like a number's webhook | DEC-34 |

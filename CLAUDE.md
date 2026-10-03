@@ -18,7 +18,7 @@ Stage 1 build is in progress — see the build order in `DECISIONS.md` for what 
 |---|---|---|
 | `PROJECT_PLAN.md` | What we build: overview of the 4 parts, milestones | Scope or milestones change |
 | `DEVELOPMENT_PLAN.md` | How: stack table local ↔ cloud, principles, env vars, code structure, phases | Stack or phases change |
-| `ARCHITECTURE_DRIVERS.md` | Drivers D1–D7 (principles + priority), wants W1–W9, restrictions R1–R20 that force deviations | A hard limit is found that bends a driver |
+| `ARCHITECTURE_DRIVERS.md` | Drivers D1–D7 (principles + priority), wants W1–W9, restrictions R1–R21 that force deviations | A hard limit is found that bends a driver |
 | `DECISIONS.md` | Priorities, build order, decision summary DEC-xx, options tables, open questions OPEN-xx, facts behind decisions | Any decision is made, changed or opened |
 | `01-crawler.md` … `04-actions.md` | Detailed plan per feature part (built in stage 1): goal, done-when, tech, code layout, tasks | Details of that part change |
 | `05-cloud-migration.md` | Stage 2: move to Google Cloud with one pilot business | Cloud setup changes |

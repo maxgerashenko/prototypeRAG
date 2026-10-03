@@ -40,7 +40,7 @@ then capture the commands in `deploy.sh`. No Terraform or CI/CD yet.
 | Component | Stage 1 (local) | Stage 2 (cloud) | Change needed |
 |---|---|---|---|
 | API + voice + dashboard | API Docker image | **Cloud Run** service (one service, DEC-26) | none (same image) |
-| Crawler | crawler Docker image | **Cloud Run Job** + **Cloud Scheduler** | none (same image) |
+| Crawler | crawler Docker image (or the API image while httpx-only, DEC-36) | **Cloud Run Job** + **Cloud Scheduler** | none (same image) |
 | Vectors + app data | Postgres + pgvector in Docker | **Neon** free tier + pgvector (DEC-03) | `DATABASE_URL` |
 | LLM | LM Studio (OpenAI-compatible) | **Gemini** paid key (OpenAI-compatible) | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
 | Embeddings | `nomic-embed-text-v1.5` (LM Studio) | **Gemini embeddings** (768 dims) | `EMBED_*` vars + **re-index** |
@@ -130,8 +130,9 @@ Considered and rejected:
 7. **Deploy crawler job:**
    `gcloud run jobs deploy ingest --image .../app/crawler --command python --args -m,app.ingest.run`
    + Cloud Scheduler trigger (e.g. weekly re-crawl).
-8. **Twilio:** point the TwiML App's voice URL (and the pilot's number, once it pays for
-   one — DEC-34) to the Cloud Run URL; test calls; generate the pilot's greeting audio (DEC-17).
+8. **Access control first (OPEN-19)**, then **Twilio:** point the TwiML App's voice URL (and the
+   pilot's number, once it pays for one — DEC-34) to the Cloud Run URL; test calls; generate the
+   pilot's greeting audio (DEC-17).
 9. **Observability:** structured logs in Cloud Logging; log latency per voice stage and
    cold starts; check the billing report after the first week.
 10. **Capture** all commands in `deploy.sh`; redeploy from it once to prove it works.

@@ -83,7 +83,19 @@ def chunk_text(text: str, target_tokens: int = 650, overlap_ratio: float = 0.125
     overlap_chars = int(target_chars * overlap_ratio)
     if overlap_chars <= 0:
         return raw_chunks
-    return [raw_chunks[0]] + [raw_chunks[i - 1][-overlap_chars:] + raw_chunks[i] for i in range(1, len(raw_chunks))]
+    return [raw_chunks[0]] + [
+        f"{_tail_on_word_boundary(raw_chunks[i - 1], overlap_chars)}\n\n{raw_chunks[i]}" for i in range(1, len(raw_chunks))
+    ]
+
+
+def _tail_on_word_boundary(text: str, max_chars: int) -> str:
+    """Last <= max_chars of `text`, starting at a word boundary (no half-word at the start)."""
+    if len(text) <= max_chars:
+        return text
+    tail = text[-max_chars:]
+    if not text[-max_chars - 1].isspace():
+        _, _, tail = tail.partition(" ")  # drop the cut-off first word
+    return tail.strip()
 
 
 def chunk_markdown(markdown: str, target_tokens: int = 650) -> list[ChunkDraft]:

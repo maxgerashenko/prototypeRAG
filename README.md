@@ -26,6 +26,15 @@ docker compose up -d --wait       # Postgres 16 + pgvector, the only container
 uv sync                           # Python 3.12 venv + dependencies
 uv run alembic upgrade head       # create tables
 uv run uvicorn app.main:app --reload   # http://localhost:8000/health
-uv run pytest                     # foundation tests (need the DB running)
+uv run pytest                     # needs the DB; tests/test_rag.py also needs LM Studio (chat + embedding model loaded)
 docker compose exec postgres psql -U app -d app   # look at the data
+```
+
+Pilot business end to end (DEC-31):
+
+```bash
+uv run python -m app.ingest.run --url https://www.abathhouse.com/williamsburg   # prints business_id
+uv run python -m app.rag.index --business-id <id>                               # embed chunks
+uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml
+# chat page: http://localhost:8000/web/chat.html
 ```

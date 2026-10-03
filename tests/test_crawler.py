@@ -5,15 +5,24 @@ Fixtures were captured from the real stage-1 pilot business (DEC-31, abathhouse.
 
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
 
 from app.db import tenant_session
 from app.db.models import Business, Chunk, Page
-from app.ingest.chunk import ChunkDraft, chunk_markdown, split_by_headers
+from app.ingest import run
+from app.ingest.chunk import ChunkDraft, chunk_markdown, chunk_text, split_by_headers
 from app.ingest.clean import content_hash, extract_title, html_to_markdown
-from app.ingest.discover import discover_links, discover_pages, is_skippable, normalize_url, same_domain
+from app.ingest.discover import (
+    RobotsChecker,
+    discover_links,
+    discover_pages,
+    is_skippable,
+    normalize_url,
+    same_domain,
+)
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -118,6 +127,28 @@ def test_split_by_headers_attributes_body_to_the_correct_heading():
         ("Heading1", "body1 text"),
         ("Heading2", "body2 text"),
     ]
+
+
+def test_chunk_overlap_starts_on_a_word_and_is_separated():
+    """Regression: the overlap used to start mid-word and was glued to the next chunk
+    with no separator ("...sauna isThe pool")."""
+    text = "\n\n".join(["alpha " * 249 + "alpha", "BETA " + "beta " * 300])
+    second = chunk_text(text, target_tokens=400)[1]
+    overlap, _, rest = second.partition("\n\n")
+    assert overlap.split()[0] == "alpha"  # whole word, not "pha"
+    assert rest.startswith("BETA")
+
+
+def test_bfs_never_queues_robots_disallowed_links(monkeypatch):
+    """Regression: disallowed links were skipped when fetching the frontier but still
+    added to the crawl list, so crawl_business fetched them anyway (R10)."""
+    html = '<a href="https://x.com/private">p</a><a href="https://x.com/ok">o</a>'
+    monkeypatch.setattr(run, "fetch_text", lambda url, client, timeout=15.0: html)
+    monkeypatch.setattr(run.time, "sleep", lambda s: None)
+    client = SimpleNamespace(_crawl_delay=0)
+    urls, _ = run._expand_by_links("https://x.com/", client, RobotsChecker("User-agent: *\nDisallow: /private\n"), 10, 3)
+    assert "https://x.com/private" not in urls
+    assert "https://x.com/ok" in urls
 
 
 def test_chunk_markdown_on_real_homepage(homepage_markdown: str):
