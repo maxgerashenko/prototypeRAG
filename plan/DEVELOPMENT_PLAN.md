@@ -65,7 +65,7 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 - Gemini used only for comparison (quality of answers and tool calls).
 
 **Steps** — details in the part files
-1. Foundation: `docker-compose.yml` with Postgres/pgvector, Alembic migrations
+1. ✅ Foundation: `docker-compose.yml` with Postgres/pgvector, Alembic migrations
    (`vector`, base tables with `business_id`), FastAPI skeleton, `tenant_session` helper.
 2. Crawler → one real business in Postgres — [01-crawler.md](01-crawler.md).
 3. Index, retrieval, `/chat`, eval questions, debug views — [02-local-rag.md](02-local-rag.md).

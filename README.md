@@ -15,3 +15,17 @@ Detailed plan per part:
 6. [Scale — stage 3](plan/06-scale.md) — many businesses: tenant isolation, onboarding, reliability, cost per business
 
 Working on this repo with Claude Code: see [CLAUDE.md](CLAUDE.md) for the file structure and how architecture discussions are recorded.
+
+## Run locally (stage 1)
+
+Needs Docker and [uv](https://docs.astral.sh/uv/) (`brew install uv`).
+
+```bash
+cp .env.example .env
+docker compose up -d --wait       # Postgres 16 + pgvector, the only container
+uv sync                           # Python 3.12 venv + dependencies
+uv run alembic upgrade head       # create tables
+uv run uvicorn app.main:app --reload   # http://localhost:8000/health
+uv run pytest                     # foundation tests (need the DB running)
+docker compose exec postgres psql -U app -d app   # look at the data
+```

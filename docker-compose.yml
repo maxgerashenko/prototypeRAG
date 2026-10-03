@@ -1,0 +1,24 @@
+# Stage 1: only Postgres + pgvector runs in Docker (DEC-28).
+# App, crawler and LM Studio run natively. At stage-1 exit: + api + crawler services.
+name: prototyperag   # Compose project names must be lowercase
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: prototypeRAG-postgres
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  pgdata:

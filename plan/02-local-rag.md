@@ -54,7 +54,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 businesses       (id, name, website, timezone, phone_numbers, settings jsonb)
 business_profile (business_id, name, address, phone, opening_hours jsonb, place_id, ...)  -- from Part 1
 pages            (id, business_id, url, title, markdown, content_hash, scraped_at)
-chunks           (id, business_id, page_id, kind, section_heading, text,
+chunks           (id, business_id, page_id, custom_reply_id, kind, chunk_index, section_heading, text,
                   embedding vector(768), embed_model, tsv tsvector GENERATED, content_hash)
 custom_replies   (id, business_id, question, answer)          -- owner overrides, also chunked (kind='custom_reply')
 conversations    (id, business_id, channel, started_at, ...)
@@ -62,6 +62,10 @@ messages         (id, business_id, conversation_id, role, content, created_at)
 ```
 
 - `kind`: `scraped | custom_reply` (no reviews — Places terms, R9).
+- Child rows reference parents by `(business_id, id)` composite foreign keys, so a chunk
+  or message can never point at another business's row (DB-enforced already in stage 1).
+- `tsv` uses the `simple` text-search config (no stemming): sites and callers may use any
+  language. Revisit if keyword recall is weak for one language.
 - Every table has `business_id`; isolation is enforced by Postgres Row-Level Security
   (see [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) R18).
 - Every query filters by `business_id`. A business has hundreds to a few thousand chunks,
@@ -144,11 +148,12 @@ docker-compose.yml, Dockerfile, .env.example
 
 ## Tasks
 
-- [ ] `docker-compose.yml` (pgvector Postgres) + LM Studio setup notes (models, server, `lms` CLI)
+- [x] `docker-compose.yml` (pgvector Postgres)
+- [ ] LM Studio setup notes (models, server, `lms` CLI)
 - [ ] Model comparison on the eval: Qwen3-30B-A3B vs Gemma 3 27B vs Gemini Flash (quality, tool calls, time to first token, tokens/s)
 - [ ] Config + `llm.py` (OpenAI-compatible client)
-- [ ] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
-- [ ] `tenant_session(business_id)` helper — all queries go through it
+- [x] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
+- [x] `tenant_session(business_id)` helper — all queries go through it
 - (stage 3: RLS policies, `app_user` role, isolation tests — [06-scale.md](06-scale.md))
 - [ ] Indexer: embed chunks missing an embedding or with a different `embed_model`
 - [ ] Retrieval: vector search → add keyword search → rank fusion
