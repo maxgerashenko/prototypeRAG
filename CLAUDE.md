@@ -10,7 +10,7 @@ Built in three learning stages (DEC-27): **1 Local** — understand the principl
 businesses, safety, reliability, price. Each stage uses the simplest solution that reaches
 its goal; harder problems are deferred to the stage where they become real.
 
-The project is currently in the **planning stage** — no application code yet.
+Stage 1 build is in progress — see the build order in `DECISIONS.md` for what exists.
 
 ## Plan files (`plan/`, flat — no subfolders)
 
@@ -70,6 +70,26 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
 - When recording a decision or open question, say which stage it belongs to.
 - Priority when goals conflict: correctness & legal > caller experience > multi-tenancy >
   same tech local/cloud > simplicity > cost > local first.
+
+## Delegating commands to the local model
+
+For **write git** (add/commit/branch), **read-only database** (SELECT, `\d`, `\dt`) and
+**write database** (INSERT/UPDATE/DELETE) commands on this repo: draft the command with
+the user's local LM Studio model instead of drafting it yourself, then run the result.
+Read-only git (status/log/diff/show) is not in scope — draft those directly as usual.
+
+1. Check which model is actually loaded: `lms ps` (`/v1/models` also lists
+   available-but-unloaded models, which fail to load on demand if others already fill
+   memory).
+2. **Ask the user before delegating each specific task** — this is a standing workflow,
+   not permission to go silent; confirm per task, every session.
+3. Draft via `python3 .claude/tools/delegate.py "<task in plain English>" [model-id]`
+   (pass `model-id` when the loaded model differs from the script's default). It talks
+   to LM Studio at `http://localhost:1234/v1` and prints one command, or a line starting
+   `REFUSE:` if the task was destructive/ambiguous.
+4. Run the printed command yourself — review it first like any other command; a local
+   model drafting it doesn't exempt it from the usual checks before destructive ops.
+   Execute it directly without re-pasting the draft back to the user first.
 
 ## Writing style for plan files
 
