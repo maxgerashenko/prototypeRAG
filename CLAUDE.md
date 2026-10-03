@@ -100,6 +100,36 @@ Read-only git (status/log/diff/show) is not in scope — draft those directly as
    model drafting it doesn't exempt it from the usual checks before destructive ops.
    Execute it directly without re-pasting the draft back to the user first.
 
+## Delegating whole-file code drafts
+
+A bigger scope than the command delegation above: drafting a whole Python module from
+a written spec, for the agent to then review, test, and fix before accepting. This was
+first used ad hoc for `app/ingest/*.py` (stage 1 step 2) and is now a standing choice,
+not a one-off.
+
+- **Model: `qwen/qwen3.6-35b-a3b`, thinking left ON** (don't pass
+  `enable_thinking=False`) — not `qwen3-coder-next` despite its name. Validated
+  head-to-head on `app/ingest/discover.py`'s spec: the non-thinking coder model wrote
+  `same_domain()` using `str.lstrip('www.')` as if it stripped a prefix (it strips a
+  character set, silently wrong on domains like `wonderful.com`); the thinking-enabled
+  run reasoned through the same trap explicitly in its `reasoning_content` and avoided
+  it, with zero bugs found on review. Reasoning is why: `qwen3-coder-next`'s benchmark
+  strength comes from agentic RL with *execution* feedback (edit → run → see failure →
+  retry), which this single-shot, no-tool-loop delegation never exercises; thinking
+  substitutes for that missing feedback loop. It also matches DEC-29/`02-local-rag.md`'s
+  existing rule that reasoning is fine for offline, non-latency-critical jobs — this is
+  one. Re-check this choice if it stops holding up on later files; one head-to-head
+  isn't proof for every case.
+- `qwen/qwen3.6-35b-a3b` is ~27 GB resident — check `lms ps` first and unload other
+  models to fit it (same memory-budget note as DEC-29's 64 GB Mac).
+- Draft via `python3 .claude/tools/delegate_code.py <spec_file> [model-id]` — prints
+  the module source only (the model's `reasoning_content` isn't surfaced by this
+  script; read it directly via the `openai` client if you want to inspect it for a
+  specific draft).
+- **Still review and test every draft against something real** before accepting it —
+  fixtures, a live DB, or the actual target site, matching the workflow used in stage 1
+  step 2. A good reasoning trace lowers the bug rate; it doesn't replace verification.
+
 ## Ask before submitting
 
 Any agent working in this repo (Claude Code or otherwise) must ask for explicit
