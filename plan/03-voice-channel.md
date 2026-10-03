@@ -30,7 +30,7 @@ Caller ──PSTN──► Twilio number
 | Step | Local | Cloud |
 |---|---|---|
 | Telephony | Twilio trial number + **ngrok** tunnel to local API | Twilio → Cloud Run URL |
-| VAD | Silero VAD / webrtcvad (small library inside the app) | same |
+| VAD | webrtcvad (`webrtcvad-wheels`; Silero would add onnxruntime — not needed in stage 1) | same |
 | Speech-to-Text | **Google Speech-to-Text** (streaming), called from the laptop | same |
 | Text-to-Speech | **Google Text-to-Speech** (Neural2/Chirp voices), called from the laptop | same |
 | All-in-one alternative | **Gemini Live API** (audio in → audio out, with tool calling) | same |
@@ -118,16 +118,17 @@ web/mic-test.html    browser mic test client
 
 ## Tasks
 
-- [ ] Audio utilities (μ-law/PCM, resampling) + tests
+- [x] Audio utilities (μ-law/PCM, resampling) + tests
 - [ ] Google STT/TTS streaming (local auth via gcloud ADC)
 - [ ] Local mic test mode end-to-end with Part 2 RAG
 - [ ] Twilio webhook + TwiML + media stream WebSocket
-- [ ] VAD, turn-taking, barge-in
+- [x] VAD (`TurnDetector`, tested on real speech)
+- [ ] Turn-taking, barge-in in the call loop
 - [ ] Phone number → business_id mapping from Postgres
 - [ ] Call transfer + take-a-message fallback
 - [ ] Save transcript at call end; summary runs in the Twilio status callback (DEC-24)
 - [ ] Measure latency per stage and log it per turn
-- [ ] `search_business_info` tool + shared tool definitions (used by both modes)
+- [x] `search_business_info` tool + shared tool definitions (used by both modes)
 - [ ] Stage 2: Live mode spike on Cloud Run; compare with pipeline mode (OPEN-08)
 
 ## Notes
