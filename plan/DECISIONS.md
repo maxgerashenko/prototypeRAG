@@ -92,7 +92,8 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-28 | Stage-1 runtime | Only Postgres in Docker; app, crawler, LM Studio native; containerize at stage-1 exit | 1 | ✅ |
 | DEC-29 | Local LLM runtime | LM Studio on the 64 GB Mac; 20–32B-class instruct models; fast MoE for voice | 1 | ✅ |
 | DEC-31 | Stage-1 pilot business | Bathhouse Williamsburg (abathhouse.com) — spa/sauna, appointment+membership-based | 1 | ✅ |
-| DEC-30 | Models for voice, aligned with cloud | Two voice modes, shared tools (RAG = `search_business_info` tool); local Qwen3-30B-A3B (thinking off) + Gemma 3 27B comparison; cloud Gemini Flash (pipeline) vs Gemini Live, decided in stage 2 | 1 · 2 | 🔄 (OPEN-08) |
+| DEC-30 | Models for voice, aligned with cloud | Two voice modes, shared tools (RAG = `search_business_info` tool); local model pick **superseded by DEC-32**; cloud Gemini Flash (pipeline) vs Gemini Live, decided in stage 2 | 1 · 2 | 🔄 (OPEN-08) |
+| DEC-32 | Local models split by role | `google/gemma-4-12b` for chat/voice; `qwen/qwen3.6-35b-a3b` (thinking on) for code-drafting delegation — both fit in memory together | 1 | ✅ |
 
 ---
 
@@ -237,17 +238,47 @@ Key design: **RAG is a tool** (`search_business_info`) alongside the action tool
 business profile is always in the system instruction → the same definitions serve
 pipeline mode (OpenAI-compatible tools) and Live mode (function calling).
 
-Local model (stands in for Gemini Flash in pipeline mode):
+Local model (stands in for Gemini Flash in pipeline mode) — kept for history;
+**superseded by DEC-32**, which replaces this pick after an eval. The voice
+architecture above (pipeline mode, RAG as a shared tool) is unaffected and still stands.
 
 | Model | Why | Verdict |
 |---|---|---|
-| **Qwen3-30B-A3B** (or current successor), thinking off | MoE → fast first token; strong native tool calling; multilingual | ✅ primary |
-| Gemma 3 27B | Gemini's open relative — answer style closest to production | ✅ comparison (weaker tools, slower) |
-| gpt-oss-20b, low reasoning effort | Fast, good tools | optional |
+| Qwen3-30B-A3B (or current successor), thinking off | MoE → fast first token; strong native tool calling; multilingual | ❌ superseded by DEC-32 |
+| Gemma 3 27B | Gemini's open relative — answer style closest to production | ❌ superseded by DEC-32 |
+| gpt-oss-20b, low reasoning effort | Fast, good tools | ❌ superseded by DEC-32 |
 | Dense 70B (4-bit) | Quality ceiling | ❌ too slow for voice |
 
 Cloud model: Gemini Flash with thinking off for pipeline mode; Gemini Live native-audio
 model for Live mode (current model names at deploy time). Final choice of mode: OPEN-08.
+
+### DEC-32 — Local models split by role (supersedes DEC-30's local-model pick, resolves OPEN-06)
+
+Context: DEC-30 picked Qwen3-30B-A3B as the primary local chat/voice model, pending an
+eval (OPEN-06). Separately, `qwen/qwen3.6-35b-a3b` (thinking on) was already chosen for
+whole-file code-drafting delegation, validated head-to-head against `qwen3-coder-next`
+(CLAUDE.md). A later >20B-model coding benchmark (known traps: lstrip bug, header
+attribution, `select().delete()`, missing `from_attributes`, async handlers) confirmed
+qwen3.6-35b-a3b remains the strongest local coder but still fails real traps that
+Claude (Sonnet 5 / Opus 5.5) passes cleanly — local models stay the coding delegate for
+cost/learning reasons (DEC-29), not because they match Claude's correctness.
+
+That left chat/voice's model choice still open. `google/gemma-4-12b` was evaluated
+against the stage-1 pilot business (`tests/eval/bathhouse.yaml`, 7 questions):
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **gemma-4-12b** | 9.76 GB resident — fits in memory alongside qwen3.6-35b-a3b (29.09 GB) + the embedding model (0.08 GB) ≈ 38.9 GB total, no unload/reload switching roles; 7/7 on the bathhouse eval, correctly refuses out-of-scope questions | Per-turn latency ~10–17s warm, not yet voice-ready; weaker tool-calling than Qwen3 per DEC-30's original note (untested here — stage 1 doesn't exercise tool calls yet) | ✅ chat/voice |
+| qwen3.6-35b-a3b for both roles | One model, nothing to switch | Also 7/7 on the same eval but no faster (9.7–42s/question, noisy); would force unload/reload between an app request and a code-drafting delegation | ❌ |
+| Qwen3-30B-A3B (DEC-30 original primary) | Native tool calling, MoE speed | Never head-to-head eval'd for chat specifically; superseded in `.env` already by the 3.6-35b-a3b family | ❌ superseded |
+| Gemma 3 27B (DEC-30 comparison) | Closest to Gemini's style | Larger, no eval run; gemma-4-12b is the newer/smaller model in the same family | ❌ superseded |
+
+Decision: **`google/gemma-4-12b` for chat/voice** (`.env`'s `LLM_MODEL`); **`qwen/qwen3.6-35b-a3b` (thinking on) stays the code-drafting delegate** (`.claude/tools/delegate_code.py`'s own default, independent of `.env`). Both loaded together on the 64 GB Mac, ~38.9 GB combined — well under the GPU memory budget noted in DEC-29.
+
+Not solved by this decision: per-turn latency for *both* models is 10–20s, far from
+natural phone-call pacing (~2–3s). That's a separate problem for the voice step
+(`04-actions.md`) — prompt size, context length, and streaming TTS overlap — not fixed
+by picking a smaller chat model.
 
 ### DEC-07 — Cloud LLM
 
@@ -439,7 +470,6 @@ Grouped by the stage in which the answer is needed.
 | OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
 | OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
-| OPEN-06 | 1 | Confirm local models | Primary Qwen3-30B-A3B · Gemma 3 27B · gpt-oss-20b (DEC-30) | Eval: quality, tool calls, time to first token, tokens/s |
 | OPEN-02 | 2 | Target country / region | EU (`europe-west1`) · US (`us-central1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |

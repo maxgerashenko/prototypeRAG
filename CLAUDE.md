@@ -70,8 +70,10 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
 - Google Speech APIs for STT/TTS, also locally. Native Google SDKs only in the voice module.
 - Voice: pipeline mode (STT → LLM → TTS) locally and in cloud; Gemini Live compared in
   stage 2. RAG is a tool (`search_business_info`) shared by both modes (DEC-30).
-- Local models in LM Studio (64 GB Mac): Qwen3-30B-A3B primary, Gemma 3 27B comparison,
-  thinking off for chat/voice.
+- Local models in LM Studio (64 GB Mac), split by role so both fit in memory at once
+  (DEC-32): `google/gemma-4-12b` for chat/voice LLM calls (`.env`'s `LLM_MODEL`);
+  `qwen/qwen3.6-35b-a3b` (thinking on) for whole-file code-drafting delegation — see
+  below.
 - Crawled pages and chunks stored in Postgres, not files. Crawler in its own Docker image.
 - Cloud Run + Cloud Run Jobs; Neon free tier in stage 2; Neon paid vs Cloud SQL in stage 3.
 - Stage 1: only Postgres in Docker, app/crawler/LM Studio native (DEC-28). `business_id`

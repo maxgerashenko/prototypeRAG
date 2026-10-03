@@ -32,11 +32,13 @@ Models (via LM Studio, 64 GB Mac — DEC-29):
   Chosen with the cloud target in mind (DEC-30) — the local model stands in for **Gemini
   Flash in pipeline mode**, so it must be fast, good at native tool calling and follow
   short spoken-style instructions:
-  - **Primary: Qwen3-30B-A3B** (or its current successor) — mixture-of-experts, few
-    active parameters → fast; native tool calling; multilingual. Run with **thinking off**.
-  - **Google-family comparison: Gemma 3 27B** — closest open relative of Gemini for
-    answer style; weaker tool calling (no dedicated tool-call format), slower (dense).
-  - Optional: gpt-oss-20b (fast, good tools; reasoning effort low).
+  - **Chat/voice: `google/gemma-4-12b`** (DEC-32) — small enough (9.76 GB) to stay
+    loaded alongside the code-drafting model below; 7/7 on the bathhouse RAG eval.
+    Tool-calling untested so far (stage 1 doesn't exercise tool calls yet) — recheck
+    before relying on it for the action tools in `04-actions.md`.
+  - Superseded picks (DEC-30's original eval list, kept for history — see DEC-32):
+    Qwen3-30B-A3B (MoE, native tool calling), Gemma 3 27B (Gemini's open relative,
+    weaker tool calling), gpt-oss-20b.
   - 70B at 4-bit fits (~40 GB) but is too slow for voice — not used.
   - Voice in/out stays with Google Speech locally; local native-audio models are not
     used (R21). Model names are examples; check the current LM Studio catalog.
@@ -150,7 +152,7 @@ docker-compose.yml, Dockerfile, .env.example
 
 - [x] `docker-compose.yml` (pgvector Postgres)
 - [ ] LM Studio setup notes (models, server, `lms` CLI)
-- [ ] Model comparison on the eval: Qwen3-30B-A3B vs Gemma 3 27B vs Gemini Flash (quality, tool calls, time to first token, tokens/s)
+- [x] Model comparison on the eval: gemma-4-12b vs qwen3.6-35b-a3b, both 7/7 on `tests/eval/bathhouse.yaml` (DEC-32); Gemini Flash comparison still open
 - [x] Config + `llm.py` (OpenAI-compatible client, built in step 2; `chat`/`chat_json`/`embed`)
 - [x] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
 - [x] `tenant_session(business_id)` helper — all queries go through it
