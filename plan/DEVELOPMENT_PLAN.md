@@ -68,7 +68,7 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 1. ✅ Foundation: `docker-compose.yml` with Postgres/pgvector, Alembic migrations
    (`vector`, base tables with `business_id`), FastAPI skeleton, `tenant_session` helper.
 2. ✅ Crawler → one real business in Postgres — [01-crawler.md](01-crawler.md).
-3. Index, retrieval, `/chat`, eval questions, debug views — [02-local-rag.md](02-local-rag.md).
+3. ✅ Index, retrieval, `/chat`, eval questions, debug views — [02-local-rag.md](02-local-rag.md).
 4. Voice: mic test mode, then Twilio + ngrok — [03-voice-channel.md](03-voice-channel.md).
 5. Actions: tool calling, internal bookings, summaries, minimal dashboard (no login) —
    [04-actions.md](04-actions.md).

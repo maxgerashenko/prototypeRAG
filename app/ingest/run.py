@@ -98,7 +98,12 @@ def crawl_business(
 
                 with tenant_session(business_id) as session:
                     page, changed = upsert_page(session, business_id, url, title, markdown, hash_)
-                    replace_chunks(session, business_id, page.id, chunk_markdown(markdown))
+                    # only re-chunk (and wipe embeddings back to NULL) when content actually
+                    # changed -- plan/01-crawler.md step 7: "only re-chunk/re-embed changed
+                    # pages". Calling this unconditionally silently de-indexes every page on
+                    # every re-crawl, even a no-op one, with no error to notice it by.
+                    if changed:
+                        replace_chunks(session, business_id, page.id, chunk_markdown(markdown))
 
                 if changed:
                     pages_changed += 1

@@ -151,21 +151,26 @@ docker-compose.yml, Dockerfile, .env.example
 - [x] `docker-compose.yml` (pgvector Postgres)
 - [ ] LM Studio setup notes (models, server, `lms` CLI)
 - [ ] Model comparison on the eval: Qwen3-30B-A3B vs Gemma 3 27B vs Gemini Flash (quality, tool calls, time to first token, tokens/s)
-- [ ] Config + `llm.py` (OpenAI-compatible client)
+- [x] Config + `llm.py` (OpenAI-compatible client, built in step 2; `chat`/`chat_json`/`embed`)
 - [x] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
 - [x] `tenant_session(business_id)` helper — all queries go through it
 - (stage 3: RLS policies, `app_user` role, isolation tests — [06-scale.md](06-scale.md))
-- [ ] Indexer: embed chunks missing an embedding or with a different `embed_model`
-- [ ] Retrieval: vector search → add keyword search → rank fusion
-- [ ] Prompt builder + answer pipeline with streaming
-- [ ] `/chat` endpoint with conversation history
-- [ ] Debug retrieval endpoint + chat page showing sources
-- [ ] Custom replies CRUD + indexing
-- [ ] Eval script: run test questions, check expected facts appear, report score
+- [x] Indexer: embed chunks missing an embedding or with a different `embed_model` — `rag/index.py`
+- [x] Retrieval: vector search → add keyword search → rank fusion — `rag/retrieve.py`
+- [x] Prompt builder + answer pipeline with streaming — `rag/prompt.py`, `rag/answer.py`
+- [x] `/chat` endpoint with conversation history — `api/chat.py`
+- [x] Debug retrieval endpoint + chat page showing sources — `api/chat.py`'s `/debug/retrieve`, `web/chat.html`
+- [x] Custom replies CRUD + indexing — `api/custom_replies.py`
+- [x] Eval script: run test questions, check expected facts appear, report score — `rag/eval.py`
 - [ ] Run the eval with Gemini (only env vars changed) and compare to the local model
 
 ## Notes
 
+- Stage-1 "done when" criteria met (2026-10-03): `POST /chat` answers eval questions
+  correctly (7/7 on `tests/eval/bathhouse.yaml`), correctly refuses out-of-scope
+  questions, and every step is inspectable (`/debug/retrieve`, `psql`, `web/chat.html`'s
+  sources panel). Model comparison (Gemma, Gemini) and `Dockerfile`/LM Studio setup
+  notes are the only tasks left open for this part.
 - Measure retrieval separately from generation: for each eval question, check that the
   right chunk is in the top 5 before tuning prompts.
 - Changing the embedding model means re-embedding all chunks; the indexer handles it

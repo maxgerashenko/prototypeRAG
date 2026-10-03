@@ -1,0 +1,25 @@
+# Eval questions for the stage-1 pilot business (DEC-31: Bathhouse Williamsburg).
+# expected_facts: substrings (case-insensitive) that must appear somewhere in the
+# answer. "in_knowledge_base: false" marks a question the answer should NOT know —
+# checked by looking for refusal language instead of expected_facts.
+
+- question: "How much does a day pass cost?"
+  expected_facts: ["39"]
+
+- question: "What is the address?"
+  expected_facts: ["103", "10th", "Brooklyn"]
+
+- question: "What is the phone number?"
+  expected_facts: ["929", "489"]
+
+- question: "What is the email address?"
+  expected_facts: ["williamsburg@abathhouse.com"]
+
+- question: "What saunas do you have?"
+  expected_facts: ["sauna"]
+
+- question: "Do you have a rooftop pool?"
+  expected_facts: ["rooftop"]
+
+- question: "Do you offer skydiving lessons?"
+  in_knowledge_base: false
