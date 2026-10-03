@@ -3,8 +3,11 @@
 **Goal:** give the system a business website URL (plus its Google listing) and get back
 clean, chunked knowledge ready to load into the vector database.
 
-**Done when:** `python -m app.ingest.run --url https://example-restaurant.com` produces
+**Done when:** `python -m app.ingest.run --url https://www.abathhouse.com/williamsburg` produces
 Markdown pages, a structured business profile, and chunks for one real business.
+
+Stage-1 test business: Bathhouse Williamsburg (DEC-31) — spa/sauna, Squarespace site,
+server-rendered HTML, `sitemap.xml` present, `robots.txt` permits crawling.
 
 ---
 
@@ -92,15 +95,16 @@ so the API stays small and starts fast (R8, DEC-10). Stage 2: Cloud Run Job + Sc
 
 ## Tasks
 
-- [ ] CLI skeleton (uses tables from the foundation step)
-- [ ] Page discovery (sitemap, links, limits, robots.txt)
-- [ ] Fetch with Crawl4AI, fallback fetcher
-- [ ] Cleaning + Markdown output, check on 3 different real sites
-- [ ] Google Places API client (needs API key; free monthly credit covers testing)
-- [ ] Profile extraction with JSON schema
-- [ ] Chunker + metadata
-- [ ] Change detection for re-crawls
-- [ ] Unit tests on saved HTML fixtures (no network in tests)
+- [x] CLI skeleton (`app/ingest/run.py`)
+- [x] Page discovery (sitemap, links, limits, robots.txt) — `discover.py`
+- [x] Fetch — `fetch.py`, httpx only; Crawl4AI deferred until a JS-heavy site is hit (DEC-27)
+- [x] Cleaning + Markdown output — `clean.py`, checked against the pilot business (DEC-31)
+- [x] Google Places API client — `places.py`, code only; **not live-tested, no API key yet**
+- [x] Profile extraction with JSON schema — `profile.py`, verified against the live local LLM
+- [x] Chunker + metadata — `chunk.py`
+- [x] Change detection for re-crawls — `store.py` (`content_hash` on upsert; full chunk replace per page)
+- [x] Unit tests on saved HTML fixtures (no network in tests) — `tests/test_crawler.py`
+- [ ] Unit tests on 3 different real sites (only the pilot business so far)
 - [ ] Stage-1 exit: `Dockerfile.crawler`
 
 ## Risks / notes

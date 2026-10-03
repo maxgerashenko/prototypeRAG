@@ -1,0 +1,8 @@
+User-agent: *
+Disallow: /config
+Disallow: /search
+Disallow: /account$
+Disallow: /account/
+Disallow: /api/
+Disallow: /static/
+Sitemap: https://www.abathhouse.com/sitemap.xml

@@ -91,11 +91,28 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-27 | Project structure | Three learning stages: local → cloud (one business) → scale | all | ✅ |
 | DEC-28 | Stage-1 runtime | Only Postgres in Docker; app, crawler, LM Studio native; containerize at stage-1 exit | 1 | ✅ |
 | DEC-29 | Local LLM runtime | LM Studio on the 64 GB Mac; 20–32B-class instruct models; fast MoE for voice | 1 | ✅ |
+| DEC-31 | Stage-1 pilot business | Bathhouse Williamsburg (abathhouse.com) — spa/sauna, appointment+membership-based | 1 | ✅ |
 | DEC-30 | Models for voice, aligned with cloud | Two voice modes, shared tools (RAG = `search_business_info` tool); local Qwen3-30B-A3B (thinking off) + Gemma 3 27B comparison; cloud Gemini Flash (pipeline) vs Gemini Live, decided in stage 2 | 1 · 2 | 🔄 (OPEN-08) |
 
 ---
 
 ## 3. Decisions with options
+
+### DEC-31 — Stage-1 pilot business (resolves OPEN-01)
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Bathhouse Williamsburg** (abathhouse.com, NYC spa/sauna) | Real, well-formed site; `robots.txt` explicitly permits crawling (lists `ClaudeBot`/`anthropic-ai` in the same allowed group as everyone else); `sitemap.xml` present; content is server-rendered (plain `httpx` fetch works, no headless browser needed yet) | Appointment/membership model, not strict 1:1 with either OPEN-01 option; no actual business relationship (see caveat) | ✅ |
+| Restaurant with table booking | Matches `04-actions.md`'s first booking backend example | No candidate site picked | ❌ for now |
+
+Reason: unblocks building the crawler now instead of waiting on a real client relationship.
+
+**Caveat (R10, R15):** this is a real third party the project has no relationship with.
+Fine as a **stage-1 technical fixture** — local crawling for learning, data stays in the
+local Postgres, nothing published, no calls or bookings placed against the real
+business. Before any public deployment, Twilio number, or live booking test
+(stage 1 steps 3–4 onward) against a real business, get the owner's written consent
+(R10) — swap in a consenting pilot business at that point if this one hasn't given it.
 
 ### DEC-01 — Tenancy model
 
@@ -419,7 +436,6 @@ Grouped by the stage in which the answer is needed.
 
 | ID | Stage | Question | Options | Depends on / trigger |
 |---|---|---|---|---|
-| OPEN-01 | 1 | Which business type first? | Restaurant (table booking) · appointment-based (salon, clinic) | Access to a real pilot business |
 | OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
 | OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
@@ -434,7 +450,7 @@ Grouped by the stage in which the answer is needed.
 | OPEN-13 | 3 | CI/CD + Terraform timing | When deploys get frequent/risky or >1 person deploys | Stage 2 `deploy.sh` experience |
 | OPEN-14 | 3 | Call recordings | Never · opt-in per business | OPEN-02, legal review |
 | OPEN-15 | 3 | Voice concurrency per instance | 10 · 20 · 40 … | Load test with real call audio (DEC-25) |
-| OPEN-16 | 3 | Dedicated database for some businesses? | No — everything in one shared DB · a full cell (Cloud Run + DB) per region · dedicated DB for a business that requires it by contract | Clients in a second region (OPEN-02, R16); regulated clients, e.g. clinics with health data (OPEN-01); a business whose traffic slows others |
+| OPEN-16 | 3 | Dedicated database for some businesses? | No — everything in one shared DB · a full cell (Cloud Run + DB) per region · dedicated DB for a business that requires it by contract | Clients in a second region (OPEN-02, R16); a future clinic/health client with stricter data rules; a business whose traffic slows others |
 ---
 
 ## 5. Knowledge from the discussion (facts behind decisions)
@@ -452,7 +468,7 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Cloud Run concurrency | Default 80 requests per instance (max 1000, not 250); voice needs a lower, load-tested value | DEC-25 |
 | Neon pooler | Separate `-pooler` hostname, PgBouncer transaction mode; `SET LOCAL` works, session `SET` doesn't; migrations use the direct connection | R20 |
 | One database per business | A Postgres database lives in one region; data residency forces a split **per region**, not per business. Scale-to-zero makes idle per-business DBs cheap but adds a wake-up (R3) to more first calls | DEC-04, OPEN-16 |
-| Health data | Clinic appointments can reveal health information → special category under GDPR Art. 9 (HIPAA in the US) → stricter contracts may demand a dedicated database or region | OPEN-01, OPEN-16 |
+| Health data | Clinic appointments can reveal health information → special category under GDPR Art. 9 (HIPAA in the US) → stricter contracts may demand a dedicated database or region | OPEN-16 |
 | Places "30-day cache" | Google's 30-day allowance applies to lat/lng, not to Places content in general; only `place_id` may be stored indefinitely | DEC-11 |
 | Async DB lookup in the webhook (Gemini) | Unneeded — the lookup runs while the caller hears ringing (DEC-17) | DEC-17 |
 | Neon wake time | Doesn't depend on data size (tenant pattern doesn't change it) | DEC-04, DEC-17 |

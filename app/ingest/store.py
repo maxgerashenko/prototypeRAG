@@ -1,0 +1,73 @@
+"""Write pages and chunks to Postgres (plan/01-crawler.md step 6 "Save").
+
+Every function here takes an already-open `session` — the caller (`run.py`) wraps a
+whole crawl in one `tenant_session(business_id)` transaction.
+"""
+
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from app.db.models import Chunk, Page
+from app.ingest.chunk import ChunkDraft
+from app.ingest.clean import content_hash as sha256_hash
+
+
+def upsert_page(
+    session: Session,
+    business_id: uuid.UUID,
+    url: str,
+    title: str | None,
+    markdown: str,
+    content_hash: str,
+) -> tuple[Page, bool]:
+    """Insert or update the page by (business_id, url). Returns (page, changed)."""
+    existing = session.scalars(select(Page).where(Page.business_id == business_id, Page.url == url)).first()
+
+    if existing is None:
+        page = Page(business_id=business_id, url=url, title=title, markdown=markdown, content_hash=content_hash)
+        session.add(page)
+        session.flush()
+        return page, True
+
+    if existing.content_hash == content_hash:
+        return existing, False
+
+    existing.title = title
+    existing.markdown = markdown
+    existing.content_hash = content_hash
+    existing.scraped_at = datetime.now(UTC)
+    session.flush()
+    return existing, True
+
+
+def replace_chunks(session: Session, business_id: uuid.UUID, page_id: uuid.UUID, drafts: list[ChunkDraft]) -> None:
+    """Full replace of this page's scraped chunks — simplest correct approach for step 2."""
+    session.execute(
+        delete(Chunk).where(Chunk.business_id == business_id, Chunk.page_id == page_id, Chunk.kind == "scraped")
+    )
+    for draft in drafts:
+        session.add(
+            Chunk(
+                business_id=business_id,
+                page_id=page_id,
+                kind="scraped",
+                chunk_index=draft.chunk_index,
+                section_heading=draft.section_heading,
+                text=draft.text,
+                embedding=None,
+                embed_model=None,
+                content_hash=sha256_hash(draft.text),
+            )
+        )
+    session.flush()
+
+
+def delete_pages_not_in(session: Session, business_id: uuid.UUID, keep_urls: list[str]) -> int:
+    """Delete pages that disappeared from the site (step 7 "Refresh"); cascades to their chunks."""
+    result = session.execute(
+        delete(Page).where(Page.business_id == business_id, Page.url.not_in(keep_urls))
+    )
+    return result.rowcount

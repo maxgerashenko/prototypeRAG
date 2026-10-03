@@ -11,12 +11,16 @@ dependencies = [
     "pgvector>=0.3",
     "alembic>=1.13",
     "pydantic-settings>=2.4",
+    "openai>=1.40",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "markdownify>=0.13",
+    "pypdf>=4.3",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "httpx>=0.27",
 ]
 
 [tool.pytest.ini_options]
