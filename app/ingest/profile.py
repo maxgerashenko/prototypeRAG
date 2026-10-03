@@ -41,7 +41,10 @@ def extract_profile_from_text(pages_markdown: list[str], business_name_hint: str
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_message},
     ]
-    return chat_json(messages, PROFILE_SCHEMA, "business_profile")
+    result = chat_json(messages, PROFILE_SCHEMA, "business_profile")
+    # some models write the literal string "null" instead of JSON null for an unstated
+    # field (seen with qwen3.6-35b-a3b) -- treat it the same as real null.
+    return {k: (None if isinstance(v, str) and v.strip().lower() == "null" else v) for k, v in result.items()}
 
 
 def merge_profile(extracted: dict, place_id: str | None) -> dict:

@@ -47,4 +47,9 @@ def chat_json(messages: list[dict], schema: dict, schema_name: str = "result") -
             "json_schema": {"name": schema_name, "schema": schema, "strict": True},
         },
     )
-    return json.loads(response.choices[0].message.content)
+    message = response.choices[0].message
+    # Some thinking-enabled models (e.g. qwen3.6-35b-a3b) emit the schema-conforming
+    # JSON into reasoning_content and leave content empty when combined with
+    # response_format=json_schema -- fall back to it rather than fail the whole call.
+    content = message.content or getattr(message, "reasoning_content", None) or ""
+    return json.loads(content)
