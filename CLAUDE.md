@@ -91,6 +91,15 @@ Read-only git (status/log/diff/show) is not in scope — draft those directly as
    model drafting it doesn't exempt it from the usual checks before destructive ops.
    Execute it directly without re-pasting the draft back to the user first.
 
+## Ask before submitting
+
+Any agent working in this repo (Claude Code or otherwise) must ask for explicit
+confirmation before submitting a change — `git commit`, `git push`, or opening a pull
+request — even when the task that produced the change clearly implied it should be
+saved. Finishing the work and submitting it are two separate steps: say what would be
+committed (files touched, one-line summary) and wait for a yes before running the
+command. This holds every time, not just the first time in a session.
+
 ## Writing style for plan files
 
 - English, concise, tables for comparisons, checklists (`- [ ]`) for tasks.
