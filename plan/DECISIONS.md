@@ -65,7 +65,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-01 | Tenancy model | One deployment, many businesses (`business_id`) | 1 | ✅ |
 | DEC-02 | Vector store | Postgres + pgvector (one DB for everything) | 1 | ✅ |
 | DEC-03 | Cloud DB hosting | Neon free tier in stage 2; Neon paid vs Cloud SQL decided in stage 3 | 2 → 3 | 🔄 |
-| DEC-04 | Tenant isolation | Shared tables + `business_id` (stage 1) + Row-Level Security (stage 3, before 2nd business) | 1 (model) · 3 (RLS) | ✅ |
+| DEC-04 | Tenant isolation | One shared database: shared tables + `business_id` (stage 1) + Row-Level Security (stage 3, before 2nd business); dedicated database only as a per-region cell (OPEN-16) | 1 (model) · 3 (RLS) | ✅ |
 | DEC-05 | LLM interface | `openai` client against OpenAI-compatible endpoints | 1 | ✅ |
 | DEC-06 | Local LLM runtime | ~~Ollama~~ — **Superseded by DEC-29** | 1 | — |
 | DEC-07 | Cloud LLM | Gemini Flash, paid key, Gemini API first | 1 (compare) · 2 | 🔄 |
@@ -138,8 +138,21 @@ Move = `pg_dump`/restore + new `DATABASE_URL`.
 | Shared tables, app filter only | Simplest | One missing `WHERE` leaks data | ❌ |
 | Schema per business | Strong isolation, easy tenant drop | Migrations × N; catalog bloat; harder cross-tenant admin | ❌ |
 | Database per business | Strongest isolation | Cost and ops per business | ❌ |
+| Database per business on scale-to-zero Postgres (e.g. Neon project per business) | Idle databases cost ~nothing; strong isolation; easy per-business delete/export | Each low-traffic DB is idle more often → the wake-up (R3) hits many more first calls; migrations × N; a connection pool per business DB in every Cloud Run instance; cost-per-business and admin queries need fan-out; onboarding = creating infrastructure (breaks D6, W7) | ❌ |
+| Shared by default + a full **cell** (Cloud Run + DB) per region, only when needed | Meets data residency / contract demands without per-business infra; inside a cell nothing changes | Second deployment to operate; routing phone number/business → cell | 🔄 stage 3, OPEN-16 |
 
 Implementation: see R18 in [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md).
+
+Re-checked 2026-10-03 (after the foundation was built): the shared database is confirmed.
+At our scale (hundreds–thousands of chunks per business) a shared Postgres has no
+performance reason to split. Isolation is enforced in layers: `tenant_session` (stage 1),
+composite `(business_id, id)` foreign keys (stage 1, so a chunk or message can't point at
+another business's row), and RLS (stage 3). Separate **environments** (dev / staging /
+prod, stage 3) are a different topic: they separate code versions, not clients.
+The only real reasons for a separate database are region and contracts → handled as a
+cell per region, not a database per business (OPEN-16). `tenant_session` is the single
+entry point to the database, so routing to another cell can be added there later
+without a code rewrite. Nothing is pre-built for it.
 
 Timing (DEC-27): `business_id` on every table and the `tenant_session` helper from
 stage 1 (cheap, avoids a painful data migration later); RLS policies + `app_user` role
@@ -421,6 +434,7 @@ Grouped by the stage in which the answer is needed.
 | OPEN-13 | 3 | CI/CD + Terraform timing | When deploys get frequent/risky or >1 person deploys | Stage 2 `deploy.sh` experience |
 | OPEN-14 | 3 | Call recordings | Never · opt-in per business | OPEN-02, legal review |
 | OPEN-15 | 3 | Voice concurrency per instance | 10 · 20 · 40 … | Load test with real call audio (DEC-25) |
+| OPEN-16 | 3 | Dedicated database for some businesses? | No — everything in one shared DB · a full cell (Cloud Run + DB) per region · dedicated DB for a business that requires it by contract | Clients in a second region (OPEN-02, R16); regulated clients, e.g. clinics with health data (OPEN-01); a business whose traffic slows others |
 ---
 
 ## 5. Knowledge from the discussion (facts behind decisions)
@@ -437,6 +451,8 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Cloud Run CPU | With request-based billing CPU is throttled when no request is active; an open WebSocket counts as active — so "CPU always allocated" doesn't fix streaming | DEC-16, DEC-24, DEC-25 |
 | Cloud Run concurrency | Default 80 requests per instance (max 1000, not 250); voice needs a lower, load-tested value | DEC-25 |
 | Neon pooler | Separate `-pooler` hostname, PgBouncer transaction mode; `SET LOCAL` works, session `SET` doesn't; migrations use the direct connection | R20 |
+| One database per business | A Postgres database lives in one region; data residency forces a split **per region**, not per business. Scale-to-zero makes idle per-business DBs cheap but adds a wake-up (R3) to more first calls | DEC-04, OPEN-16 |
+| Health data | Clinic appointments can reveal health information → special category under GDPR Art. 9 (HIPAA in the US) → stricter contracts may demand a dedicated database or region | OPEN-01, OPEN-16 |
 | Places "30-day cache" | Google's 30-day allowance applies to lat/lng, not to Places content in general; only `place_id` may be stored indefinitely | DEC-11 |
 | Async DB lookup in the webhook (Gemini) | Unneeded — the lookup runs while the caller hears ringing (DEC-17) | DEC-17 |
 | Neon wake time | Doesn't depend on data size (tenant pattern doesn't change it) | DEC-04, DEC-17 |

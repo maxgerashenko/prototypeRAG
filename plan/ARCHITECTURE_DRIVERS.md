@@ -217,7 +217,9 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Breaks: simplicity (D4) — needs an enforcement layer.
 - Decision: **shared tables with a `business_id` column + Postgres Row-Level Security**.
   Rejected: schema per business — every migration runs N times, catalog bloat with
-  hundreds of schemas, and cross-business admin queries get harder.
+  hundreds of schemas, and cross-business admin queries get harder. Database per
+  business (also on scale-to-zero Postgres) rejected for the reasons in DEC-04; a second
+  region becomes a second cell, not a database per business (OPEN-16).
 - How RLS is applied:
   - App connects as a non-owner role (`app_user`); tables use `ENABLE` + `FORCE ROW LEVEL SECURITY`.
   - Policy: `business_id = current_setting('app.business_id')::uuid`.

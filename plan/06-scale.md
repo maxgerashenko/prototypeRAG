@@ -27,6 +27,8 @@ Trigger: second business. Decision: DEC-04, restriction R18.
 - No code rewrite: queries already run through `tenant_session(business_id)` since stage 1.
 - Tests: business A can never read or write business B's rows (API, voice, actions,
   dashboard, crawler).
+- One shared database stays the default (DEC-04, re-checked). A second database only as
+  a **cell per region** (Cloud Run + DB) or for a contract that requires it — OPEN-16.
 
 ## 2. Onboarding without code
 
@@ -104,6 +106,7 @@ Trigger: cost per business (§3) too close to the price.
 Trigger: first business in a regulated market / before go-live.
 
 - Region by target market (OPEN-02): Cloud Run, database, Gemini/Vertex (OPEN-07).
+  Clients in a second region → second cell, not a database per business (OPEN-16).
 - Retention policy + scheduled cleanup of transcripts and personal data; deletion on request (R16).
 - Recordings: opt-in per business with disclosure (DEC-22, OPEN-14, R15).
 - Calendar OAuth tokens encrypted, key in Secret Manager (R14).
