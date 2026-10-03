@@ -8,8 +8,8 @@ become real.
 | Stage | Goal | Question it answers | Businesses | Infra cost |
 |---|---|---|---|---|
 | **1. Local** | Understand the principles | How do crawling, RAG, voice and tool calling actually work? | 1 (test) | ~$0 (+ cents for Google Speech / Gemini tests) |
-| **2. Cloud** | Understand cloud infrastructure | How does it run on Google Cloud — images, services, jobs, secrets, IAM, logs? | 1 (pilot) | ~$0–5/month + usage |
-| **3. Scale** | Solve multi-client scale and price problems | How do we serve many businesses safely, reliably and profitably? | many | grows with usage; known cost per business |
+| **2. Cloud** | Understand cloud infrastructure | How does it run on Google Cloud — images, services, jobs, secrets, IAM, logs? | 1 (pilot) | $0 fixed + usage only (DEC-33) |
+| **3. Scale** | Solve multi-client scale and price problems | How do we serve many businesses safely, reliably and profitably? | many | usage only + each business's number; known cost per business |
 
 Related: principles and restrictions → [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) ·
 decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
@@ -32,14 +32,14 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 
 | Layer | Stage 1 — Local | Stage 2 — Cloud | Stage 3 — Scale |
 |---|---|---|---|
-| App runtime | FastAPI **natively** (`uv run`, hot reload, debugger) → Docker image at stage exit | **Cloud Run**, one service, `min-instances=0` | `min-instances=1` for calls, tuned concurrency, split voice vs web if needed |
+| App runtime | FastAPI **natively** (`uv run`, hot reload, debugger) → Docker image at stage exit | **Cloud Run**, one service, `min-instances=0` | `min-instances=0` (cold start during ringing, DEC-35), tuned concurrency, split voice vs web if needed |
 | Crawler | Python CLI natively | Separate crawler image → **Cloud Run Job** + Scheduler | same, per-business schedules |
-| Database | Postgres 16 + pgvector in **Docker** (the only container) | **Neon** free tier (same region) | Neon paid or **Cloud SQL** (OPEN-10), pooling, backups, HNSW if needed |
+| Database | Postgres 16 + pgvector in **Docker** (the only container) | **Neon** free tier (AWS region in the same city — Neon has no GCP regions) | **Neon Launch** (usage-based, DEC-33), pooling, backups, HNSW if needed |
 | Tenant isolation | `business_id` + `tenant_session` helper | same | **RLS policies + `app_user` role + isolation tests** |
 | LLM | **LM Studio** native, split by role (DEC-32): `gemma-4-12b` for chat/voice, `qwen3.6-35b-a3b` for code delegation | **Gemini Flash** paid key (OpenAI-compatible), thinking off for voice | + cost controls |
 | Embeddings | `nomic-embed-text-v1.5` in LM Studio (or Gemini, OPEN-05) | Gemini embeddings, one re-index | same |
 | Voice | **Pipeline mode**: Google STT → local LLM → Google TTS | Pipeline mode on Cloud Run, then **Gemini Live spike** → decide (OPEN-08, DEC-30) | chosen mode, tuned for cost |
-| Telephony | Browser mic first, then Twilio trial + **ngrok** | Twilio → Cloud Run URL | provider per country/price (OPEN-09) |
+| Telephony | Browser mic first, then Twilio **Voice SDK browser calls** (no number, DEC-34) + **ngrok** | Voice SDK → Cloud Run URL; real number once the pilot pays for it | provider per country/price (OPEN-09) |
 | Secrets | `.env` | **Secret Manager** | same + rotation |
 | Deploy | — | Manual `gcloud` → `deploy.sh` | **CI/CD** (GitHub Actions + WIF), **Terraform**, staging/prod |
 | Observability | logs in terminal, debug endpoints | Cloud Logging, budget alert, latency numbers | dashboards, alerts, **cost per business** |
@@ -61,7 +61,8 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
   fastest edit/debug loop, breakpoints, print statements.
 - One test business, but with the full `business_id` data model.
 - Debug views: retrieved chunks with scores, the full prompt, LLM call logs.
-- Voice in two steps: browser mic (no call costs) → Twilio trial via ngrok.
+- Voice in two steps: browser mic (no call costs) → Twilio Voice SDK browser call via ngrok
+  (per minute, no phone number — DEC-34).
 - Gemini used only for comparison (quality of answers and tool calls).
 
 **Steps** — details in the part files
@@ -69,20 +70,20 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
    (`vector`, base tables with `business_id`), FastAPI skeleton, `tenant_session` helper.
 2. ✅ Crawler → one real business in Postgres — [01-crawler.md](01-crawler.md).
 3. ✅ Index, retrieval, `/chat`, eval questions, debug views — [02-local-rag.md](02-local-rag.md).
-4. Voice: mic test mode, then Twilio + ngrok — [03-voice-channel.md](03-voice-channel.md).
+4. Voice: mic test mode, then Twilio Voice SDK browser calls + ngrok — [03-voice-channel.md](03-voice-channel.md).
 5. Actions: tool calling, internal bookings, summaries, minimal dashboard (no login) —
    [04-actions.md](04-actions.md).
 6. Gemini comparison: switch `LLM_*` / `EMBED_*` env vars, re-run eval + booking tests.
 7. Containerize: API `Dockerfile` (+ `Dockerfile.crawler` only if Crawl4AI was added,
-   DEC-33); run everything via Compose with the same env vars — proves stage 2 readiness.
+   DEC-36); run everything via Compose with the same env vars — proves stage 2 readiness.
 
 **Deliberately not in stage 1:** RLS policies, owner login, calendar OAuth, onboarding
 flow, Places beyond `place_id`, CI/CD, any cloud hosting.
 
 **Exit criteria**
 - Eval questions pass; retrieval and prompts understood and inspectable.
-- A phone call through ngrok answers questions and books an appointment (the pilot is a
-  spa, DEC-31; consent question OPEN-18).
+- A Twilio call (Voice SDK, through ngrok) answers questions and books an appointment
+  (the pilot is a spa, DEC-31; consent question OPEN-18).
 - App and crawler run from Docker images with env-var config only.
 
 ---
@@ -104,16 +105,17 @@ Details: [05-cloud-migration.md](05-cloud-migration.md)
 - **Neon free tier** — same Postgres, $0, nothing new to learn about the DB itself.
 - One Cloud Run service, `min-instances=0`, default concurrency — **measure** cold start
   and call latency instead of optimizing blindly.
-- One pilot business, real phone number, paid Gemini key (real customer data, R12).
+- One pilot business, paid Gemini key (real customer data, R12); a real phone number
+  only once the pilot pays for it — until then Voice SDK calls (DEC-34).
 
 **Must be in stage 2 before going public:** access control on owner/debug routes and
-Twilio signature checks (OPEN-17).
+Twilio signature checks (OPEN-19).
 
-**Deliberately not in stage 2:** min-instances, load tests, service split, Cloud SQL,
+**Deliberately not in stage 2:** load tests, service split,
 Terraform, CI/CD, staging/prod, RLS enforcement (only one business).
 
 **Exit criteria**
-- Pilot business answers real calls from Cloud Run; crawler job runs on schedule.
+- Pilot business answers calls from Cloud Run (Voice SDK, or its own number once paid for); crawler job runs on schedule.
 - Redeploy from `deploy.sh` in minutes; logs and costs visible.
 - Measured numbers: cold start time, per-turn latency, cost per call minute.
 
@@ -133,9 +135,9 @@ Details: [06-scale.md](06-scale.md)
 2. **Onboarding without code** — owner login, profile confirmation, phone number mapping,
    greeting audio, enabled tools.
 3. **Cost visibility** — cost per business (call minutes, speech, tokens) → pricing.
-4. **Call reliability** — `min-instances=1`, load test → `--concurrency`, `--max-instances`.
+4. **Call reliability** — cold start during ringing (DEC-35), load test → `--concurrency`, `--max-instances`.
 5. **Operations** — CI/CD, Terraform, staging/prod, alerts.
-6. **Database growth** — Neon paid vs Cloud SQL, pooling, backups, HNSW index.
+6. **Database growth** — Neon free → Launch (usage-based), pooling, backups, HNSW index.
 7. **Cost reduction** — voice mode cost per minute (decided in stage 2), telephony provider, prompt size,
    caching.
 8. **Compliance** — region, retention, recordings policy, calendar OAuth token security.
@@ -202,7 +204,7 @@ app/
   dashboard/        owner UI (Jinja + HTMX)
 docker-compose.yml  stage 1: postgres only · stage-1 exit: + api + crawler
 Dockerfile          API image
-Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8) — once needed (DEC-33)
+Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8) — once needed (DEC-36)
 .env.example
 ```
 

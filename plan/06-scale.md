@@ -38,7 +38,7 @@ Trigger: second business. Details in [04-actions.md](04-actions.md) (dashboard).
 2. Create business, enter website URL (+ Google `place_id`) → crawler job runs.
 3. Owner confirms/edits the business profile (hours, address, booking rules) — source of
    truth for stored facts (DEC-11).
-4. Assign a Twilio number → `business_id`; generate greeting audio (DEC-17).
+4. Assign a Twilio number → `business_id` (its monthly rental is charged to the business, DEC-34); generate greeting audio (DEC-17).
 5. Owner tests answers, adds custom replies, enables tools, connects calendar (OAuth, R14).
 
 ## 3. Cost visibility and pricing
@@ -47,19 +47,19 @@ Trigger: first paying business.
 
 - Record per conversation: call minutes (telephony), STT/TTS seconds, LLM tokens,
   embedding calls → cost per business per month.
-- Fixed costs (database, min-instances, number rental) split across businesses.
+- Fixed costs: none shared (DEC-33); each business's number rental is passed to that business.
 - Use it to set pricing (per month + per minute?) and to decide the cost reductions in §7.
 - Budget alerts per project; anomaly alert if one business's usage spikes.
 
 ## 4. Call reliability under load
 
-Trigger: real call traffic from several businesses. Decisions: DEC-16, DEC-25, DEC-26.
+Trigger: real call traffic from several businesses. Decisions: DEC-35, DEC-25, DEC-26.
 
-- `min-instances=1` for the service handling calls (no cold starts during calls).
+- `min-instances=0`; cold start during ringing (DEC-35). Always-on only as a DEC-33 exception.
 - Load test with real call audio → set `--concurrency` (start ≈10–20 per vCPU, OPEN-15)
   and `--max-instances` (also protects DB connections, R20).
 - Split into two services from the same image when justified (DEC-26):
-  **voice** (Twilio webhook + WebSocket, warm, low concurrency) and **web** (chat,
+  **voice** (Twilio webhook + WebSocket, low concurrency) and **web** (chat,
   dashboard, scale to zero).
 - Latency dashboard per stage (VAD, STT, retrieval, LLM, TTS) with alerts.
 
@@ -76,15 +76,15 @@ Trigger: more than one person deploying, or deploys becoming frequent/risky.
 ## 6. Database growth
 
 Trigger: Neon free-tier limits, measured wake-up latency on calls (R3), or need for
-GCP-native IAM/backups. Decision: DEC-03, OPEN-10.
+more storage, or first paying client (OPEN-17). Decision: DEC-03, DEC-33.
 
 | Option | When |
 |---|---|
-| Neon paid (always-on compute or longer autosuspend) | Keep same provider, remove wake-ups |
-| Cloud SQL for PostgreSQL | Want everything in GCP (IAM, one bill, HA) |
+| **Neon Launch** (usage-based, no monthly minimum) | Free-tier limits reached |
+| Cloud SQL for PostgreSQL (1 dedicated vCPU ≈ $50/month) | 🔄 OPEN-17 — once a paying client covers the fixed cost; removes wake-up delay |
 
-- Move = `pg_dump`/restore + new `DATABASE_URL`/`ADMIN_DATABASE_URL`; with Cloud SQL add
-  `--add-cloudsql-instances` and the Cloud SQL Client role.
+- Neon Launch: plan upgrade inside Neon — no move, same `DATABASE_URL`.
+- Cloud SQL: `pg_dump`/restore + new `DATABASE_URL` (portability rules in DEC-03).
 - Connection pooling rules (R20); backups and restore test.
 - HNSW index on `chunks.embedding` only when exact search per business gets slow.
 
@@ -98,8 +98,6 @@ Trigger: cost per business (§3) too close to the price.
 | Telephony provider per country | Per-minute price differences | OPEN-09 |
 | Smaller prompts (top 5 chunks, short history), cached business profile | Fewer tokens per turn | DEC-12 |
 | Cheaper TTS voice tier | Lower speech cost | DEC-13 |
-| Scale web service to zero, keep only voice warm | Lower fixed cost | DEC-26 |
-| Neon vs Cloud SQL | Fixed DB cost | OPEN-10 |
 
 ## 8. Compliance
 
@@ -117,9 +115,9 @@ Trigger: first business in a regulated market / before go-live.
 - [ ] RLS migration + `app_user` role + isolation tests
 - [ ] Owner login + onboarding flow
 - [ ] Usage metering per conversation → cost per business report
-- [ ] `min-instances=1` + load test → concurrency / max-instances
+- [ ] Load test (incl. cold start during ringing) → concurrency / max-instances
 - [ ] Split voice / web services (if justified)
 - [ ] CI/CD + Terraform + staging
-- [ ] Database move decision (Neon paid vs Cloud SQL)
+- [ ] Neon free → Launch when limits are reached
 - [ ] Cost-reduction experiments (voice mode at volume, telephony provider)
 - [ ] Retention jobs, region choice, recordings policy

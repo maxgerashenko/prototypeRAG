@@ -14,7 +14,7 @@ correctly, says "I don't know" for questions not covered by the data, and every 
 | Service | How it runs | Purpose | Cloud equivalent |
 |---|---|---|---|
 | `api` | **Natively** (`uv run`, hot reload) → Docker image at stage-1 exit (DEC-28) | FastAPI: RAG, later voice + actions | Cloud Run |
-| `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Managed Postgres + pgvector (Neon → Cloud SQL) |
+| `postgres` | Docker `pgvector/pgvector:pg16` | Vectors **and** all app data | Managed Postgres + pgvector (Neon free → Launch, DEC-33) |
 | **LM Studio** | **Natively on the Mac** (Apple GPU, MLX/GGUF), 64 GB unified memory | LLM + embeddings via OpenAI-compatible API (`:1234/v1`) | Gemini via OpenAI-compatible API |
 
 The app reaches LM Studio at `http://localhost:1234/v1` (natively) or

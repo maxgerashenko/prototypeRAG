@@ -59,7 +59,7 @@ Sources:
   by the owner.
 
 Pipeline:
-1. **Crawl** — `httpx` + BeautifulSoup first; Crawl4AI (renders JS) when a JS-rendered site needs it (DEC-33). Respect
+1. **Crawl** — `httpx` + BeautifulSoup first; Crawl4AI (renders JS) when a JS-rendered site needs it (DEC-36). Respect
    `robots.txt`, limit depth/page count, dedupe URLs.
 2. **Clean** — strip nav, footer, cookie banners; convert to Markdown so headings
    (e.g. "Pricing", "Opening hours") are preserved.
@@ -87,7 +87,7 @@ Details: [02-local-rag.md](02-local-rag.md)
 - **Prompt:** system prompt with business profile (structured facts) + retrieved chunks +
   conversation history. Instruct the model to say "I don't know, let me connect you /
   take a message" instead of guessing.
-- **Storage:** Postgres + pgvector for vectors and all data (Docker locally; Neon free tier, later Cloud SQL, in cloud).
+- **Storage:** Postgres + pgvector for vectors and all data (Docker locally; Neon free tier, later Neon Launch — usage-based, DEC-33 — in cloud).
 - **LLM:** one OpenAI-compatible client — LM Studio locally, Gemini in cloud; switch by env vars.
 - **Custom replies:** per-business overrides stored in the DB (greeting, tone, answers
   the owner wants phrased a specific way, forbidden topics). These are retrieved with
@@ -156,7 +156,7 @@ Order follows the build order in [DECISIONS.md](DECISIONS.md) section 1.
 | M1 | 1 | Ingestion | `ingest <url>` fills Postgres (pages, profile, chunks) for one real business |
 | M2 | 1 | Text RAG | Chat answers test questions correctly, says "don't know" otherwise |
 | M3 | 1 | Voice (local) | Talk to the bot through the mic locally |
-| M4 | 1 | Phone | Real phone call answered via Twilio (ngrok tunnel locally) |
+| M4 | 1 | Phone | Twilio call answered — Voice SDK browser call, no number (DEC-34), ngrok tunnel locally |
 | M5 | 1 | Actions | Booking + conversation summary working end-to-end |
 | M5b | 1 | Gemini check | Eval + booking tests pass with Gemini (env vars only), still local |
 | M5c | 1 | Containerized | App + crawler run from Docker images with env-var config only |

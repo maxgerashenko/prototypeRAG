@@ -3,7 +3,7 @@
 Prototype of a multi-business voice/chat assistant: crawl a business's website → RAG over
 Postgres + pgvector → answer by chat and phone (Twilio) → actions (bookings, summaries).
 Built locally first (LM Studio on a 64 GB Mac, Docker Postgres), then moved to Google Cloud (Cloud Run,
-Neon → Cloud SQL, Gemini) by changing env vars only.
+Neon, Gemini) by changing env vars only.
 
 Built in three learning stages (DEC-27): **1 Local** — understand the principles;
 **2 Cloud** — understand the infrastructure with one pilot business; **3 Scale** — many
@@ -75,7 +75,10 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
   `qwen/qwen3.6-35b-a3b` (thinking on) for whole-file code-drafting delegation — see
   below.
 - Crawled pages and chunks stored in Postgres, not files. Crawler in its own Docker image.
-- Cloud Run + Cloud Run Jobs; Neon free tier in stage 2; Neon paid vs Cloud SQL in stage 3.
+- Cloud Run + Cloud Run Jobs, `min-instances=0` always (DEC-35); Neon free tier, then Neon Launch
+  (usage-based). No Cloud SQL.
+- Cost model (DEC-33): only free or pay-per-use services — no monthly fees, minimums or trials
+  that turn paid. Test calls via Twilio Voice SDK, no phone number until a business pays (DEC-34).
 - Stage 1: only Postgres in Docker, app/crawler/LM Studio native (DEC-28). `business_id`
   everywhere from stage 1; RLS enforced in stage 3 before the second business.
 - When recording a decision or open question, say which stage it belongs to.

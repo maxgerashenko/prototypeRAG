@@ -35,7 +35,7 @@ Google Places API ─► place_id only (live lookup for display, R9) ───�
    - Respect `robots.txt` and add a delay between requests.
 
 2. **Fetch / render**
-   - `httpx` + BeautifulSoup first — enough for server-rendered sites like the pilot (DEC-33).
+   - `httpx` + BeautifulSoup first — enough for server-rendered sites like the pilot (DEC-36).
    - **Crawl4AI** (renders JavaScript) added when a JS-rendered site is hit.
 
 3. **Clean**
@@ -94,7 +94,7 @@ app/ingest/
 
 Stage 1: runs natively (`uv run python -m app.ingest.run ...`, DEC-28). At stage-1 exit it
 gets its **own Docker image** (Crawl4AI + headless browser), separate from the API image
-so the API stays small and starts fast (R8, DEC-33) — needed only once Crawl4AI is added;
+so the API stays small and starts fast (R8, DEC-36) — needed only once Crawl4AI is added;
 while the crawler is httpx-only it can run from the API image. Stage 2: Cloud Run Job + Scheduler.
 
 ## Tasks
@@ -111,7 +111,7 @@ while the crawler is httpx-only it can run from the API image. Stage 2: Cloud Ru
 - [ ] Unit tests on 3 different real sites (only the pilot business so far)
 - [ ] PDF menus: `fetch.extract_pdf_text` exists but isn't wired in — `discover.is_skippable` drops `.pdf` links
 - [ ] Honour `Crawl-delay` from robots.txt (fixed 0.5 s delay today)
-- [ ] Stage-1 exit: `Dockerfile.crawler` — only if Crawl4AI was added by then (DEC-33)
+- [ ] Stage-1 exit: `Dockerfile.crawler` — only if Crawl4AI was added by then (DEC-36)
 
 ## Risks / notes
 
