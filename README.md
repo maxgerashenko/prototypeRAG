@@ -25,7 +25,9 @@ cp .env.example .env
 docker compose up -d --wait       # Postgres 16 + pgvector, the only container
 uv sync                           # Python 3.12 venv + dependencies
 uv run alembic upgrade head       # create tables
-uv run uvicorn app.main:app --reload   # http://localhost:8000/health
+uv run uvicorn app.main:app --reload --timeout-graceful-shutdown 1   # http://localhost:8000/health
+# --timeout-graceful-shutdown: without it a Python change hangs the restart while a page
+# holds the live-reload stream (DEV_RELOAD=true) or a voice WebSocket open
 uv run pytest                     # needs the DB; tests/test_rag.py also needs LM Studio (chat + embedding model loaded)
 docker compose exec postgres psql -U app -d app   # look at the data
 ```
@@ -37,6 +39,7 @@ uv run python -m app.ingest.run --url https://www.abathhouse.com/williamsburg   
 uv run python -m app.rag.index --business-id <id>                               # embed chunks
 uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml
 # chat page: http://localhost:8000/web/chat.html
-# voice mic test (needs `gcloud auth application-default login`, headphones):
-#   http://localhost:8000/web/mic-test.html
+# voice test page (needs `gcloud auth application-default login`):
+#   http://localhost:8000/web/mic-test.html          push-to-talk: Space / hold button, Esc ends
+#   http://localhost:8000/web/mic-test.html?mode=vad hands-free (VAD), use headphones
 ```

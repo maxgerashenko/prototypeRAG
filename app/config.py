@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     # word; "none" -> ~0.3 s. Verified on LM Studio; Gemini's value is checked in step 6.
     voice_reasoning_effort: str = "none"
 
+    dev_reload: bool = False  # live reload of web/ pages (app/api/dev_reload.py); local only
+
 
 @lru_cache
 def get_settings() -> Settings:

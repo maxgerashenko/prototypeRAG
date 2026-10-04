@@ -178,6 +178,7 @@ VOICE_LANGUAGE=en-US                         # Google Speech; auth = ADC
 STT_MODEL=latest_short                       # `phone_call` for 8 kHz Twilio audio — compare
 TTS_VOICE=en-US-Neural2-F                    # voice names change — re-check the catalog
 VOICE_REASONING_EFFORT=none                  # thinking off for voice (DEC-29)
+DEV_RELOAD=true                              # live reload of web/ pages; never set in cloud
 # in Docker Compose (end of stage 1): use host.docker.internal / service names instead of localhost
 
 # Stage 2 — Cloud Run env (secrets from Secret Manager)

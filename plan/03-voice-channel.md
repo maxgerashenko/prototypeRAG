@@ -107,7 +107,7 @@ short, short spoken-style answers, play a quiet repeated "working" sound while a
 |---|---|---|---|---|
 | **A. Phone** | Dialling a Twilio number | `POST /twilio/voice` → WebSocket `/voice/ws` (8 kHz μ-law) | Dialled number (`To`) → `businesses.phone_numbers` | Per minute + number rental (≈ $1.15/month) — only during a Twilio trial or once a business pays (DEC-34) |
 | **B. Browser via Twilio** (Voice SDK) | "Call" button on a web page → TwiML App | **Same** `POST /twilio/voice` → `/voice/ws` | Custom parameter sent by the page (`business_id`) | ≈ $0.004/min, no number; needs an active Twilio account |
-| **C. Browser direct** (mic test page) | "Talk" button on `web/mic-test.html` | Our own WebSocket `/voice/browser` (PCM16) — no Twilio | Query parameter on the WebSocket URL | $0 (only Google Speech usage) |
+| **C. Browser direct** (mic test page) | `web/mic-test.html`: push-to-talk (default) or hands-free VAD (`?mode=vad`) | Our own WebSocket `/voice/browser` (PCM16) — no Twilio | Business picker (`GET /businesses`) → query parameter on the WebSocket URL | $0 (only Google Speech usage) |
 
 Design rule: **transport adapters are thin; the call loop doesn't know which one is used.**
 `session.py` runs the pipeline (VAD → STT → LLM + tools → TTS) on PCM16 frames in and out.
@@ -144,7 +144,9 @@ app/voice/
   tts.py             Google Text-to-Speech
   live.py            Live mode: Gemini Live session, same tools (stage 2)
   tools.py           shared tool definitions: search_business_info + Part 4 actions
-web/mic-test.html    browser mic test client (mode C)
+web/mic-test.html    browser voice client (mode C): business picker, push-to-talk, mobile layout
+web/dev-reload.js    dev-only live reload of web/ pages (DEV_RELOAD=true, app/api/dev_reload.py)
+app/api/businesses.py GET /businesses for the picker — dev only, lists all tenants (stage 3: behind login)
 web/call.html        Twilio Voice SDK call page (mode B)
 ```
 
@@ -236,7 +238,7 @@ Findings:
 
 | # | Problem | Kind | Where it's tracked |
 |---|---|---|---|
-| V21 | Greeting says "you've reached business_name" — profile `name` holds the placeholder; `businesses.name` is "(pending)" | Real | [01-crawler.md](01-crawler.md) tasks |
+| V21 ✅ fixed 2026-10-04 | Greeting says "you've reached business_name" — profile `name` holds the placeholder; `businesses.name` is "(pending)" | Real | [01-crawler.md](01-crawler.md) tasks |
 | V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Real | [01-crawler.md](01-crawler.md) tasks |
 | V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real (cause unknown) | `/debug/retrieve`, eval set |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had | Potential | [02-local-rag.md](02-local-rag.md) tasks |
@@ -248,6 +250,27 @@ Findings:
 - [x] Google STT/TTS streaming code (`stt.py` one stream per VAD turn, `tts.py` per sentence)
 - [x] Transport-agnostic call loop in `session.py` (PCM16 in/out, tool loop, sentence-by-sentence TTS) + tests with fake STT/TTS/LLM
 - [x] Mic test adapter + page (mode C, `browser_ws.py`, `web/mic-test.html`)
+- [x] Mic test page as a mobile-style app (2026-10-04): business picker, **push-to-talk**
+  (Space: first press starts, then hold to talk / release to send; Esc or Backspace ends;
+  same with mouse/touch on the button), button labels follow the state, light/dark from
+  the system, green-grey palette. Server: `turn_detection="manual"` in `session.py`,
+  `mode=ptt` + `ptt_start`/`ptt_end` frames in `browser_ws.py`; release ends the turn at
+  once (no 500 ms VAD wait); empty press → `no_speech` event. Hands-free VAD kept as
+  `?mode=vad` for testing V9/barge-in. Drafted by local qwen from specs; fixed on review:
+  End button never shown, dev-reload script missing, stale socket's `onclose` could end
+  a new conversation, "Thinking…" stuck after an empty press, `dvh` overridden by `vh`.
+- [x] Redesign (2026-10-04) from the Claude Design canvas "Voice Chat Bot": 6 screens —
+  pick a business (search, expandable cards with recent conversations), a business's
+  conversations, read a transcript, connecting, live call (orb with listening /
+  thinking / speaking states, push-to-talk, hang-up), call ended. Real data from new
+  `app/api/conversations.py` (`GET /businesses/{id}/conversations[/{cid}]`, calls without
+  a user message hidden) and `conversation_count` on `GET /businesses`. "Continue in a new
+  call" = `continue_from` on the WebSocket: the earlier conversation becomes LLM history,
+  the greeting names its topic (AI disclosure kept, DEC-17). Dark only, as designed.
+  Backend drafted by local qwen (clean on review); the page by Sonnet after qwen's draft
+  failed structurally (nothing nested rendered, events never fired, broken icons).
+- [ ] Mic test page on a phone — needs HTTPS (`getUserMedia` is blocked on plain-http
+  LAN addresses); test through ngrok together with the Twilio work
 - [x] Google STT/TTS checked live (ADC set up; results under "Known problems")
 - [x] Mic test end-to-end in the browser with real STT/TTS + LM Studio (results under "Known problems")
 - [ ] Twilio webhook + TwiML + media stream WebSocket — tested with the trial number (mode A) and a Voice SDK browser call (mode B)

@@ -1,140 +1,1252 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Voice Mic Test</title>
-  <style>
-    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
-    .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    label { display: block; margin-bottom: 6px; font-weight: 500; color: #333; }
-    input[type="text"] { width: 100%; padding: 8px 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; margin-bottom: 12px; }
-    .hint { color: #666; font-size: 0.9em; margin: 0 0 12px; }
-    #talk { padding: 10px 20px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 15px; }
-    #talk.live { background: #c62828; }
-    #status { margin-left: 12px; color: #555; }
-    #log { height: 400px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 12px; margin-top: 16px; background: #fafafa; }
-    .line { margin-bottom: 8px; padding: 8px 10px; border-radius: 6px; line-height: 1.4; }
-    .user { background: #e3f2fd; }
-    .assistant { background: #f1f8e9; }
-    .meta { color: #777; font-size: 0.85em; font-family: ui-monospace, monospace; padding: 2px 10px; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0D0F14">
+<title>Voice chat bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root { --accent: #8AB4F8; --call: #7FD6A8; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: #0D0F14;
+  color: #F2F3F5;
+  font-family: Manrope, system-ui, -apple-system, sans-serif;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+}
+a { color: #8AA4FF; }
+a:hover { color: #B7C7FF; }
+button { font-family: inherit; }
+#app {
+  height: 100vh;
+  height: 100dvh;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: #0D0F14;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@media (min-width: 600px) {
+  body { align-items: center; }
+  #app {
+    height: min(844px, calc(100dvh - 32px));
+    border-radius: 40px;
+    border: 1px solid #262A33;
+    overflow: hidden;
+  }
+}
+@keyframes vw-wave{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
+@keyframes vw-ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.85);opacity:0}}
+@keyframes vw-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes vw-slide{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+@keyframes vw-dot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+@keyframes vw-blink{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes vw-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+@keyframes vw-open{from{opacity:0;max-height:0;padding-top:0;padding-bottom:0}to{opacity:1;max-height:420px}}
+@keyframes vw-halo{0%{transform:scale(1);opacity:.55}100%{transform:scale(1.05,1.4);opacity:0}}
+@keyframes vw-pop{0%{transform:scale(.6);opacity:0}70%{transform:scale(1.08);opacity:1}100%{transform:scale(1)}}
+</style>
 </head>
 <body>
-  <div class="container">
-    <label for="business_id">Business ID (UUID):</label>
-    <input type="text" id="business_id" placeholder="Paste UUID here">
-    <p class="hint">Mode C: mic → WebSocket /voice/browser (PCM16, 16 kHz) → VAD → Google STT → LLM + tools → Google TTS.
-      Use headphones — speaker echo reaching the mic counts as barge-in. Chrome or Safari.</p>
-    <button id="talk">Talk</button><span id="status"></span>
-    <div id="log"></div>
-  </div>
+<div id="app"></div>
+<script>
+(function () {
+"use strict";
 
-  <script>
-    (function () {
-      const RATE = 16000;
-      const FRAME = RATE / 50; // 20 ms per message, same as Twilio frames
-      const talkBtn = document.getElementById('talk');
-      const statusEl = document.getElementById('status');
-      const logEl = document.getElementById('log');
-      const businessInput = document.getElementById('business_id');
-      let ws = null, ctx = null, stream = null, nextPlay = 0;
-      let playing = [];
+/* ===================== HARD-REQUIRED HELPERS (verbatim) ===================== */
 
-      // runs on the audio thread: Float32 mic blocks (128 samples) -> 20 ms Int16 frames
-      const workletSrc = `
-        class Capture extends AudioWorkletProcessor {
-          constructor() { super(); this.buf = new Int16Array(${FRAME}); this.n = 0; }
-          process(inputs) {
-            const ch = inputs[0][0];
-            if (!ch) return true;
-            for (let i = 0; i < ch.length; i++) {
-              const s = Math.max(-1, Math.min(1, ch[i]));
-              this.buf[this.n++] = s < 0 ? s * 0x8000 : s * 0x7fff;
-              if (this.n === this.buf.length) { this.port.postMessage(this.buf.buffer.slice(0)); this.n = 0; }
+function h(tag, props, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === "style") el.style.cssText = v;
+    else if (k === "ref") v(el);
+    else if (v === true) el.setAttribute(k, "");
+    else el.setAttribute(k, String(v));
+  }
+  for (const c of children.flat(Infinity)) {
+    if (c == null || c === false || c === "") continue;
+    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return el;
+}
+function icon(markup) { const t = document.createElement("template"); t.innerHTML = markup.trim(); return t.content.firstElementChild; }
+
+/* ===================== HARD-REQUIRED ICON CONSTANTS (verbatim) ===================== */
+
+const PHONE_PATH = '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path>';
+const MIC_PATHS = '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>';
+const CHAT_PATH = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>';
+function svg(size, inner, sw, style) {
+  return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + (sw || 2) + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (style ? ' style="' + style + '"' : '') + '>' + inner + '</svg>';
+}
+const SVG = {
+  micHeader: svg(16, MIC_PATHS + '<line x1="12" y1="19" x2="12" y2="22"></line>'),
+  mic: svg(22, MIC_PATHS + '<line x1="12" y1="19" x2="12" y2="22"></line>'),
+  micSmall: svg(11, MIC_PATHS, 2.4),
+  search: svg(18, '<circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>'),
+  check: svg(13, '<polyline points="20 6 9 17 4 12"></polyline>', 3.2, 'animation: vw-pop .28s ease-out'),
+  checkBig: svg(36, '<polyline points="20 6 9 17 4 12"></polyline>', 2.6),
+  chat15: svg(15, CHAT_PATH), chat12: svg(12, CHAT_PATH, 2.2), chat24: svg(24, CHAT_PATH),
+  chevron: svg(16, '<polyline points="9 18 15 12 9 6"></polyline>', 2, 'flex-shrink: 0; color: #8A919D'),
+  back: svg(22, '<polyline points="15 18 9 12 15 6"></polyline>'),
+  clock: svg(12, '<circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15 14"></polyline>', 2.2),
+  phone22: svg(22, PHONE_PATH), phone20: svg(20, PHONE_PATH), phone40: svg(40, PHONE_PATH),
+  hangup: svg(26, PHONE_PATH, 2, 'transform: rotate(135deg)'),
+};
+
+/* ===================== audio constants + proven worklet/playback code ===================== */
+
+const FRAME_SAMPLES = 320;
+const SAMPLE_RATE = 16000;
+
+const WORKLET_CODE = `
+    class MicProcessor extends AudioWorkletProcessor {
+      constructor() {
+        super();
+        this.buffer = new Float32Array(${FRAME_SAMPLES});
+        this.offset = 0;
+        this.port.onmessage = this.onMessage.bind(this);
+      }
+      onMessage(e) {
+        if (e.data && e.data.type === "stop") {
+          this.port.postMessage({ type: "stop" });
+          this.port.close();
+        }
+      }
+      process(inputs) {
+        const input = inputs[0];
+        if (!input || !input.length) return true;
+        const channel = input[0];
+        for (let i = 0; i < channel.length; i++) {
+          this.buffer[this.offset] = channel[i];
+          this.offset++;
+          if (this.offset >= ${FRAME_SAMPLES}) {
+            // Convert Float32 → Int16 LE
+            const int16 = new Int16Array(${FRAME_SAMPLES});
+            let sumSq = 0;
+            for (let j = 0; j < ${FRAME_SAMPLES}; j++) {
+              const s = this.buffer[j];
+              const clamped = s < -1 ? -1 : s > 1 ? 1 : s;
+              int16[j] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+              sumSq += clamped * clamped;
             }
-            return true;
+            // RMS for level meter
+            const rms = Math.sqrt(sumSq / ${FRAME_SAMPLES});
+            // Post copy of frame
+            this.port.postMessage({ data: int16.buffer, rms: rms }, [int16.buffer]);
+            this.offset = 0;
           }
         }
-        registerProcessor('capture', Capture);`;
-
-      function addLine(cls, text) {
-        const div = document.createElement('div');
-        div.className = 'line ' + cls;
-        div.textContent = text;
-        logEl.appendChild(div);
-        logEl.scrollTop = logEl.scrollHeight;
+        return true;
       }
+    }
+    registerProcessor("mic-processor", MicProcessor);
+  `;
 
-      function play(arrayBuffer) {
-        const pcm = new Int16Array(arrayBuffer);
-        if (!pcm.length) return;
-        const buffer = ctx.createBuffer(1, pcm.length, RATE);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < pcm.length; i++) data[i] = pcm[i] / 0x8000;
-        const src = ctx.createBufferSource();
-        src.buffer = buffer;
-        src.connect(ctx.destination);
-        nextPlay = Math.max(nextPlay, ctx.currentTime);
-        src.start(nextPlay);
-        nextPlay += buffer.duration;
-        playing.push(src);
-        src.onended = () => { playing = playing.filter(s => s !== src); };
+/* adapted playPCM (names -> our call object fields) */
+function schedulePlayback(call, int16Data) {
+  const audioCtx = call.audioCtx;
+  if (!audioCtx) return;
+  const len = int16Data.byteLength / 2;
+  const buf = audioCtx.createBuffer(1, len, SAMPLE_RATE);
+  const channel = buf.getChannelData(0);
+  const view = new Int16Array(int16Data);
+  for (let i = 0; i < len; i++) {
+    channel[i] = view[i] / 0x8000;
+  }
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+  const dur = len / SAMPLE_RATE;
+  call.nextPlay = Math.max(call.nextPlay, audioCtx.currentTime);
+  src.start(call.nextPlay);
+  call.nextPlay += dur;
+  src.onended = () => {
+    if (call.botState === "speaking" && call.nextPlay <= audioCtx.currentTime + 0.05) {
+      call.botState = null;
+      refreshCall();
+    }
+    const idx = call.activeSources.indexOf(src);
+    if (idx >= 0) call.activeSources.splice(idx, 1);
+  };
+  call.activeSources.push(src);
+}
+
+function stopAllPlayback(call) {
+  for (const src of call.activeSources) { try { src.stop(); } catch (e) {} }
+  call.activeSources = [];
+  call.nextPlay = 0;
+}
+
+/* ===================== data mapping helpers ===================== */
+
+function initials(name) {
+  const words = (name || "").split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w));
+  if (words.length === 0) return "?";
+  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+}
+function hostOf(website) {
+  if (!website) return "No website";
+  try {
+    return new URL(website).host.replace(/^www\./, "");
+  } catch (e) {
+    return "No website";
+  }
+}
+function countLabel(n) {
+  if (n === 0) return "No chats yet";
+  if (n === 1) return "1 chat";
+  return n + " chats";
+}
+function dateLabel(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return "Today · " + time;
+  const yest = new Date(now);
+  yest.setDate(yest.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return "Yesterday · " + time;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " · " + time;
+}
+function fmtDur(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
+/* ===================== shared style strings ===================== */
+
+const SCREEN_RISE = "flex:1;min-height:0;display:flex;flex-direction:column;animation:vw-rise .3s ease-out;";
+const SCREEN_SLIDE = "flex:1;min-height:0;display:flex;flex-direction:column;animation:vw-slide .3s ease-out;";
+const BACK_BTN_STYLE = "height:44px;padding:0 12px 0 6px;border:0;border-radius:22px;background:transparent;color:#F2F3F5;display:flex;align-items:center;gap:4px;font-size:15px;font-weight:600;cursor:pointer;";
+const START_CALL_BTN_STYLE = "width:100%;height:56px;border-radius:28px;border:0;background:var(--call);color:#0B1220;display:flex;align-items:center;justify-content:center;gap:10px;font-size:16px;font-weight:700;cursor:pointer;";
+const SELECT_CALL_BTN_BASE = "position:relative;width:100%;height:60px;border-radius:30px;border:0;display:flex;align-items:center;justify-content:center;gap:10px;padding:0 20px;font-size:17px;font-weight:800;transition:background .25s ease, color .25s ease, transform .15s ease;";
+const PTT_BASE = "flex:1;height:64px;border-radius:32px;display:flex;align-items:center;justify-content:center;gap:10px;font-size:16px;font-weight:700;cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;transition:background .18s ease, transform .12s ease, box-shadow .18s ease;";
+const PTT_STYLE_IDLE = PTT_BASE + "background:#1B1F27;color:#F2F3F5;border:1.5px solid #2E333E;";
+const PTT_STYLE_TALKING = PTT_BASE + "background:var(--call);color:#0B1220;border:1.5px solid var(--call);transform:scale(0.97);box-shadow:0 0 0 6px rgba(127,214,168,.18);";
+
+/* ===================== state ===================== */
+
+const state = {
+  stage: "select",
+  businesses: null,
+  businessesError: false,
+  bizId: null,
+  query: "",
+  convoCache: new Map(),
+  transcriptCache: new Map(),
+  lastEndedId: null,
+  convosBizId: null,
+  transcriptConvoId: null,
+  transcriptBizId: null,
+  transcriptReturnTo: "select",
+  call: null,
+};
+
+const root = document.getElementById("app");
+let ui = {};
+
+function go(stage, extra) {
+  state.stage = stage;
+  Object.assign(state, extra || {});
+  renderStage();
+}
+
+function renderStage() {
+  ui = {};
+  let node;
+  if (state.stage === "select") node = buildSelect();
+  else if (state.stage === "convos") node = buildConvos();
+  else if (state.stage === "transcript") node = buildTranscript();
+  else if (state.stage === "connecting") node = buildConnecting();
+  else if (state.stage === "call") node = buildCall();
+  else if (state.stage === "ended") node = buildEnded();
+  root.replaceChildren(node);
+}
+
+function currentBiz() {
+  if (!state.bizId || !state.businesses) return null;
+  return state.businesses.find((b) => b.id === state.bizId) || null;
+}
+function findBiz(id) {
+  if (!state.businesses) return null;
+  return state.businesses.find((b) => b.id === id) || null;
+}
+
+/* ===================== businesses fetch ===================== */
+
+function fetchBusinesses() {
+  fetch("/businesses")
+    .then((r) => { if (!r.ok) throw new Error("bad status"); return r.json(); })
+    .then((list) => {
+      state.businesses = list;
+      state.businessesError = false;
+      if (state.stage === "select") { renderCards(); updateCallBar(); }
+    })
+    .catch(() => {
+      state.businesses = [];
+      state.businessesError = true;
+      if (state.stage === "select") { renderCards(); updateCallBar(); }
+    });
+}
+function refreshBusinessList() {
+  fetch("/businesses")
+    .then((r) => { if (!r.ok) throw new Error("bad status"); return r.json(); })
+    .then((list) => {
+      state.businesses = list;
+      state.businessesError = false;
+      if (state.stage === "select") { renderCards(); updateCallBar(); }
+    })
+    .catch(() => {});
+}
+
+/* ===================== conversations cache ===================== */
+
+function loadConvos(bizId, onDone) {
+  let entry = state.convoCache.get(bizId);
+  if (!entry || entry.status === "error") {
+    entry = { status: "loading", list: [], waiters: [] };
+    state.convoCache.set(bizId, entry);
+    fetch("/businesses/" + bizId + "/conversations?limit=50")
+      .then((r) => { if (!r.ok) throw new Error("bad status"); return r.json(); })
+      .then((list) => { entry.status = "ready"; entry.list = list; entry.waiters.forEach((fn) => fn()); entry.waiters = []; })
+      .catch(() => { entry.status = "error"; entry.waiters.forEach((fn) => fn()); entry.waiters = []; });
+  }
+  if (entry.status === "loading") { if (onDone) entry.waiters.push(onDone); }
+  else if (onDone) onDone();
+}
+
+function loadTranscript(bizId, cid, onDone) {
+  let entry = state.transcriptCache.get(cid);
+  if (!entry || entry.status === "error") {
+    entry = { status: "loading", waiters: [] };
+    state.transcriptCache.set(cid, entry);
+    fetch("/businesses/" + bizId + "/conversations/" + cid)
+      .then((r) => { if (!r.ok) throw new Error("bad status"); return r.json(); })
+      .then((data) => { entry.status = "ready"; entry.convo = data; entry.waiters.forEach((fn) => fn()); entry.waiters = []; })
+      .catch(() => { entry.status = "error"; entry.waiters.forEach((fn) => fn()); entry.waiters = []; });
+  }
+  if (entry.status === "loading") { if (onDone) entry.waiters.push(onDone); }
+  else if (onDone) onDone();
+}
+
+/* ===================== shared message bubble ===================== */
+
+function assistantMetaText(m) {
+  let t = "Assistant · " + m.time;
+  if (m.latencySec != null) t += " · " + m.latencySec + " s";
+  if (m.interrupted) t += " · interrupted";
+  return t;
+}
+function buildMessageBubble(m) {
+  if (m.role === "assistant") {
+    const metaDiv = h("div", { style: "font-size:11px;color:#8A919D;padding-left:4px;" }, assistantMetaText(m));
+    if (m.latencyTitle) metaDiv.title = m.latencyTitle;
+    return h("div", { style: "display:flex;flex-direction:column;animation:vw-rise .35s ease-out;" },
+      h("div", { style: "display:flex;gap:8px;align-items:flex-end;max-width:86%;" },
+        h("div", { style: "width:26px;height:26px;flex-shrink:0;border-radius:50%;background:#8AA4FF;display:flex;align-items:center;justify-content:center;gap:2px;" },
+          h("div", { style: "width:2px;height:6px;border-radius:1px;background:#0D0F14;" }),
+          h("div", { style: "width:2px;height:11px;border-radius:1px;background:#0D0F14;" }),
+          h("div", { style: "width:2px;height:6px;border-radius:1px;background:#0D0F14;" })
+        ),
+        h("div", { style: "display:flex;flex-direction:column;gap:4px;" },
+          h("div", { style: "padding:11px 14px;border-radius:18px 18px 18px 6px;background:#1B1F27;border:1px solid #262A33;font-size:15px;line-height:1.45;color:#E7E9EE;" }, m.text),
+          metaDiv
+        )
+      )
+    );
+  }
+  return h("div", { style: "display:flex;flex-direction:column;animation:vw-rise .35s ease-out;" },
+    h("div", { style: "align-self:flex-end;display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:80%;" },
+      h("div", { style: "padding:11px 14px;border-radius:18px 18px 6px 18px;background:var(--accent);color:#0B1220;font-size:15px;line-height:1.45;font-weight:500;" }, m.text),
+      h("div", { style: "display:flex;align-items:center;gap:4px;font-size:11px;color:#8A919D;padding-right:4px;" }, icon(SVG.micSmall), "You · " + m.time)
+    )
+  );
+}
+function buildErrorLine(text) {
+  return h("div", { style: "align-self:center;text-align:center;font-size:13px;color:#E0776E;padding:4px 10px;" }, text);
+}
+function buildThinkingBubble() {
+  return h("div", { style: "display:flex;gap:8px;align-items:center;animation:vw-rise .3s ease-out;" },
+    h("div", { style: "width:26px;height:26px;border-radius:50%;background:#8AA4FF;" }),
+    h("div", { style: "display:flex;gap:5px;padding:14px 16px;border-radius:18px 18px 18px 6px;background:#1B1F27;border:1px solid #262A33;" },
+      h("div", { style: "width:7px;height:7px;border-radius:50%;background:#B7C3D6;animation:vw-dot 1.1s ease-in-out infinite;" }),
+      h("div", { style: "width:7px;height:7px;border-radius:50%;background:#B7C3D6;animation:vw-dot 1.1s ease-in-out .15s infinite;" }),
+      h("div", { style: "width:7px;height:7px;border-radius:50%;background:#B7C3D6;animation:vw-dot 1.1s ease-in-out .3s infinite;" })
+    )
+  );
+}
+function buildListeningBubble() {
+  return h("div", { style: "align-self:flex-end;display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:18px 18px 6px 18px;border:1.5px dashed var(--accent);color:var(--accent);font-size:15px;font-weight:600;animation:vw-rise .25s ease-out;" },
+    h("div", { style: "display:flex;align-items:center;gap:3px;height:16px;" },
+      h("div", { style: "width:3px;height:10px;border-radius:2px;background:var(--accent);animation:vw-wave .7s ease-in-out infinite;" }),
+      h("div", { style: "width:3px;height:16px;border-radius:2px;background:var(--accent);animation:vw-wave .7s ease-in-out -.3s infinite;" }),
+      h("div", { style: "width:3px;height:12px;border-radius:2px;background:var(--accent);animation:vw-wave .7s ease-in-out -.15s infinite;" })
+    ),
+    "Listening…"
+  );
+}
+
+/* ===================== SELECT screen ===================== */
+
+function buildSelect() {
+  ui.cardEls = {};
+
+  const header = h("div", { style: "padding:52px 20px 16px;display:flex;flex-direction:column;gap:8px;" },
+    h("div", { style: "display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#8AA4FF;letter-spacing:.04em;text-transform:uppercase;" },
+      icon(SVG.micHeader), "Voice assistant"),
+    h("h1", { style: "margin:0;font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-.02em;" }, "Talk about a business, out loud"),
+    h("p", { style: "margin:0;font-size:15px;line-height:1.45;color:#9AA1AD;" },
+      "Pick a business and call the assistant. Every call is saved as a chat you can read later.")
+  );
+
+  const searchInput = h("input", {
+    "aria-label": "Search businesses",
+    placeholder: "Search businesses",
+    style: "flex:1;min-width:0;background:transparent;border:0;outline:none;color:#F2F3F5;font-size:15px;font-family:inherit;",
+    onInput: (e) => { state.query = e.target.value; renderCards(); }
+  });
+  searchInput.value = state.query;
+  ui.searchInput = searchInput;
+
+  const searchWrap = h("div", { style: "padding:0 20px 14px;" },
+    h("label", { style: "display:flex;align-items:center;gap:10px;height:48px;padding:0 16px;border-radius:14px;background:#161920;border:1px solid #262A33;color:#9AA1AD;" },
+      icon(SVG.search), searchInput));
+
+  const listEl = h("div", { style: "flex:1;min-height:0;overflow-y:auto;padding:2px 20px 16px;display:flex;flex-direction:column;gap:8px;" });
+  ui.listEl = listEl;
+
+  const haloEl = h("div", { "aria-hidden": "true", style: "position:absolute;inset:0;border-radius:30px;border:2px solid var(--call);animation:vw-halo 2s ease-out infinite;pointer-events:none;display:none;" });
+  const callBtnLabel = h("span", { style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, "Select a business to call");
+  const callBtn = h("button", {
+    style: SELECT_CALL_BTN_BASE + "background:#1B1F27;color:#6E7582;cursor:not-allowed;",
+    onClick: () => { if (state.bizId) startCallFor(state.bizId); }
+  }, icon(SVG.phone22), callBtnLabel);
+  callBtn.disabled = true;
+  ui.callBtn = callBtn; ui.callBtnLabel = callBtnLabel; ui.haloEl = haloEl;
+
+  const errorLine = h("div", { style: "display:none;text-align:center;font-size:13px;color:#E0776E;margin-top:4px;" });
+  ui.errorLine = errorLine;
+
+  const bottom = h("div", { style: "padding:14px 20px 30px;border-top:1px solid #1C2029;background:#0D0F14;display:flex;flex-direction:column;gap:10px;" },
+    h("div", { style: "position:relative;" }, haloEl, callBtn),
+    errorLine
+  );
+
+  const wrap = h("div", { style: SCREEN_RISE }, header, searchWrap, listEl, bottom);
+
+  if (state.businesses === null) fetchBusinesses();
+  renderCards();
+  updateCallBar();
+  return wrap;
+}
+
+function renderCards() {
+  if (state.stage !== "select") return;
+  const listEl = ui.listEl;
+  if (!listEl) return;
+  listEl.replaceChildren();
+  ui.cardEls = {};
+
+  if (state.businessesError) {
+    listEl.append(h("p", { style: "margin:24px 0 0;text-align:center;color:#9AA1AD;font-size:14px;" }, "Couldn't load businesses"));
+    return;
+  }
+  if (state.businesses === null) {
+    listEl.append(h("p", { style: "margin:24px 0 0;text-align:center;color:#9AA1AD;font-size:14px;" }, "Loading…"));
+    return;
+  }
+
+  const q = state.query.trim().toLowerCase();
+  const list = state.businesses.filter((b) => b.id === state.bizId || !q ||
+    b.name.toLowerCase().indexOf(q) >= 0 || hostOf(b.website).toLowerCase().indexOf(q) >= 0);
+
+  for (const b of list) listEl.append(buildBusinessCard(b));
+
+  if (list.length === 0) {
+    listEl.append(h("p", { style: "margin:24px 0 0;text-align:center;color:#9AA1AD;font-size:14px;" }, "No businesses match your search."));
+  }
+  if (state.bizId) {
+    listEl.append(h("div", { "aria-hidden": "true", style: "flex-shrink:0;height:320px;" }));
+  }
+}
+
+function buildBusinessCard(b) {
+  const selected = b.id === state.bizId;
+  const mono = initials(b.name);
+
+  const monoDiv = h("div", { style: "width:44px;height:44px;flex-shrink:0;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;transition:background .25s ease;" +
+    (selected ? "background:var(--accent);color:#0B1220;" : "background:#222733;color:#C9D3FF;") }, mono);
+  const radioDiv = h("div", { style: "width:24px;height:24px;flex-shrink:0;border-radius:50%;display:flex;align-items:center;justify-content:center;box-sizing:border-box;transition:all .2s ease;" +
+    (selected ? "background:var(--accent);color:#0B1220;border:0;" : "border:2px solid #3A404C;") },
+    selected ? icon(SVG.check) : null);
+
+  const btn = h("button", {
+    "aria-pressed": String(selected), "aria-expanded": String(selected),
+    style: "width:100%;box-sizing:border-box;min-height:72px;padding:12px 14px;border:0;background:transparent;display:flex;align-items:center;gap:14px;text-align:left;cursor:pointer;color:inherit;",
+    onClick: () => pickBusiness(b.id)
+  }, monoDiv,
+    h("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;" },
+      h("div", { style: "font-size:16px;font-weight:700;color:#F2F3F5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, b.name),
+      h("div", { style: "font-size:13px;color:#9AA1AD;" }, hostOf(b.website) + " · " + countLabel(b.conversation_count))
+    ),
+    radioDiv
+  );
+
+  const cardWrap = h("div", { style: "flex-shrink:0;border-radius:18px;overflow:hidden;transition:border-color .25s ease, background .25s ease, box-shadow .25s ease;" +
+    (selected ? "border:1.5px solid var(--accent);background:rgba(138,180,248,.10);box-shadow:0 8px 24px rgba(0,0,0,.35);" : "border:1.5px solid #262A33;background:#161920;") },
+    btn);
+
+  ui.cardEls[b.id] = cardWrap;
+  if (selected) cardWrap.append(buildRecentPanel(b));
+  return cardWrap;
+}
+
+function pickBusiness(id) {
+  const was = state.bizId === id;
+  state.bizId = was ? null : id;
+  if (!was) loadConvos(id, () => { if (state.stage === "select") renderCards(); });
+  renderCards();
+  updateCallBar();
+  if (!was) setTimeout(() => scrollCardToTop(id), 40);
+}
+
+function scrollCardToTop(id) {
+  const list = ui.listEl;
+  const el = ui.cardEls[id];
+  if (!list || !el) return;
+  const lr = list.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  const top = list.scrollTop + (er.top - lr.top) - 2;
+  if (list.scrollTo) list.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  else list.scrollTop = Math.max(0, top);
+}
+
+function buildRecentPanel(b) {
+  const cache = state.convoCache.get(b.id);
+  const panelChildren = [
+    h("div", { style: "display:flex;align-items:center;justify-content:space-between;padding:0 8px 4px;" },
+      h("span", { style: "font-size:12px;font-weight:700;color:#9AA1AD;letter-spacing:.05em;text-transform:uppercase;" }, "Recent conversations"),
+      h("span", { style: "font-size:12px;color:#8A919D;" }, cache && cache.status === "ready" ? countLabel(cache.list.length) : ""))
+  ];
+
+  if (!cache || cache.status === "loading") {
+    panelChildren.push(h("div", { style: "padding:10px 8px 6px;font-size:14px;color:#9AA1AD;" }, "Loading…"));
+  } else if (cache.status === "error") {
+    panelChildren.push(h("div", { style: "padding:10px 8px 6px;font-size:13px;color:#E0776E;" }, "Couldn't load conversations"));
+  } else {
+    const list = cache.list;
+    if (list.length === 0) {
+      panelChildren.push(h("div", { style: "padding:10px 8px 6px;font-size:14px;line-height:1.45;color:#9AA1AD;" },
+        "No conversations yet. Start a call below and it will show up here."));
+    } else {
+      for (const c of list.slice(0, 3)) panelChildren.push(buildRecentRow(b, c));
+      if (list.length > 3) {
+        panelChildren.push(h("button", {
+          style: "align-self:flex-start;height:40px;margin:2px 0 0;padding:0 10px;border:0;border-radius:12px;background:transparent;color:var(--accent);font-size:14px;font-weight:700;cursor:pointer;",
+          onClick: () => go("convos", { convosBizId: b.id })
+        }, "See all " + list.length + " conversations"));
       }
+    }
+  }
 
-      function clearPlayback() {
-        playing.forEach(s => { try { s.stop(); } catch (e) {} });
-        playing = [];
-        nextPlay = 0;
+  return h("div", { style: "border-top:1px solid #262A33;padding:12px 8px 10px;display:flex;flex-direction:column;gap:4px;overflow:hidden;animation:vw-open .4s ease-out;" }, panelChildren);
+}
+
+function buildRecentRow(b, c) {
+  const isNew = c.id === state.lastEndedId;
+  return h("button", {
+    style: "width:100%;box-sizing:border-box;min-height:56px;padding:8px;border:0;border-radius:12px;background:transparent;display:flex;align-items:center;gap:12px;text-align:left;cursor:pointer;color:inherit;",
+    onClick: () => go("transcript", { transcriptConvoId: c.id, transcriptBizId: b.id, transcriptReturnTo: "select" })
+  },
+    h("div", { style: "width:32px;height:32px;flex-shrink:0;border-radius:10px;background:#222733;color:#C9D3FF;display:flex;align-items:center;justify-content:center;" }, icon(SVG.chat15)),
+    h("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;" },
+      h("div", { style: "display:flex;align-items:center;gap:6px;" },
+        h("span", { style: "font-size:14px;font-weight:700;color:#F2F3F5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, c.title),
+        isNew ? h("span", { style: "flex-shrink:0;font-size:10px;font-weight:800;padding:2px 6px;border-radius:6px;background:var(--accent);color:#0B1220;" }, "NEW") : null
+      ),
+      h("div", { style: "font-size:12px;color:#8A919D;" }, dateLabel(c.started_at) + " · " + fmtDur(c.duration_s) + " · " + c.message_count + " msgs")
+    ),
+    icon(SVG.chevron)
+  );
+}
+
+function updateCallBar() {
+  const biz = currentBiz();
+  const selected = !!biz;
+  ui.haloEl.style.display = selected ? "block" : "none";
+  ui.callBtn.disabled = !selected;
+  ui.callBtn.style.background = selected ? "var(--call)" : "#1B1F27";
+  ui.callBtn.style.color = selected ? "#0B1220" : "#6E7582";
+  ui.callBtn.style.cursor = selected ? "pointer" : "not-allowed";
+  ui.callBtnLabel.textContent = selected ? "Call about " + biz.name : "Select a business to call";
+}
+function showSelectError(message) {
+  if (state.stage === "select" && ui.errorLine) {
+    ui.errorLine.textContent = message;
+    ui.errorLine.style.display = "block";
+  }
+}
+
+/* ===================== CONVOS screen ===================== */
+
+function buildConvos() {
+  const bizId = state.convosBizId;
+  const biz = findBiz(bizId);
+
+  const backBtn = h("button", { "aria-label": "Back to businesses", style: BACK_BTN_STYLE, onClick: () => go("select") },
+    icon(SVG.back), "Businesses");
+  const headerRow = h("div", { style: "padding:44px 12px 4px;display:flex;align-items:center;" }, backBtn);
+
+  const bizHeader = h("div", { style: "padding:8px 20px 18px;display:flex;align-items:center;gap:14px;" },
+    h("div", { style: "width:60px;height:60px;flex-shrink:0;border-radius:18px;background:var(--accent);color:#0B1220;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;" }, biz ? initials(biz.name) : "?"),
+    h("div", { style: "display:flex;flex-direction:column;gap:2px;min-width:0;" },
+      h("h1", { style: "margin:0;font-size:24px;line-height:1.2;font-weight:800;letter-spacing:-.01em;" }, biz ? biz.name : ""),
+      h("div", { style: "font-size:14px;color:#9AA1AD;" }, biz ? hostOf(biz.website) : "")
+    )
+  );
+
+  const startBtn = h("button", { style: START_CALL_BTN_STYLE, onClick: () => startCallFor(bizId) }, icon(SVG.phone20), "Start new call");
+  const startWrap = h("div", { style: "padding:0 20px 20px;" }, startBtn);
+
+  const countSpan = h("span", { style: "font-size:13px;color:#8A919D;" }, "");
+  ui.countSpan = countSpan;
+  const sectionHeader = h("div", { style: "padding:0 20px 10px;display:flex;align-items:baseline;justify-content:space-between;border-top:1px solid #1C2029;padding-top:18px;" },
+    h("h2", { style: "margin:0;font-size:13px;font-weight:700;color:#9AA1AD;letter-spacing:.04em;text-transform:uppercase;" }, "Previous conversations"),
+    countSpan
+  );
+
+  const listEl = h("div", { style: "flex:1;min-height:0;overflow-y:auto;padding:4px 20px 30px;display:flex;flex-direction:column;gap:10px;" });
+  ui.convosListEl = listEl;
+
+  const wrap = h("div", { style: SCREEN_SLIDE }, headerRow, bizHeader, startWrap, sectionHeader, listEl);
+
+  loadConvos(bizId, () => { if (state.stage === "convos" && state.convosBizId === bizId) renderConvoList(bizId); });
+  renderConvoList(bizId);
+  return wrap;
+}
+
+function renderConvoList(bizId) {
+  const listEl = ui.convosListEl;
+  if (!listEl) return;
+  const cache = state.convoCache.get(bizId);
+  listEl.replaceChildren();
+
+  if (!cache || cache.status === "loading") {
+    listEl.append(h("p", { style: "margin:24px 0 0;text-align:center;color:#9AA1AD;font-size:14px;" }, "Loading…"));
+    ui.countSpan.textContent = "";
+    return;
+  }
+  if (cache.status === "error") {
+    listEl.append(h("p", { style: "margin:24px 0 0;text-align:center;color:#E0776E;font-size:14px;" }, "Couldn't load conversations"));
+    ui.countSpan.textContent = "";
+    return;
+  }
+  const list = cache.list;
+  ui.countSpan.textContent = String(list.length);
+  if (list.length === 0) {
+    listEl.append(h("div", { style: "margin-top:28px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;color:#9AA1AD;" },
+      h("div", { style: "width:56px;height:56px;border-radius:50%;background:#161920;border:1px dashed #343A46;display:flex;align-items:center;justify-content:center;" }, icon(SVG.chat24)),
+      h("div", { style: "font-size:16px;font-weight:700;color:#F2F3F5;" }, "No conversations yet"),
+      h("div", { style: "font-size:14px;line-height:1.45;max-width:260px;" }, "Start a call and it will show up here when you hang up.")
+    ));
+    return;
+  }
+  list.forEach((c, i) => listEl.append(buildConvoCard(bizId, c, i)));
+}
+
+function buildConvoCard(bizId, c, i) {
+  const isNew = c.id === state.lastEndedId;
+  const cardStyle = "width:100%;box-sizing:border-box;padding:14px 16px;border-radius:18px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:8px;animation:vw-rise .35s ease-out both;animation-delay:" + (i * 0.06) + "s;" +
+    (isNew ? "background:rgba(138,180,248,.10);border:1px solid var(--accent);" : "background:#161920;border:1px solid #262A33;");
+  return h("button", { style: cardStyle, onClick: () => go("transcript", { transcriptConvoId: c.id, transcriptBizId: bizId, transcriptReturnTo: "convos" }) },
+    h("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;" },
+      h("div", { style: "font-size:16px;font-weight:700;color:#F2F3F5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, c.title),
+      isNew ? h("span", { style: "flex-shrink:0;font-size:11px;font-weight:800;padding:3px 8px;border-radius:8px;background:var(--accent);color:#0B1220;" }, "NEW") : null
+    ),
+    h("div", { style: "font-size:14px;line-height:1.45;color:#B3B9C4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;" }, c.preview),
+    h("div", { style: "display:flex;align-items:center;gap:12px;font-size:12px;color:#8A919D;" },
+      h("span", {}, dateLabel(c.started_at)),
+      h("span", { style: "display:flex;align-items:center;gap:4px;" }, icon(SVG.clock), fmtDur(c.duration_s)),
+      h("span", { style: "display:flex;align-items:center;gap:4px;" }, icon(SVG.chat12), c.message_count + " msgs")
+    )
+  );
+}
+
+/* ===================== TRANSCRIPT screen ===================== */
+
+function buildTranscript() {
+  const bizId = state.transcriptBizId;
+  const cid = state.transcriptConvoId;
+  const returnTo = state.transcriptReturnTo || "select";
+  const biz = findBiz(bizId);
+
+  const backBtn = h("button", { "aria-label": "Back", style: BACK_BTN_STYLE,
+    onClick: () => go(returnTo, returnTo === "convos" ? { convosBizId: bizId } : {}) },
+    icon(SVG.back), biz ? biz.name : "");
+  const headerRow = h("div", { style: "padding:44px 12px 4px;display:flex;align-items:center;" }, backBtn);
+
+  const titleEl = h("h1", { style: "margin:0;font-size:22px;line-height:1.25;font-weight:800;letter-spacing:-.01em;" }, "");
+  const metaEl = h("div", { style: "display:flex;align-items:center;gap:12px;font-size:13px;color:#9AA1AD;" });
+  ui.titleEl = titleEl; ui.metaEl = metaEl;
+  const subHeader = h("div", { style: "padding:6px 20px 14px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid #1C2029;" }, titleEl, metaEl);
+
+  const scrollInner = h("div", { style: "display:flex;flex-direction:column;gap:14px;padding:18px 16px 16px;" });
+  ui.scrollInner = scrollInner;
+  const scroll = h("div", { style: "flex:1;min-height:0;overflow-y:auto;" }, scrollInner);
+
+  const continueBtn = h("button", { style: START_CALL_BTN_STYLE, onClick: () => startCallFor(bizId, cid) },
+    icon(SVG.phone20), "Continue in a new call");
+  const footer = h("div", { style: "padding:14px 20px 30px;border-top:1px solid #1C2029;background:#0D0F14;" }, continueBtn);
+
+  const wrap = h("div", { style: SCREEN_SLIDE }, headerRow, subHeader, scroll, footer);
+
+  loadTranscript(bizId, cid, () => { if (state.stage === "transcript" && state.transcriptConvoId === cid) renderTranscriptBody(); });
+  renderTranscriptBody();
+  return wrap;
+}
+
+function renderTranscriptBody() {
+  const cid = state.transcriptConvoId;
+  const cache = state.transcriptCache.get(cid);
+  const scrollInner = ui.scrollInner;
+  if (!scrollInner) return;
+
+  if (!cache || cache.status === "loading") {
+    ui.titleEl.textContent = "Loading…";
+    ui.metaEl.replaceChildren();
+    scrollInner.replaceChildren(h("p", { style: "margin:24px 0 0;text-align:center;color:#9AA1AD;font-size:14px;" }, "Loading…"));
+    return;
+  }
+  if (cache.status === "error") {
+    ui.titleEl.textContent = "Conversation";
+    ui.metaEl.replaceChildren();
+    scrollInner.replaceChildren(h("p", { style: "margin:24px 0 0;text-align:center;color:#E0776E;font-size:14px;" }, "Couldn't load this conversation."));
+    return;
+  }
+
+  const convo = cache.convo;
+  const dLabel = dateLabel(convo.started_at);
+  const durLabel = fmtDur(convo.duration_s);
+  const msgs = convo.messages.filter((m) => m.role === "user" || m.role === "assistant");
+
+  ui.titleEl.textContent = convo.title;
+  ui.metaEl.replaceChildren(
+    h("span", {}, dLabel), h("span", {}, "·"), h("span", {}, durLabel), h("span", {}, "·"), h("span", {}, msgs.length + " messages")
+  );
+
+  scrollInner.replaceChildren();
+  scrollInner.append(h("div", { style: "align-self:center;font-size:12px;font-weight:600;color:#8A919D;padding:4px 10px;border-radius:10px;background:#161920;" }, "Call started · " + dLabel));
+  for (const m of msgs) {
+    scrollInner.append(buildMessageBubble({ role: m.role, text: m.content, time: fmtDur(m.at_s) }));
+  }
+  scrollInner.append(h("div", { style: "align-self:center;font-size:12px;font-weight:600;color:#8A919D;padding:4px 10px;border-radius:10px;background:#161920;" }, "Call ended · " + durLabel));
+}
+
+/* ===================== CONNECTING screen ===================== */
+
+function buildConnecting() {
+  const call = state.call;
+  const bizName = call && call.biz ? call.biz.name : "";
+  return h("div", { style: "flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:40px 28px;text-align:center;" },
+    h("div", { style: "position:relative;width:140px;height:140px;display:flex;align-items:center;justify-content:center;" },
+      h("div", { style: "position:absolute;inset:14px;border-radius:50%;border:2px solid var(--call);animation:vw-ring 1.8s ease-out infinite;" }),
+      h("div", { style: "position:absolute;inset:14px;border-radius:50%;border:2px solid var(--call);animation:vw-ring 1.8s ease-out .9s infinite;" }),
+      h("div", { style: "width:112px;height:112px;border-radius:50%;background:var(--call);color:#0D0F14;display:flex;align-items:center;justify-content:center;animation:vw-breathe 1.8s ease-in-out infinite;" }, icon(SVG.phone40))
+    ),
+    h("div", { style: "display:flex;flex-direction:column;gap:8px;" },
+      h("div", { style: "font-size:24px;font-weight:800;letter-spacing:-.01em;" }, "Connecting…"),
+      h("div", { style: "font-size:15px;line-height:1.45;color:#9AA1AD;" }, "Starting a call about " + bizName)
+    ),
+    h("button", { style: "height:48px;padding:0 24px;border-radius:24px;background:transparent;border:1px solid #2E333E;color:#F2F3F5;font-size:15px;font-weight:600;cursor:pointer;",
+      onClick: () => cancelConnecting() }, "Cancel")
+  );
+}
+
+/* ===================== CALL screen ===================== */
+
+function pttIdleContent() { return [icon(SVG.mic), h("span", {}, "Hold to talk")]; }
+function pttTalkingContent() {
+  return [
+    h("div", { style: "display:flex;align-items:center;gap:3px;height:22px;" },
+      h("div", { style: "width:4px;height:12px;border-radius:2px;background:#0B1220;animation:vw-wave .6s ease-in-out infinite;" }),
+      h("div", { style: "width:4px;height:22px;border-radius:2px;background:#0B1220;animation:vw-wave .6s ease-in-out -.2s infinite;" }),
+      h("div", { style: "width:4px;height:16px;border-radius:2px;background:#0B1220;animation:vw-wave .6s ease-in-out -.4s infinite;" }),
+      h("div", { style: "width:4px;height:20px;border-radius:2px;background:#0B1220;animation:vw-wave .6s ease-in-out -.1s infinite;" })
+    ),
+    h("span", {}, "Release to send")
+  ];
+}
+
+function buildCall() {
+  const call = state.call;
+
+  const timerSpan = h("span", { style: "font-family:'JetBrains Mono',monospace;font-size:13px;color:#F2F3F5;" }, fmtDur(call.seconds));
+  ui.timerSpan = timerSpan;
+  const liveBadge = h("div", { style: "display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:16px;background:#101C17;border:1px solid #1F3A2D;flex-shrink:0;" },
+    h("div", { style: "width:8px;height:8px;border-radius:50%;background:var(--call);animation:vw-blink 1.4s ease-in-out infinite;" }),
+    h("span", { style: "font-size:13px;font-weight:700;color:var(--call);" }, "Live"),
+    timerSpan
+  );
+  const bizBadge = h("div", { style: "display:flex;align-items:center;gap:8px;height:32px;padding:0 12px 0 4px;border-radius:16px;background:#171A21;border:1px solid #262A33;font-size:13px;font-weight:600;min-width:0;" },
+    h("span", { style: "width:24px;height:24px;flex-shrink:0;border-radius:12px;background:#222733;color:#C9D3FF;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;" }, call.biz ? initials(call.biz.name) : "?"),
+    h("span", { style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" }, call.biz ? call.biz.name : "")
+  );
+  const header = h("div", { style: "padding:48px 20px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px;" }, liveBadge, bizBadge);
+
+  const ring1 = h("div", { style: "position:absolute;inset:8px;border-radius:50%;border:2px solid #8AA4FF;animation:vw-ring 1.6s ease-out infinite;display:none;" });
+  const ring2 = h("div", { style: "position:absolute;inset:8px;border-radius:50%;border:2px solid #8AA4FF;animation:vw-ring 1.6s ease-out .8s infinite;display:none;" });
+  ui.ring1 = ring1; ui.ring2 = ring2;
+  const bars = [
+    ["16px", "-.1s"], ["28px", "-.45s"], ["38px", "-.25s"], ["28px", "-.6s"], ["16px", "-.3s"]
+  ].map(([height, delay]) => h("div", { style: "width:5px;height:" + height + ";border-radius:3px;background:#0D0F14;animation:vw-wave 1s ease-in-out " + delay + " infinite;animation-play-state:paused;" }));
+  ui.bars = bars;
+  const orbInner = h("div", { style: "width:88px;height:88px;border-radius:50%;background:#8AA4FF;display:flex;align-items:center;justify-content:center;gap:5px;transition:background .3s ease;animation:vw-breathe 3.2s ease-in-out infinite;" }, bars);
+  ui.orbInner = orbInner;
+  const orbWrap = h("div", { style: "position:relative;width:104px;height:104px;display:flex;align-items:center;justify-content:center;" }, ring1, ring2, orbInner);
+  const statusText = h("div", { "aria-live": "polite", style: "font-size:14px;font-weight:700;color:#9AA1AD;" }, "Hold the button to talk");
+  ui.statusText = statusText;
+  const orbSection = h("div", { style: "display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px 0 12px;flex-shrink:0;" }, orbWrap, statusText);
+
+  const messagesInner = h("div", { style: "display:flex;flex-direction:column;gap:14px;padding:16px 16px 12px;" });
+  ui.messagesInner = messagesInner;
+  const messagesScroll = h("div", { style: "flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column-reverse;border-top:1px solid #1C2029;" }, messagesInner);
+
+  const pttBtn = h("button", {
+    "aria-label": "Push to talk — hold to speak",
+    style: PTT_STYLE_IDLE,
+    onPointerDown: (e) => { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {} pttDown(); },
+    onPointerUp: () => pttUp(),
+    onPointerCancel: () => pttUp(),
+    onLostPointerCapture: () => pttUp(),
+    onContextMenu: (e) => e.preventDefault()
+  }, ...pttIdleContent());
+  ui.pttBtn = pttBtn;
+
+  const endBtn = h("button", { "aria-label": "End call",
+    style: "width:64px;height:64px;flex-shrink:0;border-radius:50%;border:0;background:#D93D42;color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;",
+    onClick: () => endCall() }, icon(SVG.hangup));
+
+  const controls = h("div", { style: "padding:14px 16px 30px;display:flex;gap:12px;align-items:center;border-top:1px solid #1C2029;background:#0D0F14;" }, pttBtn, endBtn);
+
+  const wrap = h("div", { style: "flex:1;min-height:0;display:flex;flex-direction:column;" }, header, orbSection, messagesScroll, controls);
+
+  refreshCall();
+  return wrap;
+}
+
+function updateOrbAndStatus() {
+  const call = state.call;
+  let statusTextVal, statusColor, orbColor, barPlay, barSpeed, orbActive;
+  if (call.noSpeechActive) {
+    statusTextVal = "Didn't catch that — hold and try again";
+    statusColor = "#9AA1AD"; orbColor = "#8AA4FF"; barPlay = "paused"; barSpeed = "1s"; orbActive = false;
+  } else if (call.talking) {
+    statusTextVal = "Listening to you…";
+    statusColor = "var(--call)"; orbColor = "var(--call)"; barPlay = "running"; barSpeed = ".7s"; orbActive = true;
+  } else if (call.botState === "thinking") {
+    statusTextVal = "Thinking…";
+    statusColor = "#B7C7FF"; orbColor = "#8AA4FF"; barPlay = "running"; barSpeed = "1.8s"; orbActive = false;
+  } else if (call.botState === "speaking") {
+    statusTextVal = "Assistant is speaking";
+    statusColor = "#B7C7FF"; orbColor = "#8AA4FF"; barPlay = "running"; barSpeed = ".85s"; orbActive = true;
+  } else {
+    statusTextVal = "Hold the button to talk";
+    statusColor = "#9AA1AD"; orbColor = "#8AA4FF"; barPlay = "paused"; barSpeed = "1s"; orbActive = false;
+  }
+  ui.statusText.textContent = statusTextVal;
+  ui.statusText.style.color = statusColor;
+  ui.orbInner.style.background = orbColor;
+  ui.bars.forEach((b) => { b.style.animationDuration = barSpeed; b.style.animationPlayState = barPlay; });
+  ui.ring1.style.display = orbActive ? "block" : "none";
+  ui.ring2.style.display = orbActive ? "block" : "none";
+  ui.ring1.style.borderColor = orbColor;
+  ui.ring2.style.borderColor = orbColor;
+  ui.timerSpan.textContent = fmtDur(call.seconds);
+}
+
+function updatePTT() {
+  const call = state.call;
+  const talking = call.talking;
+  ui.pttBtn.replaceChildren(...(talking ? pttTalkingContent() : pttIdleContent()));
+  ui.pttBtn.style.cssText = talking ? PTT_STYLE_TALKING : PTT_STYLE_IDLE;
+}
+
+function renderCallMessages() {
+  const call = state.call;
+  const inner = ui.messagesInner;
+  if (!inner) return;
+  inner.replaceChildren();
+  for (const m of call.messages) {
+    inner.append(m.kind === "error" ? buildErrorLine(m.text) : buildMessageBubble(m));
+  }
+  if (call.botState === "thinking") inner.append(buildThinkingBubble());
+  if (call.talking) inner.append(buildListeningBubble());
+}
+
+function refreshCall() {
+  if (state.stage !== "call" || !state.call) return;
+  updateOrbAndStatus();
+  updatePTT();
+  renderCallMessages();
+}
+
+/* ===================== ENDED screen ===================== */
+
+function buildEnded() {
+  const call = state.call;
+  const biz = call ? call.biz : null;
+  const msgCount = call ? call.messages.filter((m) => m.role === "user" || m.role === "assistant").length : 0;
+  const hasUser = call ? call.messages.some((m) => m.role === "user") : false;
+  const canRead = !!(call && call.conversationId && hasUser);
+
+  const check = h("div", { style: "width:84px;height:84px;border-radius:50%;background:#1B1F27;border:1px solid #2E333E;color:var(--call);display:flex;align-items:center;justify-content:center;animation:vw-pop .45s ease-out;" }, icon(SVG.checkBig));
+  const titleBlock = h("div", { style: "display:flex;flex-direction:column;gap:8px;" },
+    h("div", { style: "font-size:28px;font-weight:800;letter-spacing:-.02em;" }, "Call ended"),
+    h("div", { style: "font-size:15px;line-height:1.45;color:#9AA1AD;" }, "Saved to " + (biz ? biz.name : "") + "’s conversations")
+  );
+  const tiles = h("div", { style: "display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:10px;width:100%;" },
+    h("div", { style: "padding:14px 8px;border-radius:16px;background:#161920;border:1px solid #262A33;display:flex;flex-direction:column;gap:4px;" },
+      h("div", { style: "font-family:'JetBrains Mono',monospace;font-size:20px;" }, fmtDur(call ? call.seconds : 0)),
+      h("div", { style: "font-size:12px;color:#9AA1AD;" }, "Duration")
+    ),
+    h("div", { style: "padding:14px 8px;border-radius:16px;background:#161920;border:1px solid #262A33;display:flex;flex-direction:column;gap:4px;" },
+      h("div", { style: "font-family:'JetBrains Mono',monospace;font-size:20px;" }, String(msgCount)),
+      h("div", { style: "font-size:12px;color:#9AA1AD;" }, "Messages")
+    )
+  );
+  const readBtn = h("button", {
+    style: "height:56px;border-radius:28px;border:0;background:var(--accent);color:#0B1220;font-size:16px;font-weight:700;cursor:pointer;" + (canRead ? "" : "opacity:.5;cursor:not-allowed;"),
+    onClick: () => { if (canRead) go("transcript", { transcriptConvoId: call.conversationId, transcriptBizId: call.bizId, transcriptReturnTo: "convos" }); }
+  }, canRead ? "Read this conversation" : "Nothing was said");
+  readBtn.disabled = !canRead;
+  const backBtn = h("button", {
+    style: "height:56px;border-radius:28px;background:transparent;border:1px solid #2E333E;color:#F2F3F5;font-size:16px;font-weight:600;cursor:pointer;",
+    onClick: () => backToConversations()
+  }, "Back to conversations");
+  const actions = h("div", { style: "display:flex;flex-direction:column;gap:10px;width:100%;margin-top:8px;" }, readBtn, backBtn);
+
+  return h("div", { style: "flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:40px 24px;text-align:center;" },
+    check, titleBlock, tiles, actions);
+}
+
+/* ===================== call lifecycle ===================== */
+
+function startCallFor(bizId, continueFrom) {
+  const biz = findBiz(bizId);
+  state.call = {
+    bizId, biz,
+    ws: null, audioCtx: null, workletNode: null, micStream: null, micSource: null,
+    talking: false, botState: null,
+    messages: [], buildingAssistant: null,
+    conversationId: null,
+    seconds: 0, startedAtMs: null, timerInterval: null,
+    noSpeechActive: false, noSpeechTimer: null,
+    nextPlay: 0, activeSources: [],
+    continueFrom: continueFrom || null,
+    userSentAny: false,
+    ended: false
+  };
+  go("connecting", {});
+  beginConnect(state.call);
+}
+
+function startCallForSelected() { if (state.bizId) startCallFor(state.bizId); }
+function startNewCallForConvos() { if (state.convosBizId) startCallFor(state.convosBizId); }
+function continueCallFromTranscript() {
+  if (state.transcriptBizId && state.transcriptConvoId) startCallFor(state.transcriptBizId, state.transcriptConvoId);
+}
+function backToConversations() { go("convos", { convosBizId: state.call ? state.call.bizId : null }); }
+
+async function beginConnect(call) {
+  try {
+    call.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+  } catch (e) {
+    connectFailed(call, "Audio unavailable");
+    return;
+  }
+  try {
+    call.micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+  } catch (e) {
+    connectFailed(call, "Microphone blocked");
+    return;
+  }
+  if (state.call !== call) return;
+
+  try {
+    const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
+    const url = URL.createObjectURL(blob);
+    await call.audioCtx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    connectFailed(call, "Audio setup failed");
+    return;
+  }
+  if (state.call !== call) return;
+
+  call.workletNode = new AudioWorkletNode(call.audioCtx, "mic-processor");
+  call.micSource = call.audioCtx.createMediaStreamSource(call.micStream);
+  call.micSource.connect(call.workletNode);
+  call.workletNode.port.onmessage = (e) => {
+    if (e.data && e.data.data) {
+      if (call.ws && call.ws.readyState === WebSocket.OPEN && call.talking) {
+        call.ws.send(e.data.data);
       }
+    }
+  };
 
-      function onEvent(ev) {
-        if (ev.type === 'transcript') addLine('user', ev.text);
-        else if (ev.type === 'reply') addLine('assistant', ev.text);
-        else if (ev.type === 'clear') { clearPlayback(); addLine('meta', '[barge-in: playback cleared]'); }
-        else if (ev.type === 'latency') {
-          const { type, ...t } = ev;
-          addLine('meta', Object.entries(t).map(([k, v]) => `${k}=${v}`).join('  '));
-        } else if (ev.type === 'error') addLine('meta', 'Error: ' + ev.message);
-        else if (ev.type === 'conversation_id') addLine('meta', 'conversation ' + ev.id);
-      }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const params = new URLSearchParams({ business_id: call.bizId, mode: "ptt" });
+  if (call.continueFrom) params.set("continue_from", call.continueFrom);
+  const ws = new WebSocket(proto + "://" + location.host + "/voice/browser?" + params.toString());
+  ws.binaryType = "arraybuffer";
+  call.ws = ws;
 
-      async function start() {
-        const businessId = businessInput.value.trim();
-        if (!businessId) return;
-        ctx = new AudioContext({ sampleRate: RATE }); // the browser resamples the mic to 16 kHz
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        });
-        const url = URL.createObjectURL(new Blob([workletSrc], { type: 'application/javascript' }));
-        await ctx.audioWorklet.addModule(url);
-        const capture = new AudioWorkletNode(ctx, 'capture');
-        ctx.createMediaStreamSource(stream).connect(capture);
+  ws.addEventListener("open", () => {
+    if (state.call !== call) return;
+    call.startedAtMs = Date.now();
+    go("call", {});
+    call.timerInterval = setInterval(() => {
+      call.seconds = Math.floor((Date.now() - call.startedAtMs) / 1000);
+      if (state.stage === "call") updateOrbAndStatus();
+    }, 500);
+  });
+  ws.addEventListener("message", (event) => {
+    if (state.call !== call) return;
+    if (typeof event.data === "string") {
+      let data;
+      try { data = JSON.parse(event.data); } catch (e) { return; }
+      handleCallEvent(call, data);
+    } else {
+      handleCallAudio(call, event.data);
+    }
+  });
+  ws.addEventListener("close", (event) => {
+    if (state.call !== call || call.ended) return;
+    if (state.stage === "connecting") {
+      connectFailed(call, event.code === 4404 ? "Unknown business" : "Connection failed");
+      return;
+    }
+    if (event.code === 4404) {
+      call.ended = true;
+      teardownAudio(call);
+      go("select", {});
+      showSelectError("Unknown business");
+      return;
+    }
+    call.ended = true;
+    teardownAudio(call);
+    finalizeCall(call);
+  });
+  ws.addEventListener("error", () => {});
+}
 
-        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-        ws = new WebSocket(`${proto}://${location.host}/voice/browser?business_id=${encodeURIComponent(businessId)}`);
-        ws.binaryType = 'arraybuffer';
-        ws.onmessage = (m) => typeof m.data === 'string' ? onEvent(JSON.parse(m.data)) : play(m.data);
-        ws.onclose = (e) => { addLine('meta', `[closed ${e.code}${e.reason ? ' ' + e.reason : ''}]`); stop(); };
-        capture.port.onmessage = (m) => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(m.data); };
+function connectFailed(call, message) {
+  if (state.call !== call) return;
+  call.ended = true;
+  try { if (call.ws) call.ws.close(1000); } catch (e) {}
+  teardownAudio(call);
+  go("select", {});
+  showSelectError(message);
+}
 
-        talkBtn.textContent = 'Hang up';
-        talkBtn.classList.add('live');
-        statusEl.textContent = 'listening…';
-      }
+function cancelConnecting() {
+  const call = state.call;
+  if (call) {
+    call.ended = true;
+    try { if (call.ws) call.ws.close(1000); } catch (e) {}
+    teardownAudio(call);
+  }
+  go("select", {});
+}
 
-      function stop() {
-        if (ws) { const w = ws; ws = null; w.close(); }
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-        if (ctx) { ctx.close(); ctx = null; }
-        playing = []; nextPlay = 0;
-        talkBtn.textContent = 'Talk';
-        talkBtn.classList.remove('live');
-        statusEl.textContent = '';
-      }
+function handleCallEvent(call, data) {
+  switch (data.type) {
+    case "conversation_id":
+      call.conversationId = data.id;
+      break;
+    case "reply":
+      appendAssistantText(call, data.text);
+      break;
+    case "transcript":
+      closeCurrentAssistantMsg(call, false);
+      call.messages.push({ role: "user", text: data.text, time: fmtDur(call.seconds) });
+      call.userSentAny = true;
+      break;
+    case "latency":
+      applyLatency(call, data);
+      break;
+    case "clear":
+      stopAllPlayback(call);
+      closeCurrentAssistantMsg(call, true);
+      break;
+    case "no_speech":
+      call.botState = null;
+      showNoSpeech(call);
+      break;
+    case "error":
+      call.botState = null;
+      call.messages.push({ kind: "error", text: data.message });
+      break;
+    default:
+      break;
+  }
+  refreshCall();
+}
 
-      talkBtn.addEventListener('click', () => (ws ? stop() : start().catch(err => { addLine('meta', 'Error: ' + err.message); stop(); })));
-    })();
-  </script>
+function appendAssistantText(call, text) {
+  if (call.buildingAssistant) {
+    call.buildingAssistant.text = call.buildingAssistant.text ? call.buildingAssistant.text + " " + text : text;
+  } else {
+    const msg = { role: "assistant", text, time: fmtDur(call.seconds), latencySec: null, latencyTitle: null, interrupted: false };
+    call.messages.push(msg);
+    call.buildingAssistant = msg;
+  }
+}
+function closeCurrentAssistantMsg(call, interrupted) {
+  if (call.buildingAssistant) {
+    if (interrupted) call.buildingAssistant.interrupted = true;
+    call.buildingAssistant = null;
+  }
+}
+function findLastAssistant(call) {
+  for (let i = call.messages.length - 1; i >= 0; i--) {
+    if (call.messages[i].role === "assistant") return call.messages[i];
+  }
+  return null;
+}
+function applyLatency(call, data) {
+  const msg = call.buildingAssistant || findLastAssistant(call);
+  if (!msg) return;
+  if (data.tts_first_audio_ms != null) msg.latencySec = (data.tts_first_audio_ms / 1000).toFixed(1);
+  msg.latencyTitle = Object.entries(data).filter(([k]) => k !== "type").map(([k, v]) => k + ": " + v).join("\n");
+}
+function showNoSpeech(call) {
+  clearTimeout(call.noSpeechTimer);
+  call.noSpeechActive = true;
+  call.noSpeechTimer = setTimeout(() => { call.noSpeechActive = false; refreshCall(); }, 2500);
+}
+function handleCallAudio(call, buf) {
+  if (call.talking) return;
+  schedulePlayback(call, buf);
+  call.botState = "speaking";
+  refreshCall();
+}
+
+function pttDown() {
+  const call = state.call;
+  if (!call || state.stage !== "call" || call.talking) return;
+  stopAllPlayback(call);
+  call.talking = true;
+  call.botState = null;
+  clearTimeout(call.noSpeechTimer);
+  call.noSpeechActive = false;
+  if (call.ws && call.ws.readyState === WebSocket.OPEN) call.ws.send(JSON.stringify({ type: "ptt_start" }));
+  refreshCall();
+}
+function pttUp() {
+  const call = state.call;
+  if (!call || !call.talking) return;
+  call.talking = false;
+  call.botState = "thinking";
+  if (call.ws && call.ws.readyState === WebSocket.OPEN) call.ws.send(JSON.stringify({ type: "ptt_end" }));
+  refreshCall();
+}
+
+function teardownAudio(call) {
+  stopAllPlayback(call);
+  if (call.workletNode) {
+    try { call.workletNode.port.postMessage({ type: "stop" }); call.workletNode.disconnect(); } catch (e) {}
+  }
+  if (call.micSource) { try { call.micSource.disconnect(); } catch (e) {} }
+  if (call.micStream) { call.micStream.getTracks().forEach((t) => t.stop()); }
+  if (call.audioCtx) { try { call.audioCtx.close(); } catch (e) {} }
+  clearInterval(call.timerInterval);
+  clearTimeout(call.noSpeechTimer);
+}
+
+function endCall() {
+  const call = state.call;
+  if (!call || state.stage !== "call") return;
+  call.ended = true;
+  try { if (call.ws && call.ws.readyState === WebSocket.OPEN) call.ws.close(1000); } catch (e) {}
+  teardownAudio(call);
+  finalizeCall(call);
+}
+
+function finalizeCall(call) {
+  if (call.userSentAny && call.conversationId) state.lastEndedId = call.conversationId;
+  state.convoCache.delete(call.bizId);
+  refreshBusinessList();
+  go("ended", {});
+}
+
+/* ===================== keyboard ===================== */
+
+function isTyping() {
+  const el = document.activeElement;
+  return !!(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"));
+}
+
+window.addEventListener("keydown", (e) => {
+  if (isTyping()) return;
+  if (e.key === " ") {
+    e.preventDefault();
+    if (e.repeat) return;
+    if (state.stage === "select") startCallForSelected();
+    else if (state.stage === "convos") startNewCallForConvos();
+    else if (state.stage === "transcript") continueCallFromTranscript();
+    else if (state.stage === "call") pttDown();
+  } else if (e.key === "Escape") {
+    if (state.stage === "connecting") cancelConnecting();
+    else if (state.stage === "call") endCall();
+    else if (state.stage === "convos") go("select");
+    else if (state.stage === "transcript") go(state.transcriptReturnTo || "select");
+    else if (state.stage === "ended") backToConversations();
+  } else if (e.key === "Backspace") {
+    if (state.stage === "connecting") cancelConnecting();
+    else if (state.stage === "call") endCall();
+  }
+});
+window.addEventListener("keyup", (e) => {
+  if (isTyping()) return;
+  if (e.key === " ") {
+    e.preventDefault();
+    if (state.stage === "call") pttUp();
+  }
+});
+window.addEventListener("blur", () => {
+  if (state.stage === "call" && state.call && state.call.talking) pttUp();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && state.stage === "call" && state.call && state.call.talking) pttUp();
+});
+
+/* ===================== dev reload + boot ===================== */
+
+window.devReloadBlocked = () => state.stage === "connecting" || state.stage === "call";
+
+go("select", {});
+})();
+</script>
+<script src="/web/dev-reload.js"></script>
 </body>
 </html>
