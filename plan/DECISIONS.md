@@ -55,7 +55,7 @@ correctness & legal; the **focus** below decides trade-offs inside a stage.
 | 10 | 3 | Onboarding, cost per business, reliability, ops, DB growth, cost reduction | By trigger, see [06-scale.md](06-scale.md) |
 
 Between step 7 and step 8: **stage 1 tuning** — fixes found while building (voice
-latency, greeting, crawler profile), listed in [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
+latency, greeting, crawler profile, call-loop bugs B1–B6), listed in [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
 → "Stage 1 tuning". Not a numbered step, so step numbers stay stable.
 
 Step numbers match [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) and the commit messages

@@ -83,6 +83,9 @@ one block so stage 2 starts from a tuned pipeline:
   sound during searches, shorter tool results, LLM warm-up during the greeting,
   pre-generated greeting, sentence splitter abbreviations.
 - Crawler T3 ([01-crawler.md](01-crawler.md)): business name and timezone in the profile.
+- Voice bugs B1–B6 from the code review of the call loop ([03-voice-channel.md](03-voice-channel.md)
+  → "Stage 1 tuning"): hang-up cleanup, heard vs sent text, barge-in during STT, chunk
+  clipping, repeated tool-round text, timezone error.
 - Open items in the "Known problems" list of [03-voice-channel.md](03-voice-channel.md)
   that are testable locally.
 

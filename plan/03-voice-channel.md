@@ -295,6 +295,36 @@ after each item and record the numbers.
 - [ ] **T4b — Sentence splitter keeps abbreviations (V13).** Don't split after "p.m.",
   "a.m.", "Dr.", "St.", "e.g."; covered by `test_split_sentences_*`.
 
+**Bugs from the code review of commit `89f0fc2`** (2026-10-04, all in `app/voice/session.py`,
+confirmed against the code; IDs B1–B6 — "R" is taken by restrictions). Each fix gets a test.
+
+- [ ] **B1 (high) — Hang-up mid-reply breaks cleanup.** The reply task's `finally` sends the
+  `latency` event with `_send_event` to the already-closed socket; the error escapes
+  `_cancel_reply()`/`close()`, so the STT stream is never cancelled (thread stays blocked
+  on Google) and `conversations.ended_at` is never set. Fix: `_try_send_event` there;
+  make `close()` finish its cleanup even if cancelling the task raises. Test: close the
+  session mid-reply with a send callback that raises.
+- [ ] **B2 (medium) — "Spoken" means sent, not heard.** A sentence counts as spoken once its
+  audio is *sent*; TTS is faster than playback, so the whole reply is usually sent before
+  the caller hears it, and a later barge-in still saves all of it to history and the DB.
+  (The commit message's "only the sentences actually spoken are kept" holds only while
+  TTS is still running.) Fix: store each sentence's estimated play-end time; on barge-in
+  keep only sentences whose play-end ≤ barge-in time (optionally mark the cut one).
+- [ ] **B3 (medium) — Barge-in during STT `finish()` loses the caller's words.** The cancel
+  lands before the `try/finally` that saves the turn, so the first half of a sentence
+  split by a pause ("What if I want to come?" … "Today at 9 pm") is lost. Fix: move the
+  STT wait inside the protected block, or carry the unanswered text into the next turn.
+- [ ] **B4 (low) — Chunks bigger than one VAD frame clip the turn start.** `feed()` only
+  pushes a chunk to STT if speech had started *before* it; audio after the trigger in the
+  same chunk is dropped. Hidden today (browser and Twilio send exactly 20 ms). Fix: let
+  `TurnDetector` return the in-speech audio per chunk, or feed it frame by frame.
+- [ ] **B5 (low) — Tool rounds repeat earlier text.** The assistant message for each tool
+  round uses `" ".join(spoken)`, which accumulates across rounds, so the LLM sees earlier
+  sentences twice. Fix: only the text spoken in the current round.
+- [ ] **B6 (low) — Bad timezone looks like an unknown business.** `ZoneInfoNotFoundError`
+  is a `LookupError`, so `browser_ws` closes with 4404 "unknown business". Fix: catch it
+  in `_load_business` (log + fall back to UTC) or raise a different error; ties to V22.
+
 ## Notes
 
 - Phone audio is 8 kHz — test STT on real call audio, not just clean mic audio.
