@@ -7,7 +7,7 @@ import json
 
 from functools import lru_cache
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from app.config import get_settings
 
@@ -16,6 +16,14 @@ from app.config import get_settings
 def get_chat_client() -> OpenAI:
     settings = get_settings()
     return OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+
+
+@lru_cache(maxsize=1)
+def get_async_chat_client() -> AsyncOpenAI:
+    """For the voice call loop, which runs on the event loop: an async stream can be
+    cancelled mid-answer when the caller barges in; a sync one in a thread can't."""
+    settings = get_settings()
+    return AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
 
 
 @lru_cache(maxsize=1)

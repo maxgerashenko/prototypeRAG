@@ -54,6 +54,10 @@ correctness & legal; the **focus** below decides trade-offs inside a stage.
 | 9 | 3 | RLS enforcement → second business | Hard gate for multi-tenancy |
 | 10 | 3 | Onboarding, cost per business, reliability, ops, DB growth, cost reduction | By trigger, see [06-scale.md](06-scale.md) |
 
+Between step 7 and step 8: **stage 1 tuning** — fixes found while building (voice
+latency, greeting, crawler profile), listed in [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
+→ "Stage 1 tuning". Not a numbered step, so step numbers stay stable.
+
 Step numbers match [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) and the commit messages
 ("Stage 1 step 3") — stage 1 is steps 1–7.
 
@@ -629,6 +633,7 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Vertex AI Search | Managed search/RAG over a website data store; ≈ 10k queries/month free, then ≈ $1.50 per 1k (Standard); storage ≈ $1/GB-month | DEC-02 |
 | GCP equivalent of Neon | None scales Postgres to zero: Cloud SQL and AlloyDB bill an always-on instance, Spanner has a capacity minimum; Firestore is pay-per-use but not Postgres (rejected, DEC-02) | DEC-03, DEC-33 |
 | Google Cloud free trial | $300 / 90 days; ends without charging unless upgraded by hand. Budget alerts warn but don't cap spend | DEC-33 |
+| Gemma thinking in LM Studio | `google/gemma-4-12b` thinks by default (~8 s before the first word, measured 2026-10-03). `reasoning_effort="none"` turns it off (~0.3 s); `chat_template_kwargs.enable_thinking=False` does not. The voice call loop sends `VOICE_REASONING_EFFORT=none`; whether Gemini accepts the same value is unverified (step 6, [03-voice-channel.md](03-voice-channel.md) V20) | DEC-29, DEC-32 |
 
 Free-tier limits, model names and pricing change — re-check before each decision that
 depends on them.

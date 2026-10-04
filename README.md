@@ -37,4 +37,6 @@ uv run python -m app.ingest.run --url https://www.abathhouse.com/williamsburg   
 uv run python -m app.rag.index --business-id <id>                               # embed chunks
 uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml
 # chat page: http://localhost:8000/web/chat.html
+# voice mic test (needs `gcloud auth application-default login`, headphones):
+#   http://localhost:8000/web/mic-test.html
 ```

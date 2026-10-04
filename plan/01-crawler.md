@@ -111,6 +111,8 @@ while the crawler is httpx-only it can run from the API image. Stage 2: Cloud Ru
 - [ ] Unit tests on 3 different real sites (only the pilot business so far)
 - [ ] PDF menus: `fetch.extract_pdf_text` exists but isn't wired in — `discover.is_skippable` drops `.pdf` links
 - [ ] Honour `Crawl-delay` from robots.txt (fixed 0.5 s delay today)
+- [ ] (Stage 1 tuning T3) Profile `name` stored as the literal "business_name" and `businesses.name` left "(pending)" on the pilot — voice greets with it (found in step 4, [03-voice-channel.md](03-voice-channel.md) V21)
+- [ ] (Stage 1 tuning T3) Set `businesses.timezone` (from address/profile, or ask the owner) — stays `UTC` today, so "are you open now" is wrong (V22)
 - [ ] Stage-1 exit: `Dockerfile.crawler` — only if Crawl4AI was added by then (DEC-36)
 
 ## Risks / notes

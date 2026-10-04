@@ -18,6 +18,14 @@ class Settings(BaseSettings):
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"
     embed_dim: int = 768
 
+    # voice (plan/03-voice-channel.md) -- Google Speech, auth via ADC, so no key here
+    voice_language: str = "en-US"
+    stt_model: str = "latest_short"  # "phone_call" is tuned for 8 kHz phone audio
+    tts_voice: str = "en-US-Neural2-F"
+    # thinking off for voice (DEC-29): gemma-4-12b thinks by default, ~8 s before the first
+    # word; "none" -> ~0.3 s. Verified on LM Studio; Gemini's value is checked in step 6.
+    voice_reasoning_effort: str = "none"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -80,8 +80,15 @@ can be swapped.
 | LLM first sentence | 300–500 ms |
 | TTS first audio | 150–300 ms |
 
+First measurement (stage 1, 2026-10-03, gemma-4-12b in LM Studio, thinking off, fake
+STT/TTS — so LLM + tool only): answer from the profile alone ≈ 1.2–1.3 s to the first
+sentence; with a `search_business_info` call ≈ 5 s (1.8 s to emit the tool call, 3.2 s
+to answer over 5 chunks; the search itself ≈ 40 ms). Tool turns are the gap to close —
+a "working" sound (T1), fewer/shorter chunks (T1b), or a faster model. With thinking on (gemma's default) it
+was 8–18 s.
+
 Techniques: stream everything, start TTS on the first complete sentence, keep prompts
-short, short spoken-style answers, play a filler ("one moment…") when a tool call runs.
+short, short spoken-style answers, play a quiet repeated "working" sound while a tool call runs (T1).
 
 ## Conversation behaviour
 
@@ -141,21 +148,152 @@ web/mic-test.html    browser mic test client (mode C)
 web/call.html        Twilio Voice SDK call page (mode B)
 ```
 
+## Known problems — test or fix when the environment allows
+
+Found while building step 4 without Google credentials or Twilio (2026-10-03).
+**Real** = seen or confirmed in code/data; **Potential** = likely, not yet observed.
+Re-check each item once its environment exists, then tick it or turn it into a task.
+
+### Needs Google ADC (`gcloud auth application-default login`)
+
+| # | Problem | Kind | How to test | Fix idea if it fails |
+|---|---|---|---|---|
+| V1 | `stt.py` / `tts.py` never called live — only against fake clients (v1 streaming helper, auth, response shape) | Potential | Mic test: one question end to end | Fix against the real responses |
+| V2 | STT final result after speech end may exceed the 200–300 ms budget; each turn opens a new gRPC stream (setup should hide behind speech) | Potential | `stt_ms` in the latency event, 10+ turns | Keep one stream per call; `single_utterance` |
+| V3 | `finish()` waits up to 5 s, then silently uses the interim text | Potential | Log line "STT final result not in…" | Lower timeout; tune VAD `end_silence_ms` |
+| V4 | `STT_MODEL=latest_short` vs `phone_call` on 8 kHz μ-law audio — accuracy unknown | Potential | Same questions via mic and via Twilio, compare transcripts | Per-transport STT model |
+| V5 | `TTS_VOICE=en-US-Neural2-F` may be retired/renamed; TTS may not return the exact requested rate (8000/16000) → `ValueError` | Potential | First TTS call at both rates | Pick a current voice (Chirp 3 HD?); resample instead of failing |
+| V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Real | Time from connect to first audio | Cache greeting audio per business (onboarding) → **T4** |
+| V7 | Missing credentials surface only after ~3 s (auth probes the metadata server), and again on every turn | Real | Seen in smoke test | Check ADC once at startup / fail fast |
+| V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Real (design gap) | Ask a question in another language | `alternative_language_codes`, or language per business |
+
+**Checked live 2026-10-03** (ADC on project `prototype-rag-max`; TTS output and the
+speech fixture streamed at real-time pace):
+
+- **V1 ✅** STT and TTS work live through `stt.py`/`tts.py` unchanged.
+- **V2 ✅** STT final text 90–180 ms after audio end (budget 200–300 ms).
+- **V4 partly** — on the clean 8 kHz fixture both `latest_short` (90 ms) and `phone_call`
+  (178 ms) transcribe correctly; real phone audio still untested (needs Twilio).
+- **V5 ✅** `en-US-Neural2-F` exists; 8 and 16 kHz come back at the requested rate.
+  Warm TTS 170–310 ms per sentence (budget 150–300 ms, at the edge); the **first** call
+  per process took ~700 ms (client + auth setup) — supports V6: warm the TTS client at
+  startup and pre-generate the greeting.
+- STT turns "five pm" into "5:00 p.m." — the sentence splitter must not cut at "p.m." (V13).
+
+**First browser mic test 2026-10-03** (Chrome, headphones, gemma-4-12b thinking off, pilot
+business, 7 turns). Times are from the VAD's speech end; the caller also waits the
+500 ms end-of-speech silence before that.
+
+| Turn type | STT | First sentence (LLM) | First audio | Turns |
+|---|---|---|---|---|
+| Profile only, first turn of call | 85 ms | 2.6 s | 2.9 s | 1 |
+| Profile / history only, later turns | 65–111 ms | 0.95–2.1 s | 1.2–2.3 s | 3 |
+| With `search_business_info` | 90–102 ms | 5.4–5.5 s | 5.7 s | 2 |
+
+Findings:
+- **V16 confirmed** — search turns ≈ 5.7 s to first audio: 1.6–1.8 s until the tool call,
+  search ≈ 40 ms, then ≈ 3.7 s until the first sentence of the answer. The main gap.
+- **First turn is cold** (2.6 s vs ~1 s later) — LM Studio has not cached the system
+  prompt yet. Idea: warm it during the greeting (one `max_tokens=1` request).
+- **Pause mid-thought splits a turn**: "What if I want to come?" … "Today, night at
+  9 pm" — the 500 ms end-silence ended the turn, the reply was cancelled by barge-in when
+  the caller continued (works as designed; history keeps both parts). Watch whether
+  this happens often → longer `end_silence_ms` costs latency on every turn.
+- **"Thank you. Bye." doesn't end the call** — needs an end-call path (silence/hang-up task).
+- **V21 confirmed** in the greeting ("business_name").
+- Barge-in fired 3× with headphones, each when the caller started speaking — no false
+  trigger seen; V9 (echo without headphones) still untested.
+- To check: "Day Pass starts at $39" was answered **without** a search — verify it comes
+  from the profile (`price_range`), not from model knowledge.
+
+
+| # | Problem | Kind | How to test | Fix idea if it fails |
+|---|---|---|---|---|
+| V9 | Speaker echo → VAD hears the bot → false barge-in; browser echo cancellation may not cover WebAudio playback | Potential | Mic test without headphones | Require STT text before `clear`; raise VAD aggressiveness while bot speaks |
+| V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | Minimum speech length / confirmed words before barge-in |
+| V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | Client reports playback end; Twilio `mark` events |
+| V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); untested in Safari | Potential | Open page in Chrome, Safari, Firefox | Capture at native rate, resample server-side |
+| V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Potential | Look at `reply` events of real answers | Abbreviation list; split also on `,`/length cap → **T4b** |
+| V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
+| V15 | Reply-task sends and feed-path sends (`clear`) can interleave on one WebSocket | Potential | Barge-in many times quickly | One send queue per connection |
+
+### Latency (LM Studio, measured with fake STT/TTS — see "Latency budget")
+
+| # | Problem | Kind | How to test | Fix idea if it fails |
+|---|---|---|---|---|
+| V16 | Turns with `search_business_info` take ≈ 5 s to the first sentence (1.8 s to emit the tool call, 3.2 s over 5 chunks) — budget is 1.5 s | Real | `latency` events | Repeated "working" sound while the tool runs (**T1**); fewer/shorter chunks (**T1b**); faster model; compare Gemini (step 6) |
+| V17 | Silence re-prompt / hang-up not built yet (task above) | Real | — | — |
+
+### Needs Twilio / later stages
+
+| # | Problem | Kind | How to test | Fix idea if it fails |
+|---|---|---|---|---|
+| V18 | STT/TTS each hold a thread from the default executor (`asyncio.to_thread`); an STT stream holds one for a whole turn → limits concurrent calls per instance | Potential (stage 2–3) | Load test with several calls | Async Google clients; dedicated executor |
+| V19 | `conversations.ended_at` stays NULL if the process dies mid-call | Potential | Kill the server during a call | Twilio status callback sets it (DEC-24) |
+| V20 | `VOICE_REASONING_EFFORT=none` is only verified against LM Studio; Gemini's accepted value depends on the model | Potential | Step 6 Gemini comparison | Map per provider in `.env` |
+
+### Data / other parts (found through voice testing)
+
+| # | Problem | Kind | Where it's tracked |
+|---|---|---|---|
+| V21 | Greeting says "you've reached business_name" — profile `name` holds the placeholder; `businesses.name` is "(pending)" | Real | [01-crawler.md](01-crawler.md) tasks |
+| V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Real | [01-crawler.md](01-crawler.md) tasks |
+| V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real (cause unknown) | `/debug/retrieve`, eval set |
+| V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had | Potential | [02-local-rag.md](02-local-rag.md) tasks |
+| V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Real | Delete when convenient |
+
 ## Tasks
 
 - [x] Audio utilities (μ-law/PCM, resampling) + tests
-- [ ] Google STT/TTS streaming (local auth via gcloud ADC)
-- [ ] Transport-agnostic call loop in `session.py` (PCM16 in/out)
-- [ ] Local mic test mode end-to-end with Part 2 RAG (mode C, `browser_ws.py`)
+- [x] Google STT/TTS streaming code (`stt.py` one stream per VAD turn, `tts.py` per sentence)
+- [x] Transport-agnostic call loop in `session.py` (PCM16 in/out, tool loop, sentence-by-sentence TTS) + tests with fake STT/TTS/LLM
+- [x] Mic test adapter + page (mode C, `browser_ws.py`, `web/mic-test.html`)
+- [x] Google STT/TTS checked live (ADC set up; results under "Known problems")
+- [x] Mic test end-to-end in the browser with real STT/TTS + LM Studio (results under "Known problems")
 - [ ] Twilio webhook + TwiML + media stream WebSocket — tested with the trial number (mode A) and a Voice SDK browser call (mode B)
 - [x] VAD (`TurnDetector`, tested on real speech)
-- [ ] Turn-taking, barge-in in the call loop
+- [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
+- [ ] Silence re-prompt (~6 s) and polite hang-up; end the call on "bye" (seen in the first mic test)
 - [ ] Called number / TwiML App → business_id mapping from Postgres
 - [ ] Call transfer + take-a-message fallback
-- [ ] Save transcript at call end; summary runs in the Twilio status callback (DEC-24)
-- [ ] Measure latency per stage and log it per turn
+- [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
+- [ ] Summary runs in the Twilio status callback (DEC-24)
+- [x] Measure latency per stage and log it per turn (`latency` event + log: stt, tool, first sentence, first audio)
+- [x] Record real latency numbers against the budget above (first mic test; repeat over Twilio)
 - [x] `search_business_info` tool + shared tool definitions (used by both modes)
 - [ ] Stage 2: Live mode spike on Cloud Run; compare with pipeline mode (OPEN-08)
+
+### Stage 1 tuning — after all stage 1 steps (1–7), before stage 2
+
+From the first mic test (see "Known problems"). Done as one block once step 7 is
+finished, so stage 2 starts from a tuned pipeline. Re-measure with the mic test page
+after each item and record the numbers.
+
+- [ ] **T1 — "Working on it" sound during searches (V16).** When the model emits a
+  `search_business_info` call, play a quiet, repeated short sound (e.g. soft ticks or
+  light "typing" clicks, ~1 s loop) until the first answer sentence's audio is ready —
+  instead of a spoken "Let me check that". Caller hears something after ≈ 1.8 s instead
+  of ≈ 5.7 s of silence.
+  - Generate the sound with numpy at the session's sample rate (no third-party clip →
+    no licensing question); clearly quieter than speech, not speech-like.
+  - Send it in short chunks (~200 ms) paced in real time, so it stops at once when the
+    answer is ready without a `clear` that could cut the answer.
+  - Barge-in stops it like any bot audio; it is not saved in the transcript.
+  - Check without headphones that the sound doesn't trigger the VAD (V9).
+- [ ] **T1b — Shorter tool results (V16).** `search_business_info` returns 3 chunks instead
+  of 5 (`SEARCH_TOP_N`), optionally trimmed per chunk; measure the post-search time
+  (≈ 3.7 s now) and check the eval set still passes.
+- [ ] **T2 — Warm the LLM during the greeting.** While the greeting plays, send the system
+  prompt once with `max_tokens=1` so LM Studio caches it; removes the slow first turn
+  (2.6 s vs ~1 s later). Check whether Gemini (stage 2) needs or allows the same.
+- [ ] **T3 — Business name and timezone (V21, V22)** — crawler/profile fix, tracked in
+  [01-crawler.md](01-crawler.md); the greeting and "current local time" depend on it.
+- [ ] **T4 — Pre-generated greeting + TTS warm-up (V6).** Synthesize the greeting once per
+  business (and sample rate), cache it, play it instantly; create the TTS client at app
+  startup (first call per process ≈ 700 ms vs ≈ 250 ms warm). DEC-17: stored at
+  onboarding later.
+- [ ] **T4b — Sentence splitter keeps abbreviations (V13).** Don't split after "p.m.",
+  "a.m.", "Dr.", "St.", "e.g."; covered by `test_split_sentences_*`.
 
 ## Notes
 

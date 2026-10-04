@@ -77,6 +77,15 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 7. Containerize: API `Dockerfile` (+ `Dockerfile.crawler` only if Crawl4AI was added,
    DEC-36); run everything via Compose with the same env vars — proves stage 2 readiness.
 
+**Stage 1 tuning — after step 7, before stage 2.** Fixes found while building, done as
+one block so stage 2 starts from a tuned pipeline:
+- Voice T1–T4b ([03-voice-channel.md](03-voice-channel.md) → "Stage 1 tuning"): "working"
+  sound during searches, shorter tool results, LLM warm-up during the greeting,
+  pre-generated greeting, sentence splitter abbreviations.
+- Crawler T3 ([01-crawler.md](01-crawler.md)): business name and timezone in the profile.
+- Open items in the "Known problems" list of [03-voice-channel.md](03-voice-channel.md)
+  that are testable locally.
+
 **Deliberately not in stage 1:** RLS policies, owner login, calendar OAuth, onboarding
 flow, Places beyond `place_id`, CI/CD, any cloud hosting.
 
@@ -85,6 +94,7 @@ flow, Places beyond `place_id`, CI/CD, any cloud hosting.
 - A Twilio call (Voice SDK, through ngrok) answers questions and books an appointment
   (the pilot is a spa, DEC-31; consent question OPEN-18).
 - App and crawler run from Docker images with env-var config only.
+- Stage 1 tuning block done; voice latency re-measured and recorded.
 
 ---
 
@@ -161,6 +171,10 @@ EMBED_BASE_URL=http://localhost:1234/v1
 EMBED_API_KEY=lm-studio
 EMBED_MODEL=text-embedding-nomic-embed-text-v1.5
 EMBED_DIM=768
+VOICE_LANGUAGE=en-US                         # Google Speech; auth = ADC
+STT_MODEL=latest_short                       # `phone_call` for 8 kHz Twilio audio — compare
+TTS_VOICE=en-US-Neural2-F                    # voice names change — re-check the catalog
+VOICE_REASONING_EFFORT=none                  # thinking off for voice (DEC-29)
 # in Docker Compose (end of stage 1): use host.docker.internal / service names instead of localhost
 
 # Stage 2 — Cloud Run env (secrets from Secret Manager)
