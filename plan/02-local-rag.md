@@ -63,7 +63,10 @@ conversations    (id, business_id, channel, started_at, ...)
 messages         (id, business_id, conversation_id, role, content, created_at)
 ```
 
-- `kind`: `scraped | custom_reply` (no reviews — Places terms, R9).
+- `kind`: `scraped | custom_reply` (no reviews — Places terms, R9). Planned: `fact` —
+  one row per active fact from the facts library (DEC-38), retrieved in the same hybrid
+  search with a boost between custom replies and scraped chunks; chunks and facts get an
+  optional `location_id` (DEC-37) — [07-knowledge-quality.md](07-knowledge-quality.md) §5.
 - Child rows reference parents by `(business_id, id)` composite foreign keys, so a chunk
   or message can never point at another business's row (DB-enforced already in stage 1).
 - `tsv` uses the `simple` text-search config (no stemming): sites and callers may use any
@@ -167,7 +170,8 @@ docker-compose.yml, Dockerfile, .env.example
 - [ ] Run the eval with Gemini (only env vars changed) and compare to the local model
 - [ ] Show the full prompt in the chat page / a debug endpoint (only sources are shown today)
 - [ ] Measure `/chat` with thinking on vs `reasoning_effort="none"` — gemma-4-12b thinks by default (~8 s, see [03-voice-channel.md](03-voice-channel.md) V24)
-- [ ] Find out why "Saturday opening hours" isn't answered on the pilot — data missing or retrieval miss (V23)
+- [ ] Find out why "Saturday opening hours" isn't answered on the pilot — data missing or retrieval miss (V23). Cause found (2026-10-04): data missing — hours are in the site footer, which `clean.py` removes; fixed by the organize step ([07-knowledge-quality.md](07-knowledge-quality.md) §4)
+- [ ] Knowledge quality (before step 5): location card + facts in prompt and retrieval, summary in the prompt, extended eval with `expected_in_context` — [07-knowledge-quality.md](07-knowledge-quality.md)
 - [ ] Log every LLM call (prompt size, response, tokens, latency) — needed to explain
   DEC-32's 10–17 s turns: measure time-to-first-token with streaming, not total time
 - [x] `/chat/stream` saves the turn when the stream ends; multi-line SSE framing fixed

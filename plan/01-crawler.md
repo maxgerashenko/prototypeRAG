@@ -9,6 +9,13 @@ Markdown pages, a structured business profile, and chunks for one real business.
 Stage-1 test business: Bathhouse Williamsburg (DEC-31) — spa/sauna, Squarespace site,
 server-rendered HTML, `sitemap.xml` present, `robots.txt` permits crawling.
 
+**Next (knowledge quality, before step 5):** business = website domain with locations
+(DEC-37); a new **organize** step between clean and chunk, per-page **fact extraction**
+replacing the flat profile, and a business summary (DEC-38–DEC-40) —
+[07-knowledge-quality.md](07-knowledge-quality.md). It also fixes two crawler causes
+found in the pilot data: sitemap order spent the 8-page budget on blog posts, and
+removing `<footer>` threw away the opening hours (V23).
+
 ---
 
 ## Sources
@@ -21,6 +28,9 @@ server-rendered HTML, `sitemap.xml` present, `robots.txt` permits crawling.
 | Owner uploads (later) | Anything missing from the site | Admin upload endpoint |
 
 ## Pipeline
+
+Planned change: `clean ─► organize ─► extract facts ─► merge ─► summary ─► chunk` —
+see [07-knowledge-quality.md](07-knowledge-quality.md) §2.
 
 ```
 URL ─► discover pages ─► fetch/render ─► clean to Markdown ─► extract profile ─► chunk ─► save
@@ -40,6 +50,8 @@ Google Places API ─► place_id only (live lookup for display, R9) ───�
 
 3. **Clean**
    - Remove navigation, footer, cookie banners, repeated boilerplate across pages.
+     Planned (DEC-40): footer/header text is kept apart and extracted once as "site
+     chrome" — on the pilot it holds the hours and all locations' phones.
    - Keep headings, lists, tables → Markdown.
    - One Markdown document per page with its source URL (stored in `pages`, step 6).
 
@@ -111,8 +123,9 @@ while the crawler is httpx-only it can run from the API image. Stage 2: Cloud Ru
 - [ ] Unit tests on 3 different real sites (only the pilot business so far)
 - [ ] PDF menus: `fetch.extract_pdf_text` exists but isn't wired in — `discover.is_skippable` drops `.pdf` links
 - [ ] Honour `Crawl-delay` from robots.txt (fixed 0.5 s delay today)
-- [ ] (Stage 1 tuning T3) Profile `name` stored as the literal "business_name" and `businesses.name` left "(pending)" on the pilot — voice greets with it (found in step 4, [03-voice-channel.md](03-voice-channel.md) V21)
-- [ ] (Stage 1 tuning T3) Set `businesses.timezone` (from address/profile, or ask the owner) — stays `UTC` today, so "are you open now" is wrong (V22)
+- [x] (2026-10-04, done early) Profile `name` stored as the literal "business_name" and `businesses.name` left "(pending)" on the pilot — voice greets with it (found in step 4, [03-voice-channel.md](03-voice-channel.md) V21). Fixed: placeholder echoes (`"business_name"`, the field's own name, "null", "n/a", "unknown") become null in `profile.py`; `run.py` replaces the "(pending)" name with the extracted name, else the start page title's head. Pilot row corrected by hand
+- [ ] (Stage 1 tuning T3) Set `businesses.timezone` (from address/profile, or ask the owner) — stays `UTC` today, so "are you open now" is wrong (V22). Moved into the knowledge-quality block: timezone per location (DEC-37, [07-knowledge-quality.md](07-knowledge-quality.md) §3)
+- [ ] Knowledge quality (before step 5): crawl priority + blog cap, keep site chrome (footer) for extraction, organize step, facts, summary — [07-knowledge-quality.md](07-knowledge-quality.md) §9
 - [ ] Stage-1 exit: `Dockerfile.crawler` — only if Crawl4AI was added by then (DEC-36)
 
 ## Risks / notes
@@ -120,4 +133,5 @@ while the crawler is httpx-only it can run from the API image. Stage 2: Cloud Ru
 - JS-heavy sites and sites behind Cloudflare may block crawling → fallback: owner uploads.
 - Menus often exist only as images/PDF → PDF text extraction; image OCR later if needed.
 - Reviews: not stored in the knowledge base (Places terms, R9); if used at all, fetched
-  live and clearly separated from official business facts.
+  live and clearly separated from official business facts. Testimonials published on the
+  business's own website feed the business summary, not facts (DEC-39).

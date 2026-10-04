@@ -84,11 +84,11 @@ First measurement (stage 1, 2026-10-03, gemma-4-12b in LM Studio, thinking off, 
 STT/TTS — so LLM + tool only): answer from the profile alone ≈ 1.2–1.3 s to the first
 sentence; with a `search_business_info` call ≈ 5 s (1.8 s to emit the tool call, 3.2 s
 to answer over 5 chunks; the search itself ≈ 40 ms). Tool turns are the gap to close —
-a "working" sound (T1), fewer/shorter chunks (T1b), or a faster model. With thinking on (gemma's default) it
+filler, fewer/shorter chunks, or a faster model. With thinking on (gemma's default) it
 was 8–18 s.
 
 Techniques: stream everything, start TTS on the first complete sentence, keep prompts
-short, short spoken-style answers, play a quiet repeated "working" sound while a tool call runs (T1).
+short, short spoken-style answers, play a filler ("one moment…") when a tool call runs.
 
 ## Conversation behaviour
 
@@ -107,7 +107,7 @@ short, short spoken-style answers, play a quiet repeated "working" sound while a
 |---|---|---|---|---|
 | **A. Phone** | Dialling a Twilio number | `POST /twilio/voice` → WebSocket `/voice/ws` (8 kHz μ-law) | Dialled number (`To`) → `businesses.phone_numbers` | Per minute + number rental (≈ $1.15/month) — only during a Twilio trial or once a business pays (DEC-34) |
 | **B. Browser via Twilio** (Voice SDK) | "Call" button on a web page → TwiML App | **Same** `POST /twilio/voice` → `/voice/ws` | Custom parameter sent by the page (`business_id`) | ≈ $0.004/min, no number; needs an active Twilio account |
-| **C. Browser direct** (mic test page) | `web/mic-test.html`: push-to-talk (default) or hands-free VAD (`?mode=vad`) | Our own WebSocket `/voice/browser` (PCM16) — no Twilio | Business picker (`GET /businesses`) → query parameter on the WebSocket URL | $0 (only Google Speech usage) |
+| **C. Browser direct** (mic test page) | "Talk" button on `web/mic-test.html` | Our own WebSocket `/voice/browser` (PCM16) — no Twilio | Query parameter on the WebSocket URL | $0 (only Google Speech usage) |
 
 Design rule: **transport adapters are thin; the call loop doesn't know which one is used.**
 `session.py` runs the pipeline (VAD → STT → LLM + tools → TTS) on PCM16 frames in and out.
@@ -144,9 +144,7 @@ app/voice/
   tts.py             Google Text-to-Speech
   live.py            Live mode: Gemini Live session, same tools (stage 2)
   tools.py           shared tool definitions: search_business_info + Part 4 actions
-web/mic-test.html    browser voice client (mode C): business picker, push-to-talk, mobile layout
-web/dev-reload.js    dev-only live reload of web/ pages (DEV_RELOAD=true, app/api/dev_reload.py)
-app/api/businesses.py GET /businesses for the picker — dev only, lists all tenants (stage 3: behind login)
+web/mic-test.html    browser mic test client (mode C)
 web/call.html        Twilio Voice SDK call page (mode B)
 ```
 
@@ -165,7 +163,7 @@ Re-check each item once its environment exists, then tick it or turn it into a t
 | V3 | `finish()` waits up to 5 s, then silently uses the interim text | Potential | Log line "STT final result not in…" | Lower timeout; tune VAD `end_silence_ms` |
 | V4 | `STT_MODEL=latest_short` vs `phone_call` on 8 kHz μ-law audio — accuracy unknown | Potential | Same questions via mic and via Twilio, compare transcripts | Per-transport STT model |
 | V5 | `TTS_VOICE=en-US-Neural2-F` may be retired/renamed; TTS may not return the exact requested rate (8000/16000) → `ValueError` | Potential | First TTS call at both rates | Pick a current voice (Chirp 3 HD?); resample instead of failing |
-| V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Real | Time from connect to first audio | Cache greeting audio per business (onboarding) → **T4** |
+| V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Real | Time from connect to first audio | Cache greeting audio per business (onboarding) |
 | V7 | Missing credentials surface only after ~3 s (auth probes the metadata server), and again on every turn | Real | Seen in smoke test | Check ADC once at startup / fail fast |
 | V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Real (design gap) | Ask a question in another language | `alternative_language_codes`, or language per business |
 
@@ -215,7 +213,7 @@ Findings:
 | V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | Minimum speech length / confirmed words before barge-in |
 | V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | Client reports playback end; Twilio `mark` events |
 | V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); untested in Safari | Potential | Open page in Chrome, Safari, Firefox | Capture at native rate, resample server-side |
-| V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Potential | Look at `reply` events of real answers | Abbreviation list; split also on `,`/length cap → **T4b** |
+| V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Potential | Look at `reply` events of real answers | Abbreviation list; split also on `,`/length cap |
 | V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
 | V15 | Reply-task sends and feed-path sends (`clear`) can interleave on one WebSocket | Potential | Barge-in many times quickly | One send queue per connection |
 
@@ -223,7 +221,7 @@ Findings:
 
 | # | Problem | Kind | How to test | Fix idea if it fails |
 |---|---|---|---|---|
-| V16 | Turns with `search_business_info` take ≈ 5 s to the first sentence (1.8 s to emit the tool call, 3.2 s over 5 chunks) — budget is 1.5 s | Real | `latency` events | Repeated "working" sound while the tool runs (**T1**); fewer/shorter chunks (**T1b**); faster model; compare Gemini (step 6) |
+| V16 | Turns with `search_business_info` take ≈ 5 s to the first sentence (1.8 s to emit the tool call, 3.2 s over 5 chunks) — budget is 1.5 s | Real | `latency` events | Filler phrase while the tool runs; fewer/shorter chunks; LM Studio prompt caching; faster model; compare Gemini (step 6) |
 | V17 | Silence re-prompt / hang-up not built yet (task above) | Real | — | — |
 
 ### Needs Twilio / later stages
@@ -238,7 +236,7 @@ Findings:
 
 | # | Problem | Kind | Where it's tracked |
 |---|---|---|---|
-| V21 ✅ fixed 2026-10-04 | Greeting says "you've reached business_name" — profile `name` holds the placeholder; `businesses.name` is "(pending)" | Real | [01-crawler.md](01-crawler.md) tasks |
+| V21 | Greeting says "you've reached business_name" — profile `name` holds the placeholder; `businesses.name` is "(pending)" | Real | [01-crawler.md](01-crawler.md) tasks |
 | V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Real | [01-crawler.md](01-crawler.md) tasks |
 | V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real (cause unknown) | `/debug/retrieve`, eval set |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had | Potential | [02-local-rag.md](02-local-rag.md) tasks |
@@ -247,36 +245,15 @@ Findings:
 ## Tasks
 
 - [x] Audio utilities (μ-law/PCM, resampling) + tests
-- [x] Google STT/TTS streaming code (`stt.py` one stream per VAD turn, `tts.py` per sentence)
+- [x] Google STT/TTS streaming code (`stt.py` one stream per VAD turn, `tts.py` per sentence) — live check pending gcloud ADC
 - [x] Transport-agnostic call loop in `session.py` (PCM16 in/out, tool loop, sentence-by-sentence TTS) + tests with fake STT/TTS/LLM
 - [x] Mic test adapter + page (mode C, `browser_ws.py`, `web/mic-test.html`)
-- [x] Mic test page as a mobile-style app (2026-10-04): business picker, **push-to-talk**
-  (Space: first press starts, then hold to talk / release to send; Esc or Backspace ends;
-  same with mouse/touch on the button), button labels follow the state, light/dark from
-  the system, green-grey palette. Server: `turn_detection="manual"` in `session.py`,
-  `mode=ptt` + `ptt_start`/`ptt_end` frames in `browser_ws.py`; release ends the turn at
-  once (no 500 ms VAD wait); empty press → `no_speech` event. Hands-free VAD kept as
-  `?mode=vad` for testing V9/barge-in. Drafted by local qwen from specs; fixed on review:
-  End button never shown, dev-reload script missing, stale socket's `onclose` could end
-  a new conversation, "Thinking…" stuck after an empty press, `dvh` overridden by `vh`.
-- [x] Redesign (2026-10-04) from the Claude Design canvas "Voice Chat Bot": 6 screens —
-  pick a business (search, expandable cards with recent conversations), a business's
-  conversations, read a transcript, connecting, live call (orb with listening /
-  thinking / speaking states, push-to-talk, hang-up), call ended. Real data from new
-  `app/api/conversations.py` (`GET /businesses/{id}/conversations[/{cid}]`, calls without
-  a user message hidden) and `conversation_count` on `GET /businesses`. "Continue in a new
-  call" = `continue_from` on the WebSocket: the earlier conversation becomes LLM history,
-  the greeting names its topic (AI disclosure kept, DEC-17). Dark only, as designed.
-  Backend drafted by local qwen (clean on review); the page by Sonnet after qwen's draft
-  failed structurally (nothing nested rendered, events never fired, broken icons).
-- [ ] Mic test page on a phone — needs HTTPS (`getUserMedia` is blocked on plain-http
-  LAN addresses); test through ngrok together with the Twilio work
 - [x] Google STT/TTS checked live (ADC set up; results under "Known problems")
 - [x] Mic test end-to-end in the browser with real STT/TTS + LM Studio (results under "Known problems")
 - [ ] Twilio webhook + TwiML + media stream WebSocket — tested with the trial number (mode A) and a Voice SDK browser call (mode B)
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
-- [ ] Silence re-prompt (~6 s) and polite hang-up; end the call on "bye" (seen in the first mic test)
+- [ ] Silence re-prompt (~6 s) and polite hang-up; filler while a tool runs, if latency needs it
 - [ ] Called number / TwiML App → business_id mapping from Postgres
 - [ ] Call transfer + take-a-message fallback
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
@@ -285,68 +262,6 @@ Findings:
 - [x] Record real latency numbers against the budget above (first mic test; repeat over Twilio)
 - [x] `search_business_info` tool + shared tool definitions (used by both modes)
 - [ ] Stage 2: Live mode spike on Cloud Run; compare with pipeline mode (OPEN-08)
-
-### Stage 1 tuning — after all stage 1 steps (1–7), before stage 2
-
-From the first mic test (see "Known problems"). Done as one block once step 7 is
-finished, so stage 2 starts from a tuned pipeline. Re-measure with the mic test page
-after each item and record the numbers.
-
-- [ ] **T1 — "Working on it" sound during searches (V16).** When the model emits a
-  `search_business_info` call, play a quiet, repeated short sound (e.g. soft ticks or
-  light "typing" clicks, ~1 s loop) until the first answer sentence's audio is ready —
-  instead of a spoken "Let me check that". Caller hears something after ≈ 1.8 s instead
-  of ≈ 5.7 s of silence.
-  - Generate the sound with numpy at the session's sample rate (no third-party clip →
-    no licensing question); clearly quieter than speech, not speech-like.
-  - Send it in short chunks (~200 ms) paced in real time, so it stops at once when the
-    answer is ready without a `clear` that could cut the answer.
-  - Barge-in stops it like any bot audio; it is not saved in the transcript.
-  - Check without headphones that the sound doesn't trigger the VAD (V9).
-- [ ] **T1b — Shorter tool results (V16).** `search_business_info` returns 3 chunks instead
-  of 5 (`SEARCH_TOP_N`), optionally trimmed per chunk; measure the post-search time
-  (≈ 3.7 s now) and check the eval set still passes.
-- [ ] **T2 — Warm the LLM during the greeting.** While the greeting plays, send the system
-  prompt once with `max_tokens=1` so LM Studio caches it; removes the slow first turn
-  (2.6 s vs ~1 s later). Check whether Gemini (stage 2) needs or allows the same.
-- [ ] **T3 — Business name and timezone (V21, V22)** — crawler/profile fix, tracked in
-  [01-crawler.md](01-crawler.md); the greeting and "current local time" depend on it.
-- [ ] **T4 — Pre-generated greeting + TTS warm-up (V6).** Synthesize the greeting once per
-  business (and sample rate), cache it, play it instantly; create the TTS client at app
-  startup (first call per process ≈ 700 ms vs ≈ 250 ms warm). DEC-17: stored at
-  onboarding later.
-- [ ] **T4b — Sentence splitter keeps abbreviations (V13).** Don't split after "p.m.",
-  "a.m.", "Dr.", "St.", "e.g."; covered by `test_split_sentences_*`.
-
-**Bugs from the code review of commit `89f0fc2`** (2026-10-04, all in `app/voice/session.py`,
-confirmed against the code; IDs B1–B6 — "R" is taken by restrictions). Each fix gets a test.
-
-- [ ] **B1 (high) — Hang-up mid-reply breaks cleanup.** The reply task's `finally` sends the
-  `latency` event with `_send_event` to the already-closed socket; the error escapes
-  `_cancel_reply()`/`close()`, so the STT stream is never cancelled (thread stays blocked
-  on Google) and `conversations.ended_at` is never set. Fix: `_try_send_event` there;
-  make `close()` finish its cleanup even if cancelling the task raises. Test: close the
-  session mid-reply with a send callback that raises.
-- [ ] **B2 (medium) — "Spoken" means sent, not heard.** A sentence counts as spoken once its
-  audio is *sent*; TTS is faster than playback, so the whole reply is usually sent before
-  the caller hears it, and a later barge-in still saves all of it to history and the DB.
-  (The commit message's "only the sentences actually spoken are kept" holds only while
-  TTS is still running.) Fix: store each sentence's estimated play-end time; on barge-in
-  keep only sentences whose play-end ≤ barge-in time (optionally mark the cut one).
-- [ ] **B3 (medium) — Barge-in during STT `finish()` loses the caller's words.** The cancel
-  lands before the `try/finally` that saves the turn, so the first half of a sentence
-  split by a pause ("What if I want to come?" … "Today at 9 pm") is lost. Fix: move the
-  STT wait inside the protected block, or carry the unanswered text into the next turn.
-- [ ] **B4 (low) — Chunks bigger than one VAD frame clip the turn start.** `feed()` only
-  pushes a chunk to STT if speech had started *before* it; audio after the trigger in the
-  same chunk is dropped. Hidden today (browser and Twilio send exactly 20 ms). Fix: let
-  `TurnDetector` return the in-speech audio per chunk, or feed it frame by frame.
-- [ ] **B5 (low) — Tool rounds repeat earlier text.** The assistant message for each tool
-  round uses `" ".join(spoken)`, which accumulates across rounds, so the LLM sees earlier
-  sentences twice. Fix: only the text spoken in the current round.
-- [ ] **B6 (low) — Bad timezone looks like an unknown business.** `ZoneInfoNotFoundError`
-  is a `LookupError`, so `browser_ws` closes with 4404 "unknown business". Fix: catch it
-  in `_load_business` (log + fall back to UTC) or raise a different error; ties to V22.
 
 ## Notes
 

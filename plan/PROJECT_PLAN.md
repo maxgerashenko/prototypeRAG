@@ -68,6 +68,9 @@ Pipeline:
 5. **Structured facts** — extract key fields (hours, address, phone, booking policy)
    into a separate structured record; these are too important to leave to vector search.
    From Places only `place_id` is stored; open details in OPEN-04 (R9).
+   Planned (DEC-37–DEC-40): business = website domain with locations; an organize step,
+   per-page atomic **facts** with source quotes, and a short business summary from
+   testimonials/marketing — [07-knowledge-quality.md](07-knowledge-quality.md).
 6. **Store + embed** — pages, profile and chunks in Postgres with `business_id`
    (isolation by `tenant_session` now, Row-Level Security from stage 3); the indexer embeds chunks into pgvector.
 7. **Refresh** — re-crawl on a schedule; replace changed chunks.
@@ -157,6 +160,7 @@ Order follows the build order in [DECISIONS.md](DECISIONS.md) section 1.
 | M2 | 1 | Text RAG | Chat answers test questions correctly, says "don't know" otherwise |
 | M3 | 1 | Voice (local) | Talk to the bot through the mic locally |
 | M4 | 1 | Phone | Twilio call answered — Voice SDK browser call, no number (DEC-34), ngrok tunnel locally |
+| M4b | 1 | Knowledge quality | Pilot domain crawled with locations; facts with sources; extended eval passes incl. hours and per-location questions — [07](07-knowledge-quality.md) |
 | M5 | 1 | Actions | Booking + conversation summary working end-to-end |
 | M5b | 1 | Gemini check | Eval + booking tests pass with Gemini (env vars only), still local |
 | M5c | 1 | Containerized | App + crawler run from Docker images with env-var config only |

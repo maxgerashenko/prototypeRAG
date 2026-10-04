@@ -13,6 +13,7 @@ Detailed plan per part:
 4. [Actions](plan/04-actions.md) — bookings, calendar, conversation summaries
 5. [Cloud — stage 2](plan/05-cloud-migration.md) — Cloud Run + Neon + Gemini for one pilot business, only env vars change
 6. [Scale — stage 3](plan/06-scale.md) — many businesses: tenant isolation, onboarding, reliability, cost per business
+7. [Knowledge quality](plan/07-knowledge-quality.md) — business = domain with locations, organize/clean step, facts library, business summary
 
 Working on this repo with Claude Code: see [CLAUDE.md](CLAUDE.md) for the file structure and how architecture discussions are recorded.
 

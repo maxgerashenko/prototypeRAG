@@ -71,6 +71,10 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 2. ✅ Crawler → one real business in Postgres — [01-crawler.md](01-crawler.md).
 3. ✅ Index, retrieval, `/chat`, eval questions, debug views — [02-local-rag.md](02-local-rag.md).
 4. Voice: mic test mode, then Twilio Voice SDK browser calls + ngrok — [03-voice-channel.md](03-voice-channel.md).
+   - **Knowledge quality** (unnumbered block, before step 5; may overlap step 4's Twilio
+     part): business = domain with locations, organize step, facts library, business
+     summary (DEC-37–DEC-40) — [07-knowledge-quality.md](07-knowledge-quality.md).
+     Before step 5 because bookings need services/durations/prices per location.
 5. Actions: tool calling, internal bookings, summaries, minimal dashboard (no login) —
    [04-actions.md](04-actions.md).
 6. Gemini comparison: switch `LLM_*` / `EMBED_*` env vars, re-run eval + booking tests.
@@ -82,7 +86,8 @@ one block so stage 2 starts from a tuned pipeline:
 - Voice T1–T4b ([03-voice-channel.md](03-voice-channel.md) → "Stage 1 tuning"): "working"
   sound during searches, shorter tool results, LLM warm-up during the greeting,
   pre-generated greeting, sentence splitter abbreviations.
-- Crawler T3 ([01-crawler.md](01-crawler.md)): business name and timezone in the profile.
+- Crawler T3 ([01-crawler.md](01-crawler.md)): business name (done) and timezone — the
+  timezone moved to the knowledge-quality block (per location, DEC-37).
 - Voice bugs B1–B6 from the code review of the call loop ([03-voice-channel.md](03-voice-channel.md)
   → "Stage 1 tuning"): hang-up cleanup, heard vs sent text, barge-in during STT, chunk
   clipping, repeated tool-round text, timezone error.
@@ -215,7 +220,7 @@ app/
   config.py         settings from env (pydantic-settings)
   db/               SQLAlchemy models, Alembic migrations, tenant_session helper
   llm.py            OpenAI-compatible client: chat, embed
-  ingest/           crawler, cleaner, chunker, Places client
+  ingest/           crawler, cleaner, organize, facts + merge, summary, chunker, Places client
   rag/              index, retrieve (SQL), prompt, answer
   voice/            Twilio routes, WebSocket session, Google STT/TTS
   actions/          tools: booking, appointment, summary, message, transfer
