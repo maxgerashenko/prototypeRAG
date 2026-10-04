@@ -85,25 +85,38 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
 - Priority when goals conflict: correctness & legal > caller experience > multi-tenancy >
   same tech local/cloud > simplicity > cost > local first.
 
-## Delegating commands to the local model
+## Delegating to the local model
 
-For **write git** (add/commit/branch), **read-only database** (SELECT, `\d`, `\dt`) and
-**write database** (INSERT/UPDATE/DELETE) commands on this repo: draft the command with
-the user's local LM Studio model instead of drafting it yourself, then run the result.
-Read-only git (status/log/diff/show) is not in scope — draft those directly as usual.
+Simple work goes to the user's local LM Studio model (`google/gemma-4-12b`, the loaded
+chat model); **review and planning always stay with Claude** — code review, reviewing
+any draft (including the local model's), plans, architecture decisions, plan-file and
+commit-message writing, and editing code.
+
+| Kind | Examples | Tool | Ask the user first? |
+|---|---|---|---|
+| **Trivial** | Read & summarize a file or command output; find something (which file/line, a value); check a result (did tests pass, did a command succeed); read-only commands (`git status/log/diff/show`, `ls`, DB `SELECT`, `\d`, `\dt`) | `delegate_ask.py` (summarize/find/check), `delegate.py` (draft a command) | **No** — just do it |
+| **Write commands** | Write git (add/commit/branch); write DB (INSERT/UPDATE/DELETE) | `delegate.py` | **Yes, per task, every session** |
+| **Whole-file code drafts** | A Python module from a written spec | `delegate_code.py` (next section) | Standing choice |
+| **Never delegated** | Review, planning, decisions, plan files, commit messages, code edits | — | — |
 
 1. Check which model is actually loaded: `lms ps` (`/v1/models` also lists
    available-but-unloaded models, which fail to load on demand if others already fill
    memory).
-2. **Ask the user before delegating each specific task** — this is a standing workflow,
-   not permission to go silent; confirm per task, every session.
-3. Draft via `python3 .claude/tools/delegate.py "<task in plain English>" [model-id]`
-   (pass `model-id` when the loaded model differs from the script's default). It talks
-   to LM Studio at `http://localhost:1234/v1` and prints one command, or a line starting
-   `REFUSE:` if the task was destructive/ambiguous.
-4. Run the printed command yourself — review it first like any other command; a local
-   model drafting it doesn't exempt it from the usual checks before destructive ops.
-   Execute it directly without re-pasting the draft back to the user first.
+2. **Summarize / find / check:**
+   `python3 .claude/tools/delegate_ask.py "<question>" [file ...] [--model ID]`, or pipe
+   output in: `uv run pytest -q 2>&1 | python3 .claude/tools/delegate_ask.py "Did the tests pass?"`.
+   Prints a short answer (`PASS`/`FAIL` + the decisive line for checks, exact quotes for
+   finds, `NOT FOUND` if absent). Thinking off, ~1–3 s per call.
+3. **Draft a command:** `python3 .claude/tools/delegate.py "<task in plain English>" [model-id]`
+   prints one command, or a line starting `REFUSE:` if the task was destructive/ambiguous.
+   Run it yourself after reviewing it like any other command; a local model drafting it
+   doesn't exempt it from the usual checks before destructive ops. Execute it directly
+   without re-pasting the draft back to the user first.
+4. **Answers are hints, not proof.** Verify yourself anything that a commit, push,
+   delete or decision depends on (e.g. read the pytest summary line before committing),
+   and read code yourself before editing it — a summary isn't enough to edit from.
+5. Not for: large inputs that need full understanding (input is cut at 60k characters),
+   or anything where a wrong answer would be silent and costly — do those yourself.
 
 ## Delegating whole-file code drafts
 

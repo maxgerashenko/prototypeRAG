@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Ask the local LM Studio model to draft one git or psql command for this repo.
 
-Part of the project workflow in CLAUDE.md → "Delegating commands to the local model".
+Part of the project workflow in CLAUDE.md → "Delegating to the local model".
 Claude checks which model is actually loaded (`lms ps`) before using this, since
 `/v1/models` lists available-but-unloaded models too, and loading a new one can fail
 with "insufficient system resources" if others already fill memory.
