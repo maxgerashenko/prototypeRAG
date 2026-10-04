@@ -528,6 +528,8 @@ function pickBusiness(id) {
 }
 
 function scrollCardToTop(id) {
+  // runs 40 ms after a pick: the screen may have changed since (e.g. a quick call start)
+  if (state.stage !== "select" || !ui.cardEls) return;
   const list = ui.listEl;
   const el = ui.cardEls[id];
   if (!list || !el) return;
