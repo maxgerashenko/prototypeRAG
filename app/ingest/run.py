@@ -5,8 +5,8 @@ Pipeline (plan 07 §2): discover (priority order) -> fetch -> clean (main text +
 chrome kept apart) -> store every page -> ORGANIZE (dedupe chrome into one pseudo-page,
 detect locations from site content, assign page_type/location/retrievable per page,
 idempotent on re-crawl) -> CHUNK only the pages organize says changed, tagged with
-their location -> delete pages no longer linked -> profile extraction. Indexing
-(embedding) is a separate step: `python -m app.rag.index`.
+their location -> delete pages no longer linked -> profile extraction -> timezone per
+location (V22). Indexing (embedding) is a separate step: `python -m app.rag.index`.
 """
 
 import argparse
@@ -33,10 +33,16 @@ from app.ingest.organize import (
     organize_business,
     prefix_chunk_drafts,
 )
-from app.ingest.profile import extract_profile_from_text, merge_profile, name_from_title
+from app.ingest.profile import (
+    PENDING_NAME,
+    extract_profile_from_text,
+    is_placeholder_name,
+    merge_profile,
+    name_from_title,
+)
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
+from app.ingest.timezone import assign_timezones
 
-PENDING_NAME = "(pending)"  # businesses.name until the first profile extraction
 
 _PROFILE_FIELDS = (
     "name", "address", "phone", "email",
@@ -128,14 +134,22 @@ def _expand_by_links(
 def _rechunk_page(session, business_id: uuid.UUID, page: Page, business_name: str) -> None:
     """Chunk one page per its organize-step metadata (A2/A4): never for the site-chrome
     pseudo-page or a page organize marked not retrievable (duplicate/blog/legal/...);
-    testimonials cut and junk chunks dropped before storing; chunks from a page that is
+    testimonials cut (and kept in `page.testimonials` for summary.py, plan 07 §6) and
+    junk chunks dropped before storing; chunks from a page that is
     itself one location's page are prefixed with "<business> <location> — " and tagged
     with that location_id so both keyword and filtered vector search can use it (A2)."""
-    if not page.retrievable or page.page_type == "site_chrome":
+    if page.page_type == "site_chrome":
+        page.testimonials = []
         replace_chunks(session, business_id, page.id, [])
         return
 
-    cleaned_markdown, _testimonials = cut_testimonials(page.markdown)
+    # cut before the retrievable check: a non-retrievable page's testimonials still feed
+    # the summary (summary.py picks its source pages, e.g. skipping duplicate_of ones)
+    cleaned_markdown, page.testimonials = cut_testimonials(page.markdown)
+    if not page.retrievable:
+        replace_chunks(session, business_id, page.id, [])
+        return
+
     drafts = filter_junk_chunks(chunk_markdown(cleaned_markdown))
 
     location_name = None
@@ -158,7 +172,7 @@ def crawl_business(
 ) -> dict:
     """One full crawl: discover -> fetch -> clean -> store every page -> organize
     (locations, page type, retrievable) -> chunk the pages organize touched -> delete
-    pages no longer linked -> profile extraction (plan 07 §2)."""
+    pages no longer linked -> profile extraction (plan 07 §2) -> timezone per location (V22)."""
     client = make_client(delay_seconds)
     try:
         origin = urlparse(start_url)
@@ -231,7 +245,7 @@ def crawl_business(
 
         with tenant_session(business_id) as session:
             business = session.get(Business, business_id)
-            business_name = business.name if business and business.name != PENDING_NAME else "the business"
+            business_name = business.name if business and not is_placeholder_name(business.name) else "the business"
             for page_id in organize_result.organized_page_ids:
                 page = session.get(Page, page_id)
                 if page is not None:
@@ -272,7 +286,7 @@ def crawl_business(
                     # businesses.name starts as a placeholder (main()); replace it with the
                     # extracted name, else the start page's title -- never overwrite a real name
                     business = session.get(Business, business_id)
-                    if business is not None and business.name == PENDING_NAME:
+                    if business is not None and is_placeholder_name(business.name):
                         title = session.scalar(
                             select(Page.title).where(Page.business_id == business_id, Page.url == start_url)
                         )
@@ -281,6 +295,15 @@ def crawl_business(
             except Exception as exc:
                 print(f"profile extraction failed: {exc}")
 
+        # V22: after profile extraction -- a default location without an address of its
+        # own falls back to the profile's. Runs even when the profile is owner-confirmed.
+        timezones_set = 0
+        if extract_profile:
+            try:
+                timezones_set = assign_timezones(business_id)
+            except Exception as exc:
+                print(f"timezone lookup failed: {exc}")
+
         return {
             "pages_crawled": pages_crawled,
             "pages_changed": pages_changed,
@@ -288,6 +311,7 @@ def crawl_business(
             "pages_organized": len(organize_result.organized_page_ids),
             "locations_found": organize_result.locations_found,
             "profile_extracted": profile_extracted,
+            "timezones_set": timezones_set,
         }
     finally:
         client.close()

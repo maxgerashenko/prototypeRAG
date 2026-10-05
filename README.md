@@ -86,3 +86,38 @@ playback, shared with the debug page), `web/src/chat/`, `web/src/voice-debug/`,
 `web/src/api.ts` (backend types), `web/public/dev-reload.js` (DEV_RELOAD), `web/e2e/` (browser
 tests; `mocks.ts` = mocked API and voice socket). The backend's read API for the app is
 tested in `tests/test_conversations.py` and `tests/test_voice_session.py`.
+
+### Throwaway database (migration round trips, destructive tests)
+
+Never run `alembic downgrade` or a destructive test against the dev DB `app`, and never
+copy it with `CREATE DATABASE … TEMPLATE app`. That command waits up to 5 s for every
+other session on `app` (uvicorn, pytest, a psql shell) to leave, and new connections to
+`app` block behind it, including the compose healthcheck's `pg_isready -d app`. When the
+healthcheck gives up after its 3 s timeout, the postmaster sees a server process die and
+restarts all of Postgres ("server process … exited with exit code 2 / terminating any
+other active server processes"). Reproduced on `pgvector/pgvector:pg16` 16.15: it happens
+with the healthcheck and does not without it. Without the crash the copy still fails
+whenever anything stays connected to `app`, so use one of these instead:
+
+```bash
+P="docker compose exec -T postgres"
+$P dropdb -U app --if-exists --force app_scratch && $P createdb -U app app_scratch
+
+# then ONE of a) or b):
+# a) empty schema (default): just the migrations, plus whatever fixture the test inserts
+DATABASE_URL=postgresql+psycopg://app:app@localhost:5432/app_scratch uv run alembic upgrade head
+
+# b) a copy of the dev data, when the test needs real rows (pg_dump reads a snapshot,
+#    so it is safe while the app is connected to `app`)
+$P pg_dump -U app app | $P psql -q -v ON_ERROR_STOP=1 -U app -d app_scratch
+
+# round trip against the throwaway DB only
+export DATABASE_URL=postgresql+psycopg://app:app@localhost:5432/app_scratch
+uv run alembic downgrade base && uv run alembic upgrade head && uv run alembic current
+unset DATABASE_URL
+
+$P dropdb -U app --force app_scratch     # clean up; --force closes leftover sessions
+```
+
+`DATABASE_URL` in the environment wins over `.env` (pydantic-settings), so the same
+override points `uv run pytest` or the app at `app_scratch`.

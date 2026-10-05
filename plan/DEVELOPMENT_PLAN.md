@@ -86,8 +86,8 @@ one block so stage 2 starts from a tuned pipeline:
 - Voice T1–T4b ([03-voice-channel.md](03-voice-channel.md) → "Stage 1 tuning"): "working"
   sound during searches, shorter tool results, LLM warm-up during the greeting,
   pre-generated greeting, sentence splitter abbreviations.
-- Crawler T3 ([01-crawler.md](01-crawler.md)): business name (done) and timezone — the
-  timezone moved to the knowledge-quality block (per location, DEC-37).
+- Crawler T3 ([01-crawler.md](01-crawler.md)): business name and timezone (both done;
+  timezone per location, DEC-37).
 - Voice bugs B1–B6 from the code review of the call loop ([03-voice-channel.md](03-voice-channel.md)
   → "Stage 1 tuning"): hang-up cleanup, heard vs sent text, barge-in during STT, chunk
   clipping, repeated tool-round text, timezone error.
