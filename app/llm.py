@@ -35,10 +35,16 @@ def get_embed_client() -> OpenAI:
 def embed(texts: list[str]) -> list[list[float]]:
     settings = get_settings()
     client = get_embed_client()
-    response = client.embeddings.create(model=settings.embed_model, input=texts)
+    # ask for EMBED_DIM explicitly: gemini-embedding-001 defaults to 3072 dims and only
+    # returns 768 when requested (Matryoshka truncation, DEC-08); nomic's native size is
+    # already 768. Truncated Gemini vectors aren't unit-length, which is fine because
+    # retrieval ranks by cosine distance.
+    response = client.embeddings.create(
+        model=settings.embed_model, input=texts, dimensions=settings.embed_dim
+    )
     vectors = [d.embedding for d in response.data]
     # the chunks.embedding column is fixed at EMBED_DIM; fail here with a clear message
-    # rather than deep inside pgvector (e.g. a cloud model's default size isn't 768)
+    # rather than deep inside pgvector (e.g. a provider that ignores `dimensions`)
     if vectors and len(vectors[0]) != settings.embed_dim:
         raise ValueError(
             f"{settings.embed_model} returned {len(vectors[0])}-dim vectors, EMBED_DIM is {settings.embed_dim}"

@@ -788,7 +788,7 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Llama licence | Commercial use allowed with conditions ("Built with Llama", acceptable use policy) | OPEN-06 |
 | Places API | Scraping Google Maps violates ToS; API data has storage limits | DEC-11 |
 | Gemini free tier | Submitted data may be used to improve Google products | DEC-07 |
-| Gemini embedding size | `gemini-embedding-001` returns 3072 dims by default (approx., re-check); a reduced output dimension must be requested to fit `vector(768)` — `app/llm.py` now fails fast on a size mismatch | DEC-08, R6 |
+| Gemini embedding size | `gemini-embedding-001` returns 3072 dims by default (approx., re-check); a reduced output dimension must be requested to fit `vector(768)` — `app/llm.py` sends `dimensions=EMBED_DIM` on every embed call and fails fast on a size mismatch | DEC-08, R6 |
 | SSE framing | A raw newline inside a `data:` field ends it; multi-line text must be sent as several `data:` lines | `/chat/stream` |
 | Cost at scale | Telephony + speech minutes dominate, not the database | DEC-03, DEC-14 |
 | Phone number rental | Every provider charges a monthly fee per number (Twilio ≈ $1.15/month); Twilio upgrade needs a $20 prepaid deposit (≈ 2026) | DEC-34 |

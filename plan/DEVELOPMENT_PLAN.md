@@ -195,8 +195,8 @@ EMBED_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 EMBED_API_KEY=<secret>
 EMBED_MODEL=gemini-embedding-001
 EMBED_DIM=768                     # reduced output dimension, keeps the column size —
-                                  # the request must ask for it (default is larger);
-                                  # app/llm.py fails fast on a mismatch
+                                  # app/llm.py sends it as `dimensions` (default is
+                                  # larger) and fails fast on a mismatch
 
 # Stage 3 — adds
 DATABASE_URL=postgresql+psycopg://app_user:<secret>@...   # non-owner role, RLS applies
