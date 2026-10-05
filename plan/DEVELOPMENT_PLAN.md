@@ -175,6 +175,7 @@ DATABASE_URL=postgresql+psycopg://app:app@localhost:5432/app
 LLM_BASE_URL=http://localhost:1234/v1       # LM Studio server
 LLM_API_KEY=lm-studio                        # any value; LM Studio doesn't check it
 LLM_MODEL=google/gemma-4-12b                 # chat/voice (DEC-32); id as shown by `lms ps`
+CHAT_REASONING_EFFORT=none                   # thinking off for /chat (V24)
 EMBED_BASE_URL=http://localhost:1234/v1
 EMBED_API_KEY=lm-studio
 EMBED_MODEL=text-embedding-nomic-embed-text-v1.5

@@ -44,6 +44,31 @@ def _add_chunk(session, business_id, text, page_id=None, kind="scraped", custom_
     return chunk
 
 
+def test_chat_answers_send_reasoning_effort(monkeypatch):
+    """V24: /chat used to leave thinking on (~8 s before the first word on gemma-4-12b)."""
+    from types import SimpleNamespace
+
+    from app.config import get_settings
+    from app.rag import answer
+
+    monkeypatch.setattr(answer, "retrieve", lambda *a: [])
+    sent: list[dict] = []
+    monkeypatch.setattr(answer, "chat", lambda messages, **kw: sent.append(kw) or "ok")
+
+    def create(**kw):
+        sent.append(kw)
+        return iter([SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="ok"))])])
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(answer, "get_chat_client", lambda: fake_client)
+
+    bid = uuid.uuid4()  # no rows needed: profile None, retrieval faked
+    assert answer.answer_question(bid, "hours?").answer == "ok"
+    assert list(answer.stream_answer(bid, "hours?")) == ["ok"]
+    effort = get_settings().chat_reasoning_effort  # "none" unless .env overrides it
+    assert [kw["reasoning_effort"] for kw in sent] == [effort, effort]
+
+
 # --- reciprocal_rank_fusion (pure math, no DB/network) -------------------------------
 
 

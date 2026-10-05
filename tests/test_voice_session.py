@@ -20,7 +20,7 @@ from sqlalchemy import delete, select
 from app.db import tenant_session
 from app.db.models import Business, Chunk, Conversation, CustomReply, Message
 from app.voice import session as session_mod
-from app.voice.session import CallSession, split_sentences
+from app.voice.session import CallSession, speakable, split_sentences
 
 FIXTURES = Path(__file__).parent / "fixtures" / "voice"
 RATE = 8000
@@ -130,6 +130,101 @@ def test_split_sentences_keeps_unfinished_tail():
     assert split_sentences("We close at 5. Anything") == (["We close at 5."], "Anything")
     assert split_sentences("Yes! Sure? ok") == (["Yes!", "Sure?"], "ok")
     assert split_sentences("no end yet") == ([], "no end yet")
+
+
+def test_speakable_strips_markdown_lists_and_urls():
+    assert speakable("**Hours:** we close at *5 pm*.") == "Hours: we close at 5 pm."
+    assert speakable("## Prices\n- Day pass $39\n2. Night pass") == "Prices Day pass $39 Night pass"
+    assert speakable("See [our site](https://www.zebra.lv/hours?x=1).") == "See our site."
+    assert speakable("Book at https://www.zebra.lv/book now.") == "Book at zebra.lv now."
+    assert speakable("Prices:\n1.") == "Prices:"  # list number cut off by the sentence splitter
+    assert speakable("**") == ""
+    # not markdown: keep
+    assert speakable("Open 24/7, 3-day pass is $99, 5 * 3, snake_case.") == "Open 24/7, 3-day pass is $99, 5 * 3, snake_case."
+
+
+class MarkdownLLM:
+    """One round, no tool call: an answer the prompt forbids but models still write."""
+
+    def __init__(self) -> None:
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs):
+        async def gen():
+            for piece in ["**We close** at 5 pm. ", "**\n", "See [our site](https://zebra.lv/hours)."]:
+                yield _chunk(piece)
+
+        return gen()
+
+
+def test_markdown_reply_is_spoken_and_saved_plain(business, monkeypatch):
+    spoken: list[str] = []
+
+    def synthesize(text, rate):
+        spoken.append(text)
+        return fake_synthesize(text, rate)
+
+    s, _, events = _make_session(business, MarkdownLLM(), monkeypatch)
+    s._synthesize = synthesize
+    s.turn_detection = "manual"
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.start_turn()
+        s.end_turn()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert spoken[1:] == ["We close at 5 pm.", "See our site."]  # the bare "**" is skipped
+    assert [e["text"] for e in events if e["type"] == "reply"][1:] == spoken[1:]
+    with tenant_session(business) as db:
+        last = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at)).all()[-1]
+        assert last.content == "We close at 5 pm. See our site."
+
+
+def test_stt_failure_tells_the_client(business, monkeypatch):
+    class FailingTranscriber(FakeTranscriber):
+        def finish(self, timeout=5.0):
+            raise RuntimeError("speech-to-text failed") from PermissionError("no ADC")
+
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    s._new_transcriber = FailingTranscriber
+    s.turn_detection = "manual"
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.start_turn()
+        s.end_turn()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert {"type": "error", "message": "speech-to-text failed: no ADC"} in events
+
+
+def test_missing_google_credentials_are_checked_once(monkeypatch):
+    from google.auth.exceptions import DefaultCredentialsError
+
+    from app.voice import google_auth
+
+    calls = []
+
+    def no_adc(*args, **kwargs):
+        calls.append(1)
+        raise DefaultCredentialsError("Your default credentials were not found.")
+
+    monkeypatch.setattr(google_auth.google.auth, "default", no_adc)
+    google_auth._problem.cache_clear()
+    try:
+        for _ in range(3):  # e.g. three turns of one call
+            with pytest.raises(RuntimeError, match="gcloud auth application-default login"):
+                google_auth.require_credentials()
+        assert len(calls) == 1  # the slow probe ran once, not per turn
+    finally:
+        google_auth._problem.cache_clear()
 
 
 def test_full_turn_with_tool_call(business, monkeypatch):

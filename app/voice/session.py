@@ -72,6 +72,24 @@ def split_sentences(buffer: str) -> tuple[list[str], str]:
     return [p.strip() for p in parts[:-1] if p.strip()], parts[-1]
 
 
+# V14: the prompt asks for plain speech, but the model still slips into markdown now and
+# then, and TTS would read "asterisk asterisk" or a whole URL aloud
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")  # [text](url) -> text
+_URL = re.compile(r"\bhttps?://(?:www\.)?([^/\s]+)\S*")  # -> its domain
+_LIST_MARK = re.compile(r"(?:^|\n)\s*(?:[-*•]|\d+[.)])(?:\s+|$)")  # line-start bullets/numbers
+# emphasis, code, headings -- but not snake_case or a spaced-out "5 * 3"
+_MD_MARKS = re.compile(r"`+|#+|\*+(?=\S)|(?<=\S)\*+|(?<!\w)_+|_+(?!\w)")
+
+
+def speakable(text: str) -> str:
+    """`text` without markdown, list markers and full URLs, as one line for TTS."""
+    text = _MD_LINK.sub(r"\1", text)
+    text = _URL.sub(r"\1", text)
+    text = _LIST_MARK.sub(" ", text)
+    text = _MD_MARKS.sub("", text)
+    return " ".join(text.split())
+
+
 class CallSession:
     def __init__(
         self,
@@ -223,8 +241,11 @@ class CallSession:
         except asyncio.CancelledError:
             self._unanswered_stt = stt
             raise
-        except RuntimeError:
+        except RuntimeError as exc:
             log.exception("STT failed")
+            # tell the client, or it waits for an answer that never comes (V7)
+            detail = f"{exc}: {exc.__cause__}" if exc.__cause__ else str(exc)
+            await self._try_send_event({"type": "error", "message": detail})
             return
         timings = {"stt_ms": _ms(speech_end)}
         if not text:
@@ -311,6 +332,9 @@ class CallSession:
         await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, speech_end, timings)
 
     async def _say(self, sentence: str, spoken: list[str], speech_end: float, timings: dict) -> None:
+        sentence = speakable(sentence)
+        if not sentence:
+            return
         timings.setdefault("llm_first_sentence_ms", _ms(speech_end))
         await self._send_event({"type": "reply", "text": sentence})
         audio = await asyncio.to_thread(self._synthesize, sentence, self.sample_rate)
