@@ -287,6 +287,7 @@ class CallSession:
         ]
         client = get_async_chat_client()
         for _ in range(MAX_TOOL_ROUNDS):
+            round_start = len(spoken)
             settings = get_settings()
             stream = await client.chat.completions.create(
                 model=settings.llm_model, messages=messages, tools=TOOLS, stream=True,
@@ -319,7 +320,8 @@ class CallSession:
             timings.setdefault("tool_start_ms", _ms(speech_end))
             messages.append({
                 "role": "assistant",
-                "content": " ".join(spoken) or None,
+                # only this round's text: earlier rounds are already in `messages`
+                "content": " ".join(spoken[round_start:]) or None,
                 "tool_calls": [
                     {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"]}}
                     for c in calls.values()
