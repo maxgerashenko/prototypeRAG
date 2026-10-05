@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # thinking off for voice (DEC-29): gemma-4-12b thinks by default, ~8 s before the first
     # word; "none" -> ~0.3 s. Verified on LM Studio; Gemini's value is checked in step 6.
     voice_reasoning_effort: str = "none"
+    # T2: prime the LLM's prompt cache while the greeting plays. Helps LM Studio; whether
+    # Gemini needs or allows it (it costs one extra request per call) is checked in stage 2.
+    voice_llm_warmup: bool = True
 
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 

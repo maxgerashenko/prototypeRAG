@@ -59,3 +59,19 @@ def resample_pcm16(data: bytes, src_rate: int, dst_rate: int) -> bytes:
     x_out = np.interp(t, np.arange(len(x), dtype=np.float64), x)
     x_out = np.clip(np.round(x_out).astype(np.int32), -32768, 32767)
     return x_out.astype('<i2').tobytes()
+
+
+def working_sound(sample_rate: int, loop_s: float = 1.0) -> bytes:
+    """One loop of the quiet "working on it" sound (T1, plan/03-voice-channel.md): two soft
+    ticks per second, PCM16 mono. Generated here, not a third-party clip, so there is no
+    licensing question. Short decaying sine bursts at ~-24 dBFS peak: well under speech
+    level, and too short and sparse for the VAD to take as speech (checked in the tests)."""
+    n = round(sample_rate * loop_s)
+    out = np.zeros(n, dtype=np.float64)
+    tick_n = round(sample_rate * 0.025)  # 25 ms
+    t = np.arange(tick_n) / sample_rate
+    for start_s, freq in ((0.0, 1000.0), (loop_s / 2, 800.0)):  # tick ... tock
+        tick = np.sin(2 * np.pi * freq * t) * np.exp(-t / 0.006)
+        start = round(start_s * sample_rate)
+        out[start:start + tick_n] += tick[: n - start]
+    return np.round(out * 0.06 * 32767).astype('<i2').tobytes()

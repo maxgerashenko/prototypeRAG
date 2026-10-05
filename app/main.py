@@ -1,5 +1,8 @@
 """FastAPI app. Twilio voice routes and the dashboard are added in later steps."""
 
+import threading
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,9 +14,18 @@ from app.api.conversations import router as conversations_router
 from app.api.custom_replies import router as custom_replies_router
 from app.config import get_settings
 from app.db import engine
+from app.voice import tts
 from app.voice.browser_ws import router as voice_browser_router
 
-app = FastAPI(title="prototypeRAG")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # T4: warm the TTS connection in the background -- startup isn't held up by it
+    threading.Thread(target=tts.warm_up, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="prototypeRAG", lifespan=lifespan)
 app.include_router(chat_router)
 app.include_router(custom_replies_router)
 app.include_router(voice_browser_router)

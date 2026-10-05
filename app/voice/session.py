@@ -39,6 +39,7 @@ from app.db.models import Business, BusinessProfile, Conversation, Message, mess
 from app.llm import get_async_chat_client
 from app.rag.prompt import format_profile
 from app.voice import tts
+from app.voice.audio import working_sound
 from app.voice.stt import TurnTranscriber
 from app.voice.tools import TOOLS, run_tool
 from app.voice.vad import TurnDetector
@@ -50,6 +51,13 @@ SendAudio = Callable[[bytes], Awaitable[None]]
 SendEvent = Callable[[dict], Awaitable[None]]
 
 MAX_TOOL_ROUNDS = 3  # LLM → tool → LLM ... before giving up on a turn
+WORKING_SOUND_CHUNK_S = 0.2  # T1: sent in real time, so stopping it is never more than ~this late
+
+# T4: the standard greeting's audio per (text, sample rate, voice, language), so a call
+# starts playing at once instead of after a TTS round trip. In-process only (lost on
+# restart); DEC-17 stores it at onboarding later. "Welcome back" greetings aren't cached:
+# they carry the earlier topic, so they are new text every time.
+_greeting_audio: dict[tuple, bytes] = {}
 
 VOICE_SYSTEM_PROMPT = (
     "You are the phone assistant of the business below, talking to a caller.\n"
@@ -63,12 +71,23 @@ VOICE_SYSTEM_PROMPT = (
 
 # sentence end = . ! ? followed by whitespace; the rest stays buffered until more text comes
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+# a period after these doesn't end the sentence (T4b, V13): "We open at 9 a.m. on Monday"
+# was spoken as two sentences with a pause. Lower-case, compared with the word before the
+# break. Not "etc." / "no.": those end sentences often enough that a split is the safer guess.
+_ABBREVIATIONS = {"a.m.", "p.m.", "dr.", "st.", "e.g.", "i.e.", "mr.", "mrs.", "ms.", "vs."}
 
 
 def split_sentences(buffer: str) -> tuple[list[str], str]:
     """Complete sentences in `buffer`, plus the unfinished tail to keep buffering."""
-    parts = _SENTENCE_END.split(buffer)
-    return [p.strip() for p in parts[:-1] if p.strip()], parts[-1]
+    sentences, start = [], 0
+    for m in _SENTENCE_END.finditer(buffer):
+        words = buffer[start:m.start()].split()
+        if words and words[-1].lstrip("(\"'").lower() in _ABBREVIATIONS:
+            continue
+        if sentence := buffer[start:m.start()].strip():
+            sentences.append(sentence)
+        start = m.end()
+    return sentences, buffer[start:]
 
 
 class CallSession:
@@ -101,6 +120,8 @@ class CallSession:
         self._vad = TurnDetector(sample_rate=sample_rate)
         self._turn: TurnTranscriber | None = None
         self._reply_task: asyncio.Task | None = None
+        self._warmup_task: asyncio.Task | None = None
+        self._working_task: asyncio.Task | None = None
         self._playing_until = 0.0  # monotonic time the caller's buffer runs out of bot audio
         self._history: list[dict] = []
         self._system_prompt = ""
@@ -117,9 +138,13 @@ class CallSession:
             greeting = f"Welcome back to {name}. I'm an AI assistant. Let's pick up where we left off: {self._topic}."
         else:
             greeting = f"Hi, you've reached {name}. I'm an AI assistant. How can I help?"
-        self._reply_task = self._spawn(self._speak_greeting(greeting))
+        self._reply_task = self._spawn(self._speak_greeting(greeting, cache=self._topic is None))
+        if get_settings().voice_llm_warmup:
+            self._warmup_task = asyncio.create_task(self._warm_up_llm())
 
     async def close(self) -> None:
+        if self._warmup_task is not None:
+            self._warmup_task.cancel()
         await self._cancel_reply()
         if self._turn is not None:
             self._turn.cancel()
@@ -233,6 +258,12 @@ class CallSession:
             await self._send_event({"type": "latency", **timings})
 
     async def _reply(self, text: str, spoken: list[str], speech_end: float, timings: dict) -> None:
+        try:
+            await self._reply_rounds(text, spoken, speech_end, timings)
+        finally:
+            self._stop_working_sound()
+
+    async def _reply_rounds(self, text: str, spoken: list[str], speech_end: float, timings: dict) -> None:
         messages = [
             {"role": "system", "content": self._system_prompt},
             *self._history,
@@ -251,6 +282,8 @@ class CallSession:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
+                if delta.tool_calls:
+                    self._start_working_sound(speech_end, timings)
                 for tc in delta.tool_calls or []:
                     call = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
                     if tc.id:
@@ -289,14 +322,64 @@ class CallSession:
         await self._send_event({"type": "reply", "text": sentence})
         audio = await asyncio.to_thread(self._synthesize, sentence, self.sample_rate)
         timings.setdefault("tts_first_audio_ms", _ms(speech_end))
+        self._stop_working_sound()  # its last chunk (≤ WORKING_SOUND_CHUNK_S) still plays first
         await self._play(audio)
         spoken.append(sentence)
 
-    async def _speak_greeting(self, greeting: str) -> None:
+    async def _speak_greeting(self, greeting: str, cache: bool) -> None:
         await self._send_event({"type": "reply", "text": greeting})
-        await self._play(await asyncio.to_thread(self._synthesize, greeting, self.sample_rate))
+        settings = get_settings()
+        key = (greeting, self.sample_rate, settings.tts_voice, settings.voice_language)
+        audio = _greeting_audio.get(key) if cache else None
+        if audio is None:
+            audio = await asyncio.to_thread(self._synthesize, greeting, self.sample_rate)
+            if cache:
+                _greeting_audio[key] = audio
+        await self._play(audio)
         self._history.append({"role": "assistant", "content": greeting})
         await asyncio.to_thread(self._save_message, "assistant", greeting)
+
+    async def _warm_up_llm(self) -> None:
+        """T2: while the greeting plays, send the prompt prefix every turn starts with
+        (system prompt, tools, earlier history) with max_tokens=1, so LM Studio has it
+        cached and the first answer isn't slower than later ones (2.6 s vs ~1 s measured).
+        Best effort: a failure only means a slower first turn, so it's logged, not raised."""
+        settings = get_settings()
+        try:
+            await get_async_chat_client().chat.completions.create(
+                model=settings.llm_model, messages=[{"role": "system", "content": self._system_prompt}, *self._history],
+                tools=TOOLS, max_tokens=1, reasoning_effort=settings.voice_reasoning_effort,
+            )
+        except Exception:
+            log.warning("LLM warm-up failed", exc_info=True)
+
+    def _start_working_sound(self, speech_end: float, timings: dict) -> None:
+        """T1: a quiet tick loop while a tool runs, instead of seconds of silence."""
+        if self._working_task is None or self._working_task.done():
+            timings.setdefault("working_sound_ms", _ms(speech_end))
+            self._working_task = asyncio.create_task(self._play_working_sound())
+
+    def _stop_working_sound(self) -> None:
+        task, self._working_task = self._working_task, None
+        if task is not None:
+            task.cancel()
+
+    async def _play_working_sound(self) -> None:
+        """Chunks paced in real time: the caller's buffer never holds much more than one
+        chunk, so the answer starts right after it, with no `clear` that could cut the
+        answer. Counts as bot audio (`_playing_until`), so barge-in stops it like speech;
+        never added to the transcript."""
+        loop = working_sound(self.sample_rate)
+        twice = loop + loop  # a chunk may wrap past the loop's end
+        step = round(self.sample_rate * WORKING_SOUND_CHUNK_S) * 2
+        pos = 0
+        try:
+            while True:
+                await self._play(twice[pos:pos + step])
+                pos = (pos + step) % len(loop)
+                await asyncio.sleep(max(0.0, self._playing_until - time.monotonic() - 0.1))
+        except Exception:  # the caller hung up mid-search; close() cancels the reply that owns this
+            pass
 
     async def _play(self, audio: bytes) -> None:
         await self._send_audio(audio)
