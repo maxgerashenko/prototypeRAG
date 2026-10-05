@@ -129,6 +129,11 @@ function onEvent(s: CallState, ev: VoiceEvent, now: number): CallState {
         pendingTurn: false,
         botState: s.talking ? s.botState : null,
       };
+    case "hangup":
+      // a normal end (the caller said goodbye, or silence), not a server error: the socket
+      // close that follows is ignored because the call has already ended
+      if (s.phase === "ended") return s;
+      return { ...s, phase: "ended", endedAt: now, talking: false, botState: null, pendingTurn: false };
     case "clear": {
       // barge-in: the answer being spoken is cut off (playback stop arrives as a `playback` action)
       const last = s.messages[s.messages.length - 1];

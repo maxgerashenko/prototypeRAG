@@ -1,5 +1,5 @@
 // Shapes of the backend's JSON — app/api/chat.py, app/api/businesses.py, app/api/conversations.py,
-// app/voice/browser_ws.py.
+// app/voice/browser_ws.py, app/voice/twilio_routes.py.
 
 export interface Source {
   chunk_id: string;
@@ -40,7 +40,8 @@ export type VoiceEvent =
   | { type: "latency"; [metric: string]: string | number }
   | { type: "error"; message: string }
   | { type: "conversation_id"; id: string }
-  | { type: "no_speech" }; // push-to-talk turn with nothing said (or noise the VAD took for speech)
+  | { type: "no_speech" } // push-to-talk turn with nothing said (or noise the VAD took for speech)
+  | { type: "hangup"; reason: "goodbye" | "silence" }; // the server ends the call (V17); the socket closes next
 
 // --- voice app (app/api/businesses.py, app/api/conversations.py) ---
 
@@ -102,3 +103,20 @@ export const getConversation = (businessId: string, conversationId: string) =>
   getJson<ConversationDetail>(
     `/businesses/${encodeURIComponent(businessId)}/conversations/${encodeURIComponent(conversationId)}`,
   );
+
+// --- Twilio call page (app/voice/twilio_routes.py) ---
+
+export interface TwilioToken {
+  token: string;
+  identity: string;
+}
+
+/** Voice SDK access token. The server explains a refusal in `detail` (not on localhost, not configured). */
+export async function fetchToken(): Promise<TwilioToken> {
+  const res = await fetch("/twilio/token");
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(body.detail ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<TwilioToken>;
+}
