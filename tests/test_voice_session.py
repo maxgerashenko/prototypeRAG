@@ -213,6 +213,21 @@ def test_unknown_business_raises(monkeypatch):
         run_async(s.start())
 
 
+def test_bad_timezone_falls_back_to_utc(business, monkeypatch):
+    # B6: an invalid timezone used to raise ZoneInfoNotFoundError (a LookupError),
+    # which browser_ws reports as 4404 "unknown business"
+    with tenant_session(business) as db:
+        db.get(Business, business).timezone = "Not/A_Zone"
+    s, _, _ = _make_session(business, FakeLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s.close()
+
+    run_async(run())
+    assert "Current local time at the business:" in s._system_prompt
+
+
 # --- stt.py / tts.py with a fake Google client (no credentials needed) ------------
 
 
