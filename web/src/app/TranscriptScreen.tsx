@@ -2,6 +2,7 @@ import type { ConversationDetail } from "../api";
 import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
 import { ChevronLeft, PhoneIcon } from "./icons";
+import { SourceTag } from "./SourceIcon";
 import { fmtClock, fmtWhen, plural } from "./format";
 
 interface Props {
@@ -28,6 +29,7 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
         <h1>{c ? c.title : convo.status === "error" ? "Conversation" : "Loading…"}</h1>
         {c && (
           <div className="tr-meta">
+            <SourceTag source={c.source} />
             <span>{when}</span>
             <span>·</span>
             <span>{dur}</span>

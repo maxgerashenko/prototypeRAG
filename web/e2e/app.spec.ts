@@ -26,7 +26,7 @@ function data(now = Date.now()): Partial<ApiState> {
     conversations: {
       b1: [
         convo("c1", "When are you open on Sunday", [greet, "When are you open on Sunday?", "From 8am to 2pm.", "Thanks!", "Anything else?"], 2 * MIN, 252, now),
-        convo("c2", "Do you take reservations", [greet, "Do you take reservations?", "Yes, online or by phone."], 26 * 60 * MIN, 95, now),
+        convo("c2", "Do you take reservations", [greet, "Do you take reservations?", "Yes, online or by phone."], 26 * 60 * MIN, 95, now, "twilio"),
         convo("c3", "Gift cards", [greet, "How much is a gift card?"], 40 * 24 * 60 * MIN, 95, now),
       ],
       b2: [convo("a1", "Oil change price", [greet, "How much is an oil change?", "About forty dollars."])],
@@ -262,6 +262,29 @@ test.describe("2 · a business's previous conversations", () => {
     await expect(page.locator("[data-screen=convos]")).toBeVisible(); // returns where it came from
   });
 
+  test("call source: green phone for Twilio calls, blue globe for web calls", async ({ page }) => {
+    const init = data();
+    init.conversations!.b1.push(convo("c4", "Parking", [greet, "Where can I park?"], 50 * 24 * 60 * MIN));
+    await openApp(page, init);
+    await pick(page, "Corner Bakery");
+    const rows = page.locator(".recent-row");
+    await expect(rows.nth(0).locator(".recent-icon")).toHaveClass(/src-web/);
+    await expect(rows.nth(0).getByRole("img", { name: "Web" })).toBeVisible();
+    await expect(rows.nth(1).locator(".recent-icon")).toHaveClass(/src-twilio/);
+    await expect(rows.nth(1).getByRole("img", { name: "Phone" })).toBeVisible();
+    // the colours themselves: --call (green) and --accent (blue) from app.css
+    const color = (i: number) => rows.nth(i).locator(".src-icon").evaluate((el) => getComputedStyle(el).color);
+    expect(await color(0)).toBe("rgb(138, 180, 248)");
+    expect(await color(1)).toBe("rgb(127, 214, 168)");
+
+    await page.getByRole("button", { name: "See all 4 conversations" }).click();
+    const cards = page.locator(".convo-card");
+    await expect(cards.nth(0).locator(".src-tag")).toHaveText("Web");
+    await expect(cards.nth(1).locator(".src-tag")).toHaveText("Phone");
+    await cards.nth(1).click();
+    await expect(page.locator("[data-screen=transcript] .tr-meta .src-tag")).toHaveText("Phone");
+  });
+
   test("'Start new call' and Space call this business", async ({ page }) => {
     await openApp(page);
     await pick(page, "Bloom & Stem");
@@ -282,7 +305,7 @@ test.describe("3 · read a past conversation", () => {
     await page.locator(".recent-row").first().click();
     const screen = page.locator("[data-screen=transcript]");
     await expect(screen.locator("h1")).toHaveText("When are you open on Sunday");
-    await expect(screen.locator(".tr-meta")).toHaveText("Today · 2:58 PM·4:12·5 messages");
+    await expect(screen.locator(".tr-meta")).toHaveText("WebToday · 2:58 PM·4:12·5 messages");
     await expect(screen.locator(".pill").first()).toHaveText("Call started · Today · 2:58 PM");
     await expect(screen.locator(".pill").last()).toHaveText("Call ended · 4:12");
     await expect(screen.getByRole("button", { name: "Back" })).toContainText("Corner Bakery");
