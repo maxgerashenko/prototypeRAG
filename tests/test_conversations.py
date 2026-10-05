@@ -6,6 +6,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
+from tests.async_helpers import run_async
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
@@ -99,13 +101,13 @@ def test_continue_from_loads_history_and_greets_with_topic(two_businesses, monke
         await s.close()
         return s
 
-    s = asyncio.run(run(convs["talked"]))
+    s = run_async(run(convs["talked"]))
     assert events[0]["text"].startswith("Welcome back to Alpha Spa. I'm an AI assistant.")
     assert "Do you have a sauna talked" in events[0]["text"]
     assert [m["role"] for m in s._history] == ["assistant", "user", "assistant", "assistant"]
     assert s.conversation_id != convs["talked"]  # a new conversation row
 
     events.clear()
-    s = asyncio.run(run(convs["other"]))  # another business's conversation: ignored
+    s = run_async(run(convs["other"]))  # another business's conversation: ignored
     assert events[0]["text"].startswith("Hi, you've reached Alpha Spa.")
     assert s._history == [{"role": "assistant", "content": events[0]["text"]}]

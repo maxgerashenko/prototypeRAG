@@ -158,7 +158,7 @@ Whenever a delegated task finishes — a subagent (Sonnet, Opus, …), a local-m
 or any of several tasks run in parallel — write one short Markdown summary for it, right
 when its result arrives:
 
-- Path: `tmp/agent-tasks/<YYYY-MM-DD>_<who>_<task-slug>.md` (`tmp/` is git-ignored —
+- Path: `tmp/agent-tasks/<MM-DD>_<HH-MM>_<who>_<task-slug>.md` — no year, local time the task finished to the minute (`tmp/` is git-ignored —
   these are working notes, not project history; commit messages and `plan/` stay the
   record).
 - Content: title line `# Task: <name> — <who> — ✅ done / 🔄 in progress / ❌ failed`,

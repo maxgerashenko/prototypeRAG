@@ -147,3 +147,6 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+
+# Agent task reports (temporary, local only)
+tmp/
