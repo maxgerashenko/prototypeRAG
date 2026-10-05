@@ -1,5 +1,8 @@
 """CLI entry (plan/01-crawler.md, plan/07-knowledge-quality.md §2/§8):
-`python -m app.ingest.run --url <site>`.
+`python -m app.ingest.run --url <site>` for a first crawl, or
+`python -m app.ingest.run --business-id <id> [--index]` to re-crawl a business already
+in the database from its stored website -- the Cloud Run Job's entry point (plan
+05-cloud-migration.md step 7), which has no URL to pass, only the business it serves.
 
 Pipeline (plan 07 §2): discover (priority order) -> fetch -> clean (main text + site
 chrome kept apart) -> store every page -> ORGANIZE (dedupe chrome into one pseudo-page,
@@ -89,6 +92,19 @@ def resolve_business(url: str, business_id: uuid.UUID | None) -> uuid.UUID:
             )
     print(f"business_id: {bid}")
     return bid
+
+
+def start_url_of(business_id: uuid.UUID) -> str:
+    """The stored website of an existing business, used as the start URL for a re-crawl
+    without --url. Errors (SystemExit) when the business doesn't exist or has no website:
+    a scheduled job must fail loudly, not silently crawl nothing."""
+    with tenant_session(business_id) as session:
+        business = session.get(Business, business_id)
+        if business is None:
+            raise SystemExit(f"--business-id {business_id}: no such business (first crawl needs --url)")
+        if not business.website:
+            raise SystemExit(f"--business-id {business_id}: business has no website stored, pass --url")
+        return business.website
 
 
 def _expand_by_links(
@@ -319,19 +335,39 @@ def crawl_business(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Crawl a business website into Postgres")
-    parser.add_argument("--url", required=True)
+    parser.add_argument("--url", help="start URL; omit to re-crawl --business-id from its stored website")
     parser.add_argument("--business-id", type=uuid.UUID, default=None)
     parser.add_argument("--max-pages", type=int, default=200)
     parser.add_argument("--no-profile", action="store_true")
+    parser.add_argument(
+        "--index", action="store_true",
+        help="embed the new/changed chunks after the crawl (app.rag.index), so a scheduled "
+        "re-crawl leaves the business searchable without a second job",
+    )
     args = parser.parse_args()
 
-    business_id = resolve_business(args.url, args.business_id)
+    if args.url is None and args.business_id is None:
+        parser.error("pass --url (first crawl) or --business-id (re-crawl an existing business)")
+    url = args.url or start_url_of(args.business_id)
+    business_id = resolve_business(url, args.business_id)
 
     summary = crawl_business(
-        business_id, args.url, max_pages=args.max_pages, extract_profile=not args.no_profile
+        business_id, url, max_pages=args.max_pages, extract_profile=not args.no_profile
     )
+    if args.index:
+        # imported here: the indexer pulls in the embeddings client, which a plain crawl
+        # doesn't need
+        from app.rag.index import index_business
+
+        summary.update(index_business(business_id))
     for key, value in summary.items():
         print(f"{key}: {value}")
+    # a job run that couldn't fetch a single page (site down, DNS, blocked) must show up
+    # as a failed execution in Cloud Run, not a green one with nothing done
+    if summary["pages_crawled"] == 0:
+        raise SystemExit("no pages crawled")
+    if summary.get("batches_failed"):
+        raise SystemExit(f"{summary['batches_failed']} embedding batch(es) failed")
 
 
 if __name__ == "__main__":

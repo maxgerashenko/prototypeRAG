@@ -128,8 +128,10 @@ Considered and rejected:
 6. **Deploy API:**
    `gcloud run deploy api --image .../app/api --set-secrets ... --timeout 3600`
 7. **Deploy crawler job:**
-   `gcloud run jobs deploy ingest --image .../app/crawler --command python --args -m,app.ingest.run`
-   + Cloud Scheduler trigger (e.g. weekly re-crawl).
+   `gcloud run jobs deploy ingest --image .../app/crawler --command python --args -m,app.ingest.run,--business-id,<pilot id>,--index`
+   + Cloud Scheduler trigger (e.g. weekly re-crawl). Without `--url` the crawler re-crawls the
+   business from its stored website; `--index` embeds the changed chunks in the same run. A run
+   that crawls no page or fails an embedding batch exits non-zero, so it shows as a failed execution.
 8. **Access control first (OPEN-19)**, then **Twilio:** point the TwiML App's voice URL (and the
    pilot's number, once it pays for one — DEC-34) to the Cloud Run URL; test calls; generate the
    pilot's greeting audio (DEC-17).

@@ -94,7 +94,7 @@ Google Places API ─► place_id only (live lookup for display, R9) ───�
 
 ```
 app/ingest/
-  run.py            CLI entry: --url, --business-id, --max-pages
+  run.py            CLI entry: --url, --business-id, --max-pages, --index (re-crawl by --business-id alone)
   discover.py       sitemap + link discovery, robots.txt
   fetch.py          Crawl4AI / httpx fetchers
   clean.py          boilerplate removal, HTML → Markdown

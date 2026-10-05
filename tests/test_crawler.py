@@ -547,6 +547,66 @@ def test_resolve_business_rejects_business_id_that_already_has_a_different_domai
         _cleanup_business(bid)
 
 
+# --- run.py: re-crawl by --business-id, the Cloud Run Job entry (05 step 7) -----------
+
+
+def test_start_url_of_returns_the_stored_website():
+    bid = run.resolve_business("https://recrawl-one.example.com/some/page", None)
+    try:
+        assert run.start_url_of(bid) == "https://recrawl-one.example.com/"
+    finally:
+        _cleanup_business(bid)
+
+
+def test_start_url_of_unknown_business_fails_loudly():
+    with pytest.raises(SystemExit):
+        run.start_url_of(uuid.uuid4())
+
+
+def _run_main(monkeypatch, argv: list[str], summary: dict) -> dict:
+    """Run main() with crawl_business/index_business stubbed; returns what they were called with."""
+    calls: dict = {}
+
+    def fake_crawl(business_id, start_url, **kwargs):
+        calls["crawl"] = (business_id, start_url)
+        return dict(summary)
+
+    def fake_index(business_id, batch_size=64):
+        calls["index"] = business_id
+        return {"chunks_indexed": 3, "batches_failed": 0}
+
+    import app.rag.index
+
+    monkeypatch.setattr(run, "crawl_business", fake_crawl)
+    monkeypatch.setattr(app.rag.index, "index_business", fake_index)
+    monkeypatch.setattr("sys.argv", ["run", *argv])
+    run.main()
+    return calls
+
+
+def test_main_recrawls_by_business_id_without_url_and_indexes(monkeypatch):
+    bid = run.resolve_business("https://recrawl-two.example.com/", None)
+    try:
+        calls = _run_main(monkeypatch, ["--business-id", str(bid), "--index"], {"pages_crawled": 5})
+        assert calls == {"crawl": (bid, "https://recrawl-two.example.com/"), "index": bid}
+    finally:
+        _cleanup_business(bid)
+
+
+def test_main_needs_url_or_business_id(monkeypatch):
+    with pytest.raises(SystemExit):
+        _run_main(monkeypatch, [], {"pages_crawled": 5})
+
+
+def test_main_fails_the_job_when_nothing_was_crawled(monkeypatch):
+    bid = run.resolve_business("https://recrawl-three.example.com/", None)
+    try:
+        with pytest.raises(SystemExit, match="no pages crawled"):
+            _run_main(monkeypatch, ["--business-id", str(bid)], {"pages_crawled": 0})
+    finally:
+        _cleanup_business(bid)
+
+
 # --- organize.py: locations from content, never from the start path (A1, DEC-37) ------
 
 
