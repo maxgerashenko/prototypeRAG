@@ -248,6 +248,77 @@ the statement changes.
 
 Eval runs with the local model and again with Gemini at step 6 (R1).
 
+### Baseline, run 2026-10-04 (before any milestone-1 code change — `google/gemma-4-12b`, old pipeline, business `6596a8a2-c563-42c2-b006-b404a02822aa`)
+
+`tests/eval/bathhouse.yaml` extended per §7 (original 7 questions kept + 10 new graded +
+1 `manual: true`); `app/rag/eval.py` extended with `expected_in_context` checking
+(`check_context`) and tool-result size logging (`EvalResult.tool_result_chars`, from
+`format_chunks()` on the retrieved chunks — the same text `search_business_info` would
+return).
+
+- **Original 7 questions:** 7/7 (unchanged from the pre-existing baseline note).
+- **Extended eval (17 total, 16 graded + 1 manual):** 11/16 passed = **68.8 %**.
+- **Retrieval hit@k (`expected_in_context`, 10 of 17 questions carry it):** 4/10 = **40.0 %**.
+- **Avg tool-result size:** **6244 chars** across all 17 questions (top-5 chunks every
+  time; the plan's "5 chunks, up to ~2.6k chars each" was this run's ceiling per chunk,
+  not the typical case — several questions pulled in multiple ~2k+ chunks at once).
+- Failures, all explained by K1/K2 (pages never crawled / hours dropped by `clean.py`),
+  confirming the plan's diagnosis rather than a new finding:
+  - "What time do you open?" / "...hours on Sunday?" — hours are in the footer, which
+    `clean.py` discarded (K2, V23).
+  - "Flatiron address" / "Philadelphia phone" — those location pages were never crawled
+    (K1; `--max-pages 8` took the journal, not the other locations).
+  - "Why did the Williamsburg sauna get bigger in 2024?" — the **blog trap**: the model
+    gave a confident, present-tense answer instead of refusing; the source is a `/journal`
+    history post with no page-type signal telling the model it's not a current fact.
+  - "Is the Williamsburg location open right now?" (manual) — correctly refused (no
+    hours data exists yet to answer from), but can't say *why* without hours + timezone.
+- Two **context misses that did NOT cause an answer failure** — "What is the phone
+  number?" and "What is the email address?" passed on the answer check (11/16) while
+  failing `expected_in_context`: `business_profile` is always in the prompt
+  (`app/rag/prompt.py:format_profile`, DEC-12) regardless of what retrieval returns, so
+  the LLM answered from the profile, not from the 5 retrieved chunks. This is expected
+  given today's architecture, not a retrieval bug — flagged here because it's exactly
+  the gap the facts-library milestone (§5) is meant to close structurally (core facts
+  always-in-prompt, not profile-shaped).
+
+### After, run 2026-10-04 (same eval file, same business, after A1–A5/B2–B5/C: crawl
+priority, organize step, chrome dedup, location detection — `business_profile` NOT yet
+retired, `facts.py` NOT yet built)
+
+- **Extended eval (16 graded + 1 manual): 13/16 passed = 81.2 %** (up from 68.8 %).
+  - **Fixed by K1 (crawl priority):** "Flatiron address" and "Philadelphia phone" now
+    **pass** — those location pages are now actually crawled (they weren't before).
+  - **Still failing, as expected — out of this milestone's scope:**
+    - "What time do you open?" / "...hours on Sunday?" — **still fail**. K2 itself is
+      fixed (the hours text is no longer *lost* — it survives once, deduped, as the
+      `site_chrome` pseudo-page's `markdown`), but that page is deliberately never
+      chunked (plan 07 §4: "facts are extracted from it once; it is never chunked"),
+      and nothing extracts facts from it yet (`facts.py` is the next milestone). This
+      is the expected *shape* of the remaining gap, not the original K2 bug: the next
+      milestone must extract hours as a fact from the chrome pseudo-page, or V23 stays
+      broken even with the data sitting right there, inspectable, in
+      `pages.markdown` for the one `page_type='site_chrome'` row.
+    - "blog trap" — **still fails** (a confident answer instead of a refusal). Blog
+      pages are now correctly `retrievable=False` and un-chunked (verified: 0
+      `scraped` chunks remain for any `page_type='blog'` page), so the model isn't
+      retrieving the blog post anymore — this looks like the model answering from its
+      own general training knowledge about saunas rather than from retrieved context.
+      Worth re-checking once facts-first retrieval (OPEN-22) changes what's in
+      context; not chased further here (no prompt/retrieval code changed this
+      milestone, per the task's scope).
+- **Retrieval hit@k: 5/10 = 50.0 %** (up from 40.0 %) — same "always-in-prompt profile"
+  caveat as the baseline for the address/phone/email misses.
+- **Avg tool-result size: 5404 chars** (down from 6244, ≈ 13 % smaller) — directionally
+  right from the junk-chunk filter, testimonial cut and blog/legal/duplicate exclusion,
+  but nowhere near the plan's "< 40 % of baseline" target, which this plan ties to
+  fact-chunk retrieval (§5.5), not to the organize step alone.
+- Pilot crawl coverage, for scale: **60 pages** (was 8), **4 locations** each with a
+  `url` + postal `address` (was 1 default location with no address filled), **32
+  retrievable / 28 excluded** (blog/legal/careers/landing/site_chrome + 5 exact
+  duplicates), **170 chunks** (8 location-tagged across the 4 locations, 162
+  business-wide).
+
 ## 8. Code layout (planned)
 
 ```
@@ -273,23 +344,61 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
 
 ### Stage 1 — local, pilot business
 
-- [ ] **Baseline:** extend `tests/eval/bathhouse.yaml` (§7), add `expected_in_context`
+- [x] **Baseline:** extend `tests/eval/bathhouse.yaml` (§7), add `expected_in_context`
   and tool-result size logging to `rag/eval.py`; run on the current pipeline and record
   the numbers here
-- [ ] Wait for / align with the identity change (DEC-37): `businesses.domain`,
+  - Numbers recorded above under "Baseline, run 2026-10-04"; after-numbers (post re-crawl)
+    recorded in the same place once the re-crawl + re-index finished.
+- [x] Wait for / align with the identity change (DEC-37): `businesses.domain`,
   `locations` with default flag, crawler reuses `business_id` by domain
-- [ ] Crawl priority order + blog cap + `noindex` — `discover.py`/`run.py` (K1)
-- [ ] `clean.py` keeps chrome text separately; tests on a saved pilot HTML fixture with
+  - This was already built (migration 0002, `app/ingest/identity.py`,
+    `run.py:resolve_business`) before this milestone's work started.
+- [x] Crawl priority order + blog cap + `noindex` — `discover.py`/`run.py` (K1)
+  - `discover.py`: `prioritize()` orders start_url → depth-1 pages → deeper non-blog
+    pages → blog capped at `DEFAULT_BLOG_CAP=20`; `has_noindex()` scans the fetched HTML
+    (no column to persist it — see organize.py note below). Depth-1 is a stand-in for
+    "location pages" since locations aren't known until organize.py runs after the crawl.
+- [x] `clean.py` keeps chrome text separately; tests on a saved pilot HTML fixture with
   the footer (K2)
-- [ ] Migration: `pages` metadata columns, `facts`, `fact_sources`, `business_summaries`,
+  - `clean_page()` returns `(main_markdown, chrome_markdown, language)`; chrome tags are
+    popped (not decomposed) before the rest of boilerplate removal runs. `html_to_markdown`
+    kept as a thin wrapper for backward compatibility. Also added `extract_og_site_name`
+    (A3) and `extract_html_lang`.
+- [x] Migration: `pages` metadata columns, `facts`, `fact_sources`, `business_summaries`,
   `chunks.kind` += `fact`, `chunks.fact_id`, `chunks.location_id` (composite FKs)
-- [ ] `organize.py`: chrome pseudo-page, page type (URL rules + LLM), location,
+  - Migration 0003, applied to the dev DB (`alembic current` → 0003/head). Added one
+    column beyond the plan's sketch: `pages.chrome_markdown` (nullable) — needed so
+    chrome dedup has each page's chrome text to compare on a later `--only organize`
+    re-run, since raw HTML isn't stored (DEC-09); documented in the migration's docstring.
+  - Schema only: `facts`/`fact_sources`/`business_summaries` have no extraction/merge/
+    summary code writing them yet (next milestone, OPEN-20).
+- [x] `organize.py`: chrome pseudo-page, page type (URL rules + LLM), location,
   language, duplicates, staleness, junk-chunk filter, testimonial cut — fixture tests
+  - **Simplification vs. the plan:** page type uses URL rules + simple content
+    heuristics only, no LLM classification this milestone — the pilot's crawled page set
+    is fully covered by URL rules, and skipping the LLM call keeps this step
+    deterministic and network-free for unit tests. Documented in `organize.py`'s module
+    docstring; add an LLM fallback when a page type can't be resolved this way.
+  - `noindex` isn't a stored column — it's only known at crawl time from raw HTML, so it's
+    threaded through `organize_business(..., noindex_urls=...)` as a same-run parameter,
+    not persisted; a later `--only organize` re-run (no fresh fetch) can't re-derive it.
+  - Location detection reads the deduped site chrome (footer "Locations & HOURS" block
+    for name+address, header nav for each location's own page path), never the crawl's
+    start URL, per A1. Found and fixed two bugs against the real pilot data during this
+    task: (1) `detect_site_chrome`'s per-page block dedupe used a `set`, which silently
+    scrambled block order; (2) `organize_business` matched existing `locations` rows by
+    name only, so the pre-existing "Bathhouse Williamsburg" row (named by the old,
+    pre-organize code path) collided on its URL with the newly-detected "Williamsburg"
+    candidate — fixed by matching existing rows by URL first, which also renames the row
+    to the clean location name (A3) instead of leaving two rows or crashing.
 - [ ] Decide OPEN-20 (extraction model): run `facts.py` on 5 pilot pages with both
   candidates, audit precision
+  - Not started — `facts.py` doesn't exist yet (next milestone).
 - [ ] `facts.py` + `merge.py`: extraction, quote/number validation, dedupe, conflicts,
   stale handling, owner lock; idempotency test (second run = no changes)
-- [ ] Re-crawl the whole pilot domain; audit 30 facts (§7); `/debug/facts`
+- [x] (partial) Re-crawl the whole pilot domain — done, see Part C results below in the
+  task report; audit 30 facts (§7) and `/debug/facts` **not done** (no `facts` rows exist
+  yet — `facts.py` is the next milestone)
 - [ ] Location card + timezone per location → prompt and voice "current local time"
   (V22); re-check V23 (hours now in the data)
 - [ ] Retrieval: fact chunks, location filter, boosts, retrievable pages only; tool

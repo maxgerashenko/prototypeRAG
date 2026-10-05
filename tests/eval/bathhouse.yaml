@@ -2,24 +2,80 @@
 # expected_facts: substrings (case-insensitive) that must appear somewhere in the
 # answer. "in_knowledge_base: false" marks a question the answer should NOT know —
 # checked by looking for refusal language instead of expected_facts.
+# expected_in_context (plan/07-knowledge-quality.md §7, retrieval hit@k): substrings
+# that must appear somewhere in the *retrieved context* (the formatted chunks the LLM
+# was given), independent of whether the LLM's answer used them correctly — isolates
+# retrieval misses from generation misses.
 
 - question: "How much does a day pass cost?"
   expected_facts: ["39"]
+  expected_in_context: ["39"]
 
 - question: "What is the address?"
   expected_facts: ["103", "10th", "Brooklyn"]
+  expected_in_context: ["103", "10th"]
 
 - question: "What is the phone number?"
   expected_facts: ["929", "489"]
+  expected_in_context: ["929", "489"]
 
 - question: "What is the email address?"
   expected_facts: ["williamsburg@abathhouse.com"]
+  expected_in_context: ["williamsburg@abathhouse.com"]
 
 - question: "What saunas do you have?"
   expected_facts: ["sauna"]
+  expected_in_context: ["sauna"]
 
 - question: "Do you have a rooftop pool?"
   expected_facts: ["rooftop"]
+  expected_in_context: ["rooftop"]
 
 - question: "Do you offer skydiving lessons?"
   in_knowledge_base: false
+
+# --- extended, added for plan/07-knowledge-quality.md milestone 1 (K1-K7, V22/V23) ---
+
+- question: "What time do you open?"
+  expected_facts: ["8"]
+  expected_in_context: ["8am"]
+  note: "V23 — hours are in the site footer (site chrome), dropped by clean.py before this milestone."
+
+- question: "What are your hours on Sunday?"
+  expected_facts: ["8"]
+  expected_in_context: ["7 days a week"]
+  note: "V23"
+
+- question: "What is the address of the Flatiron location?"
+  expected_facts: ["22nd", "New York"]
+  expected_in_context: ["22nd"]
+  note: "per-location — Flatiron page was never crawled before K1's priority-order fix (--max-pages 8 took journal posts instead)."
+
+- question: "What is the phone number for the Philadelphia location?"
+  expected_facts: ["267", "802"]
+  expected_in_context: ["267"]
+  note: "per-location — Philadelphia page was never crawled before K1."
+
+- question: "How long is a full body massage and how much does it cost?"
+  expected_facts: ["min"]
+  note: "treatment price + duration — /massage was never crawled before K1."
+
+- question: "What temperature is the sauna?"
+  expected_facts: ["1"]
+  note: "sauna/pool temperature — present in the amenities chunk (K6) mixed with testimonials."
+
+- question: "Is the rooftop pool open in winter?"
+  expected_facts: ["pool"]
+  note: "rooftop pool in winter — tests whether a seasonal caveat is retrieved, not just the rooftop-pool fact."
+
+- question: "Do you offer memberships?"
+  expected_facts: ["membership"]
+  note: "/memberships was never crawled before K1."
+
+- question: "Is the Williamsburg location open right now?"
+  manual: true
+  note: "V22 — needs 'current local time' in the Williamsburg location's own timezone, not just a yes/no; excluded from the pass rate and checked by eye until the location-timezone prompt exists."
+
+- question: "Why did the Williamsburg sauna get bigger in 2024?"
+  in_knowledge_base: false
+  note: "'blog trap' (K1/organize page_type) — this is in a /journal blog post as history, not a current business fact; the answer must not be stated as a present-tense business fact even if the text is retrieved."

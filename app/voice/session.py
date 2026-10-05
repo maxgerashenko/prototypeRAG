@@ -339,6 +339,14 @@ class CallSession:
             self._system_prompt = (
                 f"{VOICE_SYSTEM_PROMPT}\n\nCurrent local time at the business: {now}\n\n{format_profile(profile)}"
             )
+            # A3 (plan/07-knowledge-quality.md §3): business.name is now the brand
+            # ("Bathhouse"), kept in sync from the site's og:site_name on every crawl
+            # (app/ingest/run.py) -- preferred over business_profile.name, which still
+            # holds the old LLM-extracted "Bathhouse Williamsburg" (profile table is
+            # retired once the facts/location card replaces it, plan 07 §5.5).
+            placeholder = {"business_name", "(pending)", "pending", ""}
+            if business.name and business.name.strip().lower() not in placeholder:
+                return business.name
             return (profile.name if profile and profile.name else None) or business.name
 
     def _save_message(self, role: str, content: str) -> None:
