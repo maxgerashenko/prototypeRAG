@@ -405,7 +405,21 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
 - [ ] Location card → prompt; re-check V23 (hours now in the data)
 - [ ] Retrieval: fact chunks, location filter, boosts, retrievable pages only; tool
   result fact-first; optional `location` argument (OPEN-23)
-- [ ] `summary.py` + prompt (≤ ~120 tokens), guest themes attributed, no names
+- [x] `summary.py` + prompt (≤ ~120 tokens), guest themes attributed, no names
+  - Built 2026-10-05 without `facts.py` (it reads pages, not facts). Sources: site root,
+    `about`/`location` pages, and any page with `pages.testimonials`; never duplicates,
+    chrome, legal or careers. Customer names are stripped from the testimonials before
+    the model sees them and checked again on the output; code drops any sentence or item
+    with a digit (no prices/hours/numbers) and enforces the word/item limits.
+  - "Regenerate only when a source page changed" uses `source_page_ids` +
+    `pages.scraped_at > generated_at` (upsert_page only moves `scraped_at` on a content
+    change) — no new column. Owner-confirmed summaries are skipped; the "suggested
+    update" view is the step 5 dashboard.
+  - Prompt: one-liner, highlights, guest themes ("Guests often mention: …") and tone,
+    ≤ 480 chars (`SUMMARY_MAX_CHARS`); `description` is stored but not in the prompt.
+    Runs at the end of every crawl, or alone: `python -m app.ingest.run --url … --only summary`.
+  - [ ] **Test on Mac:** run it on the pilot with LM Studio and read the stored row
+    (tests fake the LLM; the output quality of the real model isn't checked yet)
 - [ ] Run extended eval + A/B (`RETRIEVAL_MODE`) → decide OPEN-22; re-measure V16 on the
   mic test page; record numbers here and in [03-voice-channel.md](03-voice-channel.md)
 - [ ] Retire `business_profile` from the prompt once the location card passes the eval
@@ -442,7 +456,8 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
     run re-types existing pages. The LLM fallback stays the plan for a new business
 - [x] **Testimonials discarded:** `cut_testimonials()` returns the cut text but nothing
   stores it — persist it for `summary.py` (§6) instead of re-deriving it.
-  Done (PR #11): `run.py` keeps them in `pages.testimonials`
+  Done (PR #11): `run.py` keeps them in `pages.testimonials` (migration 0004); read by
+  `summary.py` (PR #28)
 - [x] **Duplicate placeholder check:** `app/voice/session.py:_load_business` has its own
   placeholder-name set; reuse `profile._none_if_placeholder` (one rule in one place).
   Done 2026-10-05: `profile.is_placeholder_name()` is the one rule, used by `session.py`,

@@ -43,10 +43,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import get_settings
 from app.db import tenant_session
-from app.db.models import Business, BusinessProfile, Conversation, Message, message_order
+from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
 from app.ingest.profile import is_placeholder_name
 from app.llm import get_async_chat_client
-from app.rag.prompt import format_profile
+from app.rag.prompt import format_profile, format_summary
 from app.voice import tts
 from app.voice.audio import working_sound
 from app.voice.stt import TurnTranscriber
@@ -596,6 +596,8 @@ class CallSession:
             self._system_prompt = (
                 f"{VOICE_SYSTEM_PROMPT}\n\nCurrent local time at the business: {now}\n\n{format_profile(profile)}"
             )
+            if summary_text := format_summary(session.get(BusinessSummary, self.business_id)):
+                self._system_prompt += f"\n\n{summary_text}"
             # A3 (plan/07-knowledge-quality.md §3): business.name is now the brand
             # ("Bathhouse"), kept in sync from the site's og:site_name on every crawl
             # (app/ingest/run.py) -- preferred over business_profile.name, which still

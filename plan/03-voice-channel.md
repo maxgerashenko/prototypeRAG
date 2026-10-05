@@ -339,6 +339,9 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
   In cloud sessions the first two fail with `APIConnectionError` and
   `test_barge_in_mid_reply_keeps_only_what_was_spoken` hangs (same on main)
+- [ ] **Business summary** (plan 07 §6): `uv run python -m app.ingest.run --url https://www.abathhouse.com --only summary --force`,
+  then read the `business_summaries` row — no prices/hours/numbers, no customer names,
+  guest themes match the site's testimonials; ask a call "what's it like there?"
 
 ## Notes
 

@@ -107,7 +107,7 @@ group one thread at a time, or expect merge conflicts.
 | 5 | Call transfer + take-a-message fallback | 03 Tasks | `voice/session.py`, `voice/tools.py`, `actions/` | after 9 |
 | 6 | Decide OPEN-20, then `facts.py` + `merge.py` incl. hours from `site_chrome` (V23) | 07 §5, §9 | `ingest/facts.py`, `merge.py`, `run.py` | LM Studio for OPEN-20 |
 | 7 | Location card → prompt; fact chunks in retrieval, location filter, fact-first tool result (OPEN-23) | 07 §3, §5.5 | `rag/prompt.py`, `rag/retrieve.py`, `rag/index.py`, `voice/tools.py` | after 6 |
-| 8 | `summary.py` business summary from `pages.testimonials` | 07 §6 | `ingest/summary.py`, `rag/prompt.py` | — |
+| 8 | ✅ (PR #28) `summary.py` business summary from `pages.testimonials` | 07 §6 | `ingest/summary.py`, `rag/prompt.py` | — |
 | 9 | Tool registry + executor with confirmation guard and action log | 04 Tasks | `actions/`, `voice/tools.py`, migration | — |
 | 10 | Tool-calling loop in text chat, then voice | 04 Tasks | `rag/answer.py`, `api/chat.py`, `voice/session.py` | after 9 |
 | 11 | Internal booking backend + rules; SMS confirmation | 04 Booking backends | `actions/booking.py`, migration | after 9 (wants 6); Twilio for SMS |

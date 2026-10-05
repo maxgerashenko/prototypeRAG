@@ -403,6 +403,23 @@ def test_bad_timezone_falls_back_to_utc(business, monkeypatch):
     assert "Current local time at the business:" in s._system_prompt
 
 
+def test_business_summary_goes_into_the_voice_prompt(business, monkeypatch):
+    """plan 07 §6: the summary is in the call's system prompt, guest themes attributed."""
+    from app.db.models import BusinessSummary
+
+    with tenant_session(business) as db:
+        db.add(BusinessSummary(business_id=business, one_liner="A quiet spa.", guest_themes=["Friendly staff"]))
+    s, _, _ = _make_session(business, FakeLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s.close()
+
+    run_async(run())
+    assert "About the business: A quiet spa." in s._system_prompt
+    assert "Guests often mention: Friendly staff" in s._system_prompt
+
+
 # --- stt.py / tts.py with a fake Google client (no credentials needed) ------------
 
 
