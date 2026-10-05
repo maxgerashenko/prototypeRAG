@@ -423,9 +423,15 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
   to `app` crashed the Postgres container once (it recovered, no data lost). Write down
   the safe way for migration round-trip tests (empty DB + `alembic upgrade head` +
   fixture) in the README / dev notes and never template from the live dev DB
-- [ ] **16 pages typed `other` are retrievable** (campaign/test URLs like `/ag1-*`,
+- [x] **16 pages typed `other` are retrievable** (campaign/test URLs like `/ag1-*`,
   `/ldv-iush`, plus `/restaurant`, `/rewards`, `/micro/membership`, `/home`): add the
   LLM page-type fallback (or stricter rules) so test/landing pages are excluded
+  - Fixed with stricter URL rules, not the LLM fallback (keeps organize network-free):
+    `/home` and campaign/test slugs (`ag1-*`, `ai-search*`, `ldv-*`, `micro/*`) →
+    `landing` (not retrievable); `/restaurant`, `/rewards` → `service`; `/creators`,
+    `/partnerships` → `about`; slugs with a year (`aufguss-event-2026`) → `event`. No
+    pilot sitemap URL is `other` any more (test). `ORGANIZER_VERSION` bumped so the next
+    run re-types existing pages. The LLM fallback stays the plan for a new business
 - [ ] **Testimonials discarded:** `cut_testimonials()` returns the cut text but nothing
   stores it — persist it for `summary.py` (§6) instead of re-deriving it
 - [ ] **Duplicate placeholder check:** `app/voice/session.py:_load_business` has its own

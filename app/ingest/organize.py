@@ -34,7 +34,7 @@ from app.db.models import Business, Location, Page
 from app.ingest.chunk import ChunkDraft
 from app.ingest.clean import content_hash as sha256_hash
 
-ORGANIZER_VERSION = "1"  # bump to force re-organizing every page regardless of content_hash
+ORGANIZER_VERSION = "2"  # bump to force re-organizing every page regardless of content_hash
 
 # --- site chrome dedupe (K2) ---------------------------------------------------------
 
@@ -150,7 +150,13 @@ _FAQ_SLUGS = {"faq"}
 _POLICY_SLUGS = {"health-and-safety", "know-before-you-go", "code-of-conduct", "what-to-expect"}
 _CONTACT_SLUGS = {"contact"}
 _CAREERS_SLUGS = {"careers"}
-_LANDING_SLUGS = {""}  # site root
+_LANDING_SLUGS = {"", "home"}  # site root and its /home twin
+# Campaign/test landing pages listed in the pilot's sitemap but not part of the site
+# (plan 07 K7): ad variants (/ag1-xmis-t1 ...), search experiments (/ai-search-old),
+# /ldv-iush, /micro/membership. Typed `landing` so they're never retrievable.
+_CAMPAIGN_RE = re.compile(r"^(ag1-|ai-search|ldv-|micro/)")
+_ABOUT_SLUGS = {"creators", "partnerships"}
+_DATED_SLUG_RE = re.compile(r"(^|-)20\d\d($|-)")  # aufguss-event-2026
 
 PAGE_TYPES = (
     "location", "service", "pricing", "faq", "policy", "contact", "about", "blog",
@@ -164,7 +170,7 @@ def classify_page_type(url: str, location_slugs: set[str]) -> str:
     matches one is the location's own page, even for locations not yet given a url by
     `location_url` (a site can link a location before we've crawled its page)."""
     path = urlparse(url).path.strip("/").lower()
-    if path in _LANDING_SLUGS:
+    if path in _LANDING_SLUGS or _CAMPAIGN_RE.match(path):
         return "landing"
     if path in location_slugs:
         return "location"
@@ -184,9 +190,12 @@ def classify_page_type(url: str, location_slugs: set[str]) -> str:
     if first_segment == "treatments" or path in {
         "day-pass", "memberships", "packs", "scrub", "massage", "sauna-rituals-aufguss",
         "gift-cards", "rooftop-pool-nyc", "rooftop-pool-bar-menu", "referrals", "first-timers",
+        "restaurant", "rewards",
     }:
         return "service"
-    if "coming-soon" in path:
+    if path in _ABOUT_SLUGS:
+        return "about"
+    if "coming-soon" in path or _DATED_SLUG_RE.search(path):
         return "event"
     return "other"
 

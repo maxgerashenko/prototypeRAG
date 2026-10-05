@@ -3,6 +3,7 @@
 Fixtures were captured from the real stage-1 pilot business (DEC-31, abathhouse.com).
 """
 
+import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -284,10 +285,29 @@ def test_classify_page_type_url_rules():
         "https://x.com/treatments/massage": "service",
         "https://x.com/day-pass": "service",
         "https://x.com/coming-soon-chicago": "event",
+        "https://x.com/aufguss-event-2026": "event",
+        "https://x.com/home": "landing",
+        "https://x.com/ag1-xmis-t1": "landing",
+        "https://x.com/ai-search-old": "landing",
+        "https://x.com/ldv-iush": "landing",
+        "https://x.com/micro/membership": "landing",
+        "https://x.com/restaurant": "service",
+        "https://x.com/rewards": "service",
+        "https://x.com/partnerships": "about",
         "https://x.com/some-random-page": "other",
     }
     for url, expected in cases.items():
         assert organize.classify_page_type(url, slugs) == expected, url
+
+
+def test_pilot_sitemap_has_no_other_pages():
+    """Every non-blog page in the pilot's sitemap gets a real type (review finding on
+    milestone 1: 16 pages fell through to `other` and stayed retrievable)."""
+    sitemap = (FIXTURES / "abathhouse_sitemap.xml").read_text()
+    urls = re.findall(r"<loc>([^<]+)</loc>", sitemap)
+    slugs = {"williamsburg", "flatiron", "atlantic-ave", "philadelphia"}
+    other = [u for u in urls if organize.classify_page_type(u, slugs) == "other"]
+    assert other == []
 
 
 def test_is_retrievable():
