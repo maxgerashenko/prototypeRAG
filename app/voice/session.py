@@ -102,6 +102,8 @@ class CallSession:
         self._vad = TurnDetector(sample_rate=sample_rate)
         self._turn: TurnTranscriber | None = None
         self._reply_task: asyncio.Task | None = None
+        # STT of a turn a barge-in cut off before it was answered; its words lead the next turn
+        self._unanswered_stt: asyncio.Task | None = None
         self._playing_until = 0.0  # monotonic time the caller's buffer runs out of bot audio
         self._history: list[dict] = []
         self._system_prompt = ""
@@ -213,8 +215,15 @@ class CallSession:
     # --- one turn -------------------------------------------------------------------
 
     async def _handle_turn(self, turn: TurnTranscriber, speech_end: float) -> None:
+        earlier, self._unanswered_stt = self._unanswered_stt, None
+        stt = asyncio.ensure_future(self._transcribe(turn, earlier))
         try:
-            text = await asyncio.to_thread(turn.finish)
+            # shielded: a barge-in here ("What if I want to come?" … "Today at 9 pm") must
+            # not lose these words, so they are carried into the next turn
+            text = await asyncio.shield(stt)
+        except asyncio.CancelledError:
+            self._unanswered_stt = stt
+            raise
         except RuntimeError:
             log.exception("STT failed")
             return
@@ -238,6 +247,17 @@ class CallSession:
             log.info("voice turn %s: %s", self.conversation_id, timings)
             # may run after hang-up (cancelled by close()), when the socket is closed
             await self._try_send_event({"type": "latency", **timings})
+
+    async def _transcribe(self, turn: TurnTranscriber, earlier: asyncio.Task | None) -> str:
+        """Final transcript of `turn`, after the words of an earlier unanswered turn."""
+        texts = []
+        if earlier is not None:
+            try:
+                texts.append(await earlier)
+            except RuntimeError:
+                log.exception("STT failed")
+        texts.append(await asyncio.to_thread(turn.finish))
+        return " ".join(t for t in texts if t)
 
     async def _reply(self, text: str, spoken: list[str], speech_end: float, timings: dict) -> None:
         messages = [
