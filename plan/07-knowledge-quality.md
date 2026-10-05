@@ -410,6 +410,27 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
 - [ ] Update [01-crawler.md](01-crawler.md) / [02-local-rag.md](02-local-rag.md) data-model
   sections to the built state
 
+**Review findings on milestone 1 (217e8eb, 2026-10-04) — fix before stage 2:**
+
+- [ ] **Hours not retrievable (V23 still open):** hours survive cleaning but live only in
+  the `page_type='site_chrome'` page, which is never chunked. `facts.py` must extract
+  hours (per location) from it; re-run the eval's hours questions to confirm
+- [ ] **End-to-end crawl test:** run `crawl_business` against saved fixtures (no network)
+  and assert pages, chrome pseudo-page, locations and chunks. The chrome pseudo-page was
+  deleted by `delete_pages_not_in` right after creation — caught only by inspecting the
+  DB, no test covered it
+- [ ] **Throwaway-DB procedure:** `CREATE DATABASE … TEMPLATE app` with open connections
+  to `app` crashed the Postgres container once (it recovered, no data lost). Write down
+  the safe way for migration round-trip tests (empty DB + `alembic upgrade head` +
+  fixture) in the README / dev notes and never template from the live dev DB
+- [ ] **16 pages typed `other` are retrievable** (campaign/test URLs like `/ag1-*`,
+  `/ldv-iush`, plus `/restaurant`, `/rewards`, `/micro/membership`, `/home`): add the
+  LLM page-type fallback (or stricter rules) so test/landing pages are excluded
+- [ ] **Testimonials discarded:** `cut_testimonials()` returns the cut text but nothing
+  stores it — persist it for `summary.py` (§6) instead of re-deriving it
+- [ ] **Duplicate placeholder check:** `app/voice/session.py:_load_business` has its own
+  placeholder-name set; reuse `profile._none_if_placeholder` (one rule in one place)
+
 ### Stage 2 — cloud, one pilot
 
 - [ ] Crawler Cloud Run Job runs organize + extract + summary after the crawl (same CLI)
