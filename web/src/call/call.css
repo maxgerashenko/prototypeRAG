@@ -1,0 +1,15 @@
+/* Debug-page look, like chat.html and voice-debug.html. */
+body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
+.container { max-width: 640px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.hint { color: #666; font-size: 13px; margin: 0 0 16px; }
+label { display: block; margin-bottom: 6px; font-weight: 500; color: #333; }
+select { width: 100%; padding: 8px 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; margin-bottom: 16px; }
+.controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+button { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; color: #fff; background: #1976d2; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+#hangup { background: #c62828; }
+#mute { background: #546e7a; }
+#status { font-weight: 500; }
+#log { height: 240px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px 12px; background: #fafafa; font: 12px ui-monospace, monospace; }
+#log div.error { color: #c62828; }

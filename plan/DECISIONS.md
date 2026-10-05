@@ -119,6 +119,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-40 | Organize / clean step | New step between crawl and index: crawl priority, site chrome kept once (not thrown away), page type, location, language, duplicates, staleness, junk filter; idempotent by content hash + version; owner-confirmed facts never overwritten | 1 | ✅ |
 | DEC-41 | Web UI stack | React + TypeScript (Vite multi-page build) in `web/`, built to `web/dist` and served by the one FastAPI service under `/web`; voice app, debug pages and later the owner dashboard | 1 · 2 (image build) | ✅ |
 | DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
+| DEC-43 | API access control + Twilio checks (resolves OPEN-19) | One shared `ACCESS_KEY` (header or login cookie) on every route except the chat widget, health, login and the Twilio entry points; Twilio webhook signature check + a signed stream token on `/voice/ws` under `TWILIO_AUTH_TOKEN`; both set before the URL is public | 1 (built) · 2 (required) · 3 (owner login, OPEN-12) | ✅ |
 
 ---
 
@@ -726,6 +727,38 @@ Consequences:
 - Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
   second business.
 
+### DEC-43 — API access control and Twilio checks (stage 2 gate, built in stage 1; resolves OPEN-19)
+
+Context: OPEN-19 — before the stage-2 Cloud Run URL (or an ngrok tunnel) is public, every
+route trusted the `business_id` in the request: `/businesses/{id}/custom-replies` let anyone
+rewrite what the phone bot says, `/debug/retrieve` dumped chunk text, `/twilio/token`
+minted call tokens, and `/voice/ws` opened a call for any business. Built together with the
+Twilio adapter (step 4, 2026-10-05), since ngrok makes the URL public already in stage 1.
+One operator, one pilot business; owner login is stage 3 (OPEN-12).
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Shared secret `ACCESS_KEY`: `X-Access-Key` header, or an HttpOnly cookie set by `POST /login` (pages, fetches and WebSocket handshakes send it automatically)** | Same code locally (ngrok) and on Cloud Run; no Google-specific setup; pages need no change | One key for everyone; rotate = change env var | ✅ |
+| IAP / Cloud Run IAM | Google identities, no key handling | Cloud-only (breaks D4 local = cloud); Twilio and the public chat widget must bypass it anyway; IAP needs a load balancer (monthly cost, DEC-33) | ❌ |
+| Owner login (Google sign-in / magic link) | Per-person access | Not needed for one operator; OPEN-12 decides it in stage 3 | 🔄 stage 3 |
+
+| Option (Twilio) | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Webhook: `X-Twilio-Signature` check (`twilio` helper library) when `TWILIO_AUTH_TOKEN` is set; stream: our TwiML adds a `token` parameter = HMAC(auth token, business_id:CallSid), checked on the `start` message** | Doesn't depend on how Twilio signs WebSocket handshakes; ties the stream to the call the webhook approved; the TwiML only goes to Twilio, so the caller never sees the token | Two mechanisms | ✅ |
+| Signature check on the WebSocket handshake only | One mechanism | Handshake signing behaviour less documented; nothing ties the stream to a business we approved | ❌ |
+
+Consequences:
+- Public with `ACCESS_KEY` set: `/chat`, `/chat/stream` (widget), `/health`, `/login`,
+  `/twilio/voice`, `/voice/ws`. Everything else — `/web/*` pages (redirect to `/login`),
+  `/businesses…`, `/debug/retrieve`, `/twilio/token`, `/voice/browser` (close 4401), `/dev/reload` — needs the key.
+- Empty `ACCESS_KEY` / `TWILIO_AUTH_TOKEN` keep stage-1 localhost open; the app logs a
+  warning at startup. Both must be set before any public URL (stage 2 step 8, and any
+  ngrok session that should stay up).
+- `PUBLIC_BASE_URL` fixes the signed URL when proxies rewrite it (the signature covers
+  the exact URL set in the TwiML App).
+- Still open to anyone with the URL: the chat widget trusts `business_id` (by design — it
+  only answers questions); rate limits/cost caps are stage 3 (06-scale.md).
+
 ## 4. Still considering (open questions)
 
 Grouped by the stage in which the answer is needed.
@@ -743,7 +776,6 @@ Grouped by the stage in which the answer is needed.
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
 | OPEN-08 | 2 | Voice mode in cloud | Pipeline (Google STT → Gemini Flash → Google TTS) · Gemini Live | Stage-2 comparison: latency, quality, cost per minute, session limits |
-| OPEN-19 | 2 | API access control for the pilot | Shared secret header / IAP / Cloud Run IAM for owner routes, Twilio signature check for webhooks; public only: chat widget | Needed before stage 2 step 8 (public Cloud Run URL): today every route trusts the `business_id` in the request, and `/businesses/{id}/custom-replies` lets anyone rewrite what the phone bot says; `/debug/retrieve` dumps chunk text |
 | OPEN-09 | 3 | Telephony provider | Twilio · Telnyx · Vonage · Plivo | OPEN-02 (price, number availability) |
 | OPEN-12 | 3 | Owner login for dashboard | Google sign-in · magic link | Before the second business |
 | OPEN-13 | 3 | CI/CD + Terraform timing | When deploys get frequent/risky or >1 person deploys | Stage 2 `deploy.sh` experience |

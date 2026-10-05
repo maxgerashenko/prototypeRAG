@@ -50,6 +50,9 @@ Then open a page:
 | **Voice app** (DEC-42): pick a business, read past conversations, call with push-to-talk, continue an earlier call | http://localhost:8000/ (redirects to `/web/`; the old `/web/mic-test.html` does too) | DB; for calls also LM Studio, `gcloud auth application-default login`, Chrome or Safari |
 | Chat test (answers + retrieved sources; paste a `business_id`) | http://localhost:8000/web/chat.html | DB, LM Studio |
 | Voice debug (hands-free: open mic + server VAD, raw event log; paste a `business_id`) | http://localhost:8000/web/voice-debug.html | as for calls, plus headphones |
+| Twilio call (mode B, DEC-34): a real Twilio call from the browser, same call loop as a phone | http://localhost:8000/web/call.html | as for calls, plus `TWILIO_*` in `.env`, ngrok and a TwiML App ([03-voice-channel.md](plan/03-voice-channel.md#local-development-setup)) |
+
+With `ACCESS_KEY` set in `.env` (required whenever the server is reachable from outside, e.g. through ngrok — DEC-43), pages first ask for the key at `/login`.
 
 In the voice app, hold **Hold to talk** (or hold Space) while you speak and release to send;
 pressing while the assistant talks interrupts it. Space also starts a call (selected

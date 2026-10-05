@@ -127,7 +127,7 @@ Details: [05-cloud-migration.md](05-cloud-migration.md)
   only once the pilot pays for it — until then Voice SDK calls (DEC-34).
 
 **Must be in stage 2 before going public:** access control on owner/debug routes and
-Twilio signature checks (OPEN-19).
+Twilio signature checks — built in stage 1 (DEC-43); set `ACCESS_KEY` and `TWILIO_AUTH_TOKEN`.
 
 **Deliberately not in stage 2:** load tests, service split,
 Terraform, CI/CD, staging/prod, RLS enforcement (only one business).
@@ -184,6 +184,10 @@ VOICE_LANGUAGE=en-US                         # Google Speech; auth = ADC
 STT_MODEL=latest_short                       # `phone_call` for 8 kHz Twilio audio — compare
 TTS_VOICE=en-US-Neural2-F                    # voice names change — re-check the catalog
 VOICE_REASONING_EFFORT=none                  # thinking off for voice (DEC-29)
+TWILIO_ACCOUNT_SID=… TWILIO_API_KEY_SID=… TWILIO_API_KEY_SECRET=… TWILIO_TWIML_APP_SID=…
+TWILIO_AUTH_TOKEN=…                          # optional locally: webhook signature + stream token (DEC-43)
+ACCESS_KEY=…                                 # optional locally: key for all non-public routes (DEC-43)
+PUBLIC_BASE_URL=https://<ngrok-host>         # optional: URL Twilio calls us at
 DEV_RELOAD=true                              # live reload of web/ pages; never set in cloud
 # in Docker Compose (end of stage 1): use host.docker.internal / service names instead of localhost
 

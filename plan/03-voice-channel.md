@@ -123,11 +123,20 @@ will differ from the trial one — don't publish the trial number.
 ## Local development setup
 
 1. Twilio account (trial credit is enough to start; auto-recharge off — DEC-33). No
-   phone number: create a **TwiML App** + API key, and a page using the Twilio Voice
-   JS SDK that calls it (≈ $0.004/min, DEC-34).
-2. `ngrok http 8000` → set the TwiML App's voice URL to `https://<ngrok>/twilio/voice`.
-   The same webhook later serves a real number unchanged.
-3. Before phone: browser calls (mode C → `/voice/browser`) with the same voice pipeline, so
+   phone number: in the Twilio console create an **API key** (Account → API keys) and a
+   **TwiML App** (Voice → TwiML Apps) (≈ $0.004/min, DEC-34).
+2. `ngrok http 8000` → set the TwiML App's voice URL to `https://<ngrok>/twilio/voice`
+   (POST). The same webhook later serves a real number unchanged.
+3. `.env`: `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`,
+   `TWILIO_TWIML_APP_SID` (for `GET /twilio/token`); optionally `TWILIO_AUTH_TOKEN`
+   (then every webhook must carry a valid `X-Twilio-Signature` and the stream a signed
+   token, DEC-43 — set it whenever the ngrok tunnel stays up), `ACCESS_KEY` (then pages and
+   APIs need a login at `/login`, DEC-43) and `PUBLIC_BASE_URL=https://<ngrok>`
+   (only if the signature check fails because the URL seen behind the tunnel differs).
+4. Open `http://localhost:8000/web/call.html` (mode B; `localhost` counts as a secure
+   origin for the mic) → pick the business → **Call**. Twilio reaches the webhook through
+   the TwiML App's ngrok URL either way.
+5. Before phone: browser calls (mode C → `/voice/browser`) with the same voice pipeline, so
    STT/TTS can be tuned without spending call minutes: the voice app at `/web/` (push-to-talk,
    DEC-42) or `web/voice-debug.html` (open mic + raw event log).
 
@@ -147,8 +156,11 @@ app/voice/
   tools.py           shared tool definitions: search_business_info + Part 4 actions
 web/index.html       voice app (mode C, push-to-talk, DEC-42) — web/src/app/; audio + socket in web/src/voice/voiceCall.ts
 web/voice-debug.html open-mic debug client with raw event log (mode C, VAD) — web/src/voice-debug/ (DEC-41)
-web/call.html        Twilio Voice SDK call page (mode B) — React + TS like the others
+web/call.html        Twilio Voice SDK call page (mode B) — web/src/call/
 ```
+
+`twilio_routes.py` uses the `twilio` Python helper library for TwiML, Access Tokens and the
+signature check only — no REST calls; like the Google SDKs it stays inside `app/voice/`.
 
 ## Known problems — test or fix when the environment allows
 
@@ -250,6 +262,9 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
 |---|---|---|---|---|
 | V18 | STT/TTS each hold a thread from the default executor (`asyncio.to_thread`); an STT stream holds one for a whole turn → limits concurrent calls per instance | Potential (stage 2–3) | Load test with several calls | Async Google clients; dedicated executor |
 | V19 | `conversations.ended_at` stays NULL if the process dies mid-call | Potential | Kill the server during a call | Twilio status callback sets it (DEC-24) |
+| V26 | ~~`/voice/ws` trusts the `business_id` stream parameter; anyone who knows the URL can open a stream~~ — fixed: signed stream token under `TWILIO_AUTH_TOKEN` (DEC-43) | Fixed | `tests/test_twilio.py` | — |
+| V27 | Barge-in on Twilio: `clear` drops Twilio's buffer, but `_playing_until` is still estimated (V11); Twilio `mark` events would give the real playback end | Potential | Barge-in right after the bot stops, over a real call | Send a `mark` after each sentence, track `mark` replies |
+| V28 | `/twilio/status` (call end, DEC-24 summary) not built; `ended_at` is set when the stream WebSocket closes | Real | — | Status callback with the summary task |
 | V20 | `VOICE_REASONING_EFFORT=none` is only verified against LM Studio; Gemini's accepted value depends on the model | Potential | Step 6 Gemini comparison | Map per provider in `.env` |
 
 ### Data / other parts (found through voice testing)
@@ -272,11 +287,12 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
 - [ ] Voice app: a real call with STT/TTS + LM Studio through the React app (only mocked so far)
 - [x] Google STT/TTS checked live (ADC set up; results under "Known problems")
 - [x] Mic test end-to-end in the browser with real STT/TTS + LM Studio (results under "Known problems")
-- [ ] Twilio webhook + TwiML + media stream WebSocket — tested with the trial number (mode A) and a Voice SDK browser call (mode B)
+- [x] Twilio webhook + TwiML + media stream WebSocket (`twilio_routes.py`, `ws.py`, `web/call.html`) — tested with a simulated Twilio stream (`tests/test_twilio.py`: TwiML, signature, token, whole call with barge-in `clear`) (2026-10-05)
+- [ ] A real Voice SDK browser call (mode B) through ngrok — needs the Twilio setup above; repeat the latency table over Twilio, check V4 (STT model on phone audio)
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
 - [ ] Silence re-prompt (~6 s) and polite hang-up; filler while a tool runs, if latency needs it
-- [ ] Called number / TwiML App → business_id mapping from Postgres
+- [x] Called number / TwiML App → business_id mapping from Postgres (`business_id` param from the call page, else `To` in `businesses.phone_numbers`)
 - [ ] Call transfer + take-a-message fallback
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
 - [ ] Summary runs in the Twilio status callback (DEC-24)
@@ -310,6 +326,32 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
   In cloud sessions the first two fail with `APIConnectionError` and
   `test_barge_in_mid_reply_keeps_only_what_was_spoken` hangs (same on main)
+
+#### Twilio call (mode B) — install and test on Mac
+
+Code is in `twilio_routes.py`, `ws.py` and `web/call.html`; so far it's tested only with a
+simulated Twilio stream (`tests/test_twilio.py`). Setup details are under "Local development setup".
+
+- [ ] **Install:** `uv sync` (adds `twilio`, `python-multipart`); `cd web && npm install && npm run build`
+  (adds `@twilio/voice-sdk`); ngrok: `brew install ngrok`, free ngrok account,
+  `ngrok config add-authtoken <token>`. A free static ngrok domain (≈ 2026, re-check) keeps
+  the URL stable: `ngrok http --url=<domain> 8000`. Without one, the URL changes on every start
+  and the TwiML App's voice URL must be updated each time
+- [ ] **Twilio console:** trial account, auto-recharge off (DEC-33); API key (SID + secret);
+  TwiML App with Voice URL `https://<ngrok>/twilio/voice`, method POST; note the Account SID
+  and the Auth Token
+- [ ] **`.env`:** `TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`,
+  `TWILIO_TWIML_APP_SID`, `TWILIO_AUTH_TOKEN`, `ACCESS_KEY` (DEC-43, because ngrok makes the
+  whole server public); restart uvicorn and check that the startup log has no "checks are open" warning
+- [ ] **Locked down:** `curl -X POST https://<ngrok>/twilio/voice` → 403 (no signature);
+  `https://<ngrok>/web/` → redirects to `/login`; `/businesses` → 401
+- [ ] **First call:** `http://localhost:8000/web/call.html` → log in → pick the pilot →
+  **Call** → greeting plays → ask "what time do you close on Saturday?" → spoken answer.
+  The call shows up in the voice app (caller `client:browser-test`). If the webhook returns
+  403 on a real call, set `PUBLIC_BASE_URL=https://<ngrok>` (signature URL mismatch)
+- [ ] **Over Twilio:** repeat the latency table (`latency` lines in the server log); barge-in
+  mid-answer stops the audio at once (V27); hang up mid-answer → `ended_at` set (V28)
+- [ ] **V4** Same questions with `STT_MODEL=latest_short` vs `phone_call` on real 8 kHz call audio
 
 ## Notes
 
