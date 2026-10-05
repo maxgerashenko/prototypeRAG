@@ -1,6 +1,6 @@
 """Per-call state and the call loop (plan/03-voice-channel.md, pipeline mode — DEC-30).
 
-Transport-agnostic: adapters (`browser_ws.py` now, Twilio `ws.py` next) convert their
+Transport-agnostic: adapters (`browser_ws.py`, Twilio `ws.py`) convert their
 wire format to PCM16 frames, call `feed()`, and give the session two callbacks — one
 that sends PCM16 back to the caller and one that sends events (transcript, reply text,
 latency, and `clear` = stop playback now, for barge-in). The session never knows which
@@ -27,7 +27,8 @@ Hanging up = a `hangup` event, then the adapter's `hang_up` callback (closes the
 `close()` still runs as for any hang-up.
 
 Pass `continue_from` to load an earlier conversation of the same business as LLM history
-(a new conversation row is still created).
+(a new conversation row is still created). Twilio calls pass `call_sid`, stored on the
+conversation for the status callback.
 """
 
 import asyncio
@@ -165,6 +166,7 @@ class CallSession:
         transcriber_factory: Callable[[int], TurnTranscriber] = TurnTranscriber,
         synthesize: Callable[[str, int], bytes] = tts.synthesize,
         continue_from: uuid.UUID | None = None,
+        call_sid: str | None = None,
         hang_up: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if turn_detection not in ("vad", "manual"):
@@ -178,6 +180,7 @@ class CallSession:
         self._new_transcriber = transcriber_factory
         self._synthesize = synthesize
         self._continue_from = continue_from
+        self._call_sid = call_sid
         self._hang_up = hang_up
         self._topic: str | None = None
 
@@ -577,7 +580,8 @@ class CallSession:
                         self._topic = raw
                     else:
                         self._topic = None
-            conversation = Conversation(business_id=self.business_id, channel="voice", caller=self._caller)
+            conversation = Conversation(business_id=self.business_id, channel="voice", caller=self._caller,
+                                        call_sid=self._call_sid)
             session.add(conversation)
             session.flush()
             self.conversation_id = conversation.id

@@ -336,6 +336,9 @@ class Conversation(Base):
     business_id: Mapped[uuid.UUID] = _business_id()
     channel: Mapped[str] = mapped_column(Text, nullable=False)
     caller: Mapped[str | None] = mapped_column(Text)
+    # Twilio CallSid for phone/Voice SDK calls (modes A/B): the status callback finds the
+    # conversation by it to set `ended_at` when the process died mid-call (V19, DEC-24).
+    call_sid: Mapped[str | None] = mapped_column(Text, unique=True)
     started_at: Mapped[datetime] = _now()
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
