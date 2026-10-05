@@ -120,7 +120,12 @@ class CallSession:
         self._reply_task = self._spawn(self._speak_greeting(greeting))
 
     async def close(self) -> None:
-        await self._cancel_reply()
+        # on hang-up the transport is already gone; a failing reply task must not skip the
+        # rest of the cleanup (STT thread blocked on Google, conversation left open)
+        try:
+            await self._cancel_reply()
+        except Exception:
+            log.exception("voice reply failed during close")
         if self._turn is not None:
             self._turn.cancel()
             self._turn = None
@@ -230,7 +235,8 @@ class CallSession:
             await asyncio.shield(asyncio.to_thread(self._save_turn, text, reply))
             timings["total_ms"] = _ms(speech_end)
             log.info("voice turn %s: %s", self.conversation_id, timings)
-            await self._send_event({"type": "latency", **timings})
+            # may run after hang-up (cancelled by close()), when the socket is closed
+            await self._try_send_event({"type": "latency", **timings})
 
     async def _reply(self, text: str, spoken: list[str], speech_end: float, timings: dict) -> None:
         messages = [
