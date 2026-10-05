@@ -134,12 +134,15 @@ app/
   llm.py                OpenAI-compatible chat + embed helpers
   db/                   SQLAlchemy models, Alembic migrations (enables pgvector)
   api/chat.py           POST /chat, GET /chat/stream (SSE), GET /debug/retrieve
+  api/businesses.py     GET /businesses — voice app picker (DEC-42)
+  api/conversations.py  GET /businesses/{id}/conversations[/{cid}] — voice app history (DEC-42)
   rag/
     index.py            chunks without embedding (or wrong embed_model) → embed → UPDATE
     retrieve.py         vector + keyword SQL, rank fusion, custom reply boost
     prompt.py           prompt builder
     answer.py           full pipeline
-web/chat.html           minimal test chat page (shows retrieved chunks next to the answer)
+web/chat.html           minimal test chat page (shows retrieved chunks next to the answer);
+                        React + TS entry, code in web/src/chat/ (DEC-41)
 tests/eval/<business>.yaml  question → expected facts
 docker-compose.yml, Dockerfile, .env.example
 ```

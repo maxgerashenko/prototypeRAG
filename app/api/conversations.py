@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from app.db import tenant_session
-from app.db.models import Conversation, Message
+from app.db.models import Conversation, Message, message_order
 
 router = APIRouter()
 
@@ -78,7 +78,7 @@ def list_conversations(business_id: uuid.UUID, limit: int = Query(50, ge=1, le=2
             Message.business_id == business_id,
             Message.conversation_id.in_(ids),
             Message.role.in_(["user", "assistant"])
-        ).order_by(Message.created_at, Message.id)
+        ).order_by(*message_order())
         msgs = session.execute(msgs_stmt).scalars().all()
         msg_map = {}
         for m in msgs:
@@ -112,7 +112,7 @@ def get_conversation_detail(business_id: uuid.UUID, conversation_id: uuid.UUID) 
             Message.conversation_id == conversation_id,
             Message.business_id == business_id,
             Message.role.in_(["user", "assistant"])
-        ).order_by(Message.created_at, Message.id)
+        ).order_by(*message_order())
         msgs = session.execute(msgs_stmt).scalars().all()
         message_outs = [
             MessageOut(

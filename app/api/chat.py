@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.db import tenant_session
-from app.db.models import Conversation, Message
+from app.db.models import Conversation, Message, message_order
 from app.rag.answer import answer_question, stream_answer
 from app.rag.retrieve import retrieve
 
@@ -53,7 +53,7 @@ def _prepare_conversation_and_history(
         rows = session.scalars(
             select(Message)
             .where(Message.business_id == business_id, Message.conversation_id == conversation_id)
-            .order_by(Message.created_at)
+            .order_by(*message_order())
         )
         history = [{"role": m.role, "content": m.content} for m in rows if m.role in ("user", "assistant")]
     return conversation_id, history

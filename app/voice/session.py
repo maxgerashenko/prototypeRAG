@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.db import tenant_session
-from app.db.models import Business, BusinessProfile, Conversation, Message
+from app.db.models import Business, BusinessProfile, Conversation, Message, message_order
 from app.llm import get_async_chat_client
 from app.rag.prompt import format_profile
 from app.voice import tts
@@ -317,7 +317,7 @@ class CallSession:
                         Message.business_id == self.business_id,
                         Message.conversation_id == self._continue_from,
                         Message.role.in_(("user", "assistant")),
-                    ).order_by(Message.created_at, Message.id)
+                    ).order_by(*message_order())
                 ).all()
                 if rows:
                     self._history = [{"role": m.role, "content": m.content} for m in rows]

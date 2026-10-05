@@ -3,7 +3,7 @@
 Real parts: VAD on the real speech fixture, Postgres (business, conversation, messages)
 and `run_tool` (keyword retrieval). Faked: Google STT/TTS (need ADC credentials) and the
 LLM stream (so tool calling is deterministic). Live Google/LM Studio runs are manual,
-through web/mic-test.html.
+through the voice app at /web/ (push-to-talk) or web/voice-debug.html (VAD).
 """
 
 import asyncio

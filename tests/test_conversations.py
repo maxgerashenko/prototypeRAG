@@ -111,3 +111,64 @@ def test_continue_from_loads_history_and_greets_with_topic(two_businesses, monke
     s = run_async(run(convs["other"]))  # another business's conversation: ignored
     assert events[0]["text"].startswith("Hi, you've reached Alpha Spa.")
     assert s._history == [{"role": "assistant", "content": events[0]["text"]}]
+
+
+# --- question/answer ordering ------------------------------------------------------
+# A turn's question and answer are saved in one transaction, so both get the same
+# created_at (now() = transaction start). The rows below are inserted answer-first in one
+# transaction on purpose; every reader must still put the question first (message_order()).
+
+@pytest.fixture
+def tied_turn():
+    bid = uuid.uuid4()
+    with tenant_session(bid) as s:
+        s.add(Business(id=bid, name="Tie Test"))
+    with tenant_session(bid) as s:
+        c = Conversation(business_id=bid, channel="voice", started_at=T0)
+        s.add(c)
+        s.flush()
+        cid = c.id
+    with tenant_session(bid) as s:
+        # ids chosen so the old tiebreak (ORDER BY created_at, id) always puts the answer first
+        s.add(Message(id=uuid.UUID(int=1), business_id=bid, conversation_id=cid, role="assistant", content="From 10am."))
+        s.add(Message(id=uuid.UUID(int=2**128 - 1), business_id=bid, conversation_id=cid, role="user",
+                      content="When are you open?"))
+    yield bid, cid
+    with tenant_session(bid) as s:
+        s.execute(delete(Business).where(Business.id == bid))
+
+
+def test_transcript_puts_question_before_answer_of_the_same_turn(tied_turn):
+    bid, cid = tied_turn
+    d = TestClient(app).get(f"/businesses/{bid}/conversations/{cid}").json()
+    assert [m["content"] for m in d["messages"]] == ["When are you open?", "From 10am."]
+    row = TestClient(app).get(f"/businesses/{bid}/conversations").json()[0]
+    assert row["title"] == "When are you open" and row["preview"] == "From 10am."
+
+
+def test_chat_history_puts_question_before_answer(tied_turn):
+    from app.api.chat import _prepare_conversation_and_history
+
+    bid, cid = tied_turn
+    _, history = _prepare_conversation_and_history(bid, cid)
+    assert history == [{"role": "user", "content": "When are you open?"}, {"role": "assistant", "content": "From 10am."}]
+
+
+def test_continue_from_history_puts_question_before_answer(tied_turn):
+    bid, cid = tied_turn
+
+    async def run():
+        async def send_audio(pcm):
+            pass
+
+        async def send_event(e):
+            pass
+
+        s = CallSession(bid, 16000, send_audio, send_event, continue_from=cid, synthesize=lambda t, r: b"")
+        await s.start()
+        await s._reply_task
+        await s.close()
+        return s
+
+    s = run_async(run())
+    assert [m["content"] for m in s._history[:2]] == ["When are you open?", "From 10am."]

@@ -117,7 +117,8 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-38 | Facts library | Atomic, sourced, location-scoped facts (`facts` + `fact_sources`), extracted per page by the LLM with a verbatim quote checked in code; retrieved as `chunks` rows `kind='fact'` in the same hybrid search (DEC-12); raw chunks as fallback (OPEN-22); core location facts always in the prompt | 1 · 2 (Gemini re-extract) · 3 (owner review) | ✅ |
 | DEC-39 | Reviews and marketing text | Website testimonials + marketing → a short business summary (description, highlights, guest themes, tone) in the system prompt; never a source of facts; no Google reviews (R9) | 1 | ✅ |
 | DEC-40 | Organize / clean step | New step between crawl and index: crawl priority, site chrome kept once (not thrown away), page type, location, language, duplicates, staleness, junk filter; idempotent by content hash + version; owner-confirmed facts never overwritten | 1 | ✅ |
-| DEC-41 | Web UI stack | React + TypeScript (Vite build) in `frontend/`, built to static files served by the one FastAPI service under `/web`; voice test app, chat page and later the owner dashboard | 1 | ✅ |
+| DEC-41 | Web UI stack | React + TypeScript (Vite multi-page build) in `web/`, built to `web/dist` and served by the one FastAPI service under `/web`; voice app, debug pages and later the owner dashboard | 1 · 2 (image build) | ✅ |
+| DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
 
 ---
 
@@ -504,7 +505,7 @@ DEC-33 exception first.
 
 ### DEC-19 — Dashboard — **Superseded by DEC-41**
 
-FastAPI + Jinja templates + HTMX. No separate frontend build (React/SPA) — D4.
+~~FastAPI + Jinja templates + HTMX. No separate frontend build (React/SPA) — D4.~~
 
 ### DEC-20 — Frameworks
 
@@ -666,13 +667,65 @@ uses the same app instead of Jinja + HTMX.
 | **React + TypeScript, Vite build, static files served by FastAPI** | Types for the API/WebSocket protocol; components per screen; HMR dev server; still ONE deployed service (D4) | Node toolchain + build step; Docker image needs a build stage (step 7); bundle to keep small | ✅ |
 | Separate frontend hosting (e.g. a static host/CDN) | Independent deploys, CDN | Second service/bill, CORS — breaks D4/DEC-33 for no gain at this scale | ❌ |
 
-- Source `frontend/` (Vite, React, TypeScript strict, vitest); `npm run build` → `frontend/dist/`,
-  mounted at `/web` (URLs unchanged: `/web/mic-test.html`, `/web/chat.html`).
-- Dev: `npm run dev` (Vite HMR, proxies API + `/voice` WebSocket to uvicorn) — replaces the
-  SSE live reload (`DEV_RELOAD`).
+- ~~Source `frontend/` (Vite, React, TypeScript strict, vitest); `npm run build` → `frontend/dist/`,
+  mounted at `/web` (URLs unchanged: `/web/mic-test.html`, `/web/chat.html`).~~ The same
+  decision was made in parallel on branch `claude/web-react-ts` (as its DEC-37); at the merge
+  (2026-10-05) that branch's complete app replaced the unfinished `frontend/` port (user
+  decision: the branch wins for the web, main wins for the backend). Source is `web/` (Vite
+  multi-page, React 19, TypeScript strict): `index.html` = voice app (DEC-42), `chat.html`,
+  `voice-debug.html` (open mic + raw event log); `npm run build` → `web/dist/`, mounted at
+  `/web` with `check_dir=False` (the API starts before the first build). `/` and the old
+  `/web/mic-test.html` redirect to `/web/`.
+- Dev: `npm run dev` (Vite HMR on :5173, proxies the API, `/dev` and the `/voice` WebSocket to
+  uvicorn). `DEV_RELOAD` is kept for the built pages: it now watches `web/dist` (all of `web/`
+  would include `node_modules`), `dev-reload.js` lives in `web/public/`, and the app blocks
+  reloads during a call — so `npm run build -- --watch` + `DEV_RELOAD=true` reloads pages.
 - Bends D4 slightly (toolchain), not the infrastructure: no extra service, no extra cost.
-- Stage 1 step 7 (containerize): multi-stage Dockerfile — Node build stage → copy `dist/`.
-- Browser tests (Playwright, `pytest -m ui`) run against the built app.
+- Stage 1 step 7 (containerize): multi-stage Dockerfile — Node build stage → copy `web/dist/`.
+- Tests: `npm test` (Vitest units) and `npm run e2e` (Playwright, TypeScript, mocked backend,
+  runs the built pages) — these replaced `tests/test_ui.py` (`pytest -m ui`), whose 12
+  scenarios were ported into `web/e2e/app.spec.ts`.
+### DEC-42 — Voice app UI from the "Voice Chat Bot" design (stage 1)
+
+Context: the user designed a phone-sized app (Claude Design artifact "Voice Chat Bot",
+`39NZFVruiDY7NNH95uf6KR`) with six screens — pick a business (search, recent
+conversations), a business's previous conversations, a past transcript, connecting, live
+call with push-to-talk, call ended — to be fully implemented, working on real data. It was
+built twice in parallel: as a plain-HTML page on main (`web/mic-test.html`, with server
+push-to-talk, `continue_from`, `app/api/businesses.py`, `app/api/conversations.py`) and as
+a React app on branch `claude/web-react-ts`. Merged 2026-10-05: the React app, adapted to
+main's backend, with every behaviour of main's page (its 12 browser tests ported).
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Server push-to-talk: `mode=ptt`, `ptt_start`/`ptt_end` text frames open and close the turn, no VAD; `no_speech` for an empty turn** (main) | Answers at once on release (no 0.5 s VAD wait); mic audio sent only during a turn; echo can't barge in | A protocol message per turn | ✅ |
+| Client-only hold-to-talk: silence frames while not held, server VAD ends the turn (branch) | No server change | ~0.5 s extra wait per turn; a tap shorter than the VAD's start (~160 ms) gets no answer | ❌ replaced at the merge |
+| Open mic with server VAD | Same as a phone call | Not the design; needs headphones against echo | ❌ for the app (kept in `voice-debug.html` and for phones) |
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Read-only JSON API: `GET /businesses` (`businesses.py`), `/businesses/{id}/conversations[/{cid}]` (`conversations.py`)** (main) | Lists and transcripts from the saved `conversations`/`messages`; durations and message offsets computed on the server; silent calls hidden; reusable by the dashboard | `/businesses` lists every business — fine with one operator and no login | ✅ |
+| The branch's own versions of the same endpoints (category column fallback, `ended_at`/`created_at` returned) | — | Duplicate of main's | ❌ dropped at the merge |
+
+Consequences:
+- `/web/` (and `/`, and the old `/web/mic-test.html`) is the voice app; debug pages
+  `/web/chat.html` and `/web/voice-debug.html` (open mic, raw events).
+- Card subtitle = business domain (DEC-37), else website host, else "No website"; search by
+  name or host. Conversation title = first question, preview = last message ("You: " when
+  the caller spoke last), as computed by `conversations.py`.
+- "Continue in a new call" sends `continue_from` (earlier messages become LLM history, the
+  greeting names the topic). Keyboard as on main's page: Space calls / holds to talk, Esc
+  backs out or ends the call, Backspace ends a call. Answers show the time to first audio
+  ("· 1.4 s", all timings on hover) and "· interrupted" after a barge-in. A call nobody
+  spoke in shows "Nothing was said" (not saved for reading). 4404 → "Unknown business".
+- Fixed at the merge: a question and its answer are saved in one transaction and get the
+  same `created_at` (`now()` = transaction start); `ORDER BY created_at, id` then ordered
+  them by a random UUID, so a transcript, `continue_from` history or `/chat`'s LLM history
+  could put the answer first. Ordering now breaks the tie user-first (`message_order()` in
+  `app/db/models.py`, used by every message query).
+- Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
+  second business.
+
 ## 4. Still considering (open questions)
 
 Grouped by the stage in which the answer is needed.
