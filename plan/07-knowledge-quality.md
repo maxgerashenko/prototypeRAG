@@ -399,8 +399,10 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
 - [x] (partial) Re-crawl the whole pilot domain — done, see Part C results below in the
   task report; audit 30 facts (§7) and `/debug/facts` **not done** (no `facts` rows exist
   yet — `facts.py` is the next milestone)
-- [ ] Location card + timezone per location → prompt and voice "current local time"
-  (V22); re-check V23 (hours now in the data)
+- [x] Timezone per location → voice "current local time" (V22): `app/ingest/timezone.py`,
+  run after profile extraction; voice reads `businesses.timezone` (= the default
+  location's) until conversations carry a location
+- [ ] Location card → prompt; re-check V23 (hours now in the data)
 - [ ] Retrieval: fact chunks, location filter, boosts, retrievable pages only; tool
   result fact-first; optional `location` argument (OPEN-23)
 - [ ] `summary.py` + prompt (≤ ~120 tokens), guest themes attributed, no names
