@@ -3,10 +3,13 @@
 Fixtures were captured from the real stage-1 pilot business (DEC-31, abathhouse.com).
 """
 
+import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
+import httpx
 import pytest
 from sqlalchemy import delete, select
 
@@ -564,5 +567,146 @@ def test_organize_business_detects_locations_from_chrome_not_start_path():
         # idempotent: re-running organize on the same, unchanged pages touches nothing
         result2 = organize.organize_business(bid, f"{root}williamsburg", root)
         assert result2.organized_page_ids == []
+    finally:
+        _cleanup_business(bid)
+
+
+# --- run.py: end-to-end crawl on fixtures (no network) --------------------------------
+#
+# plan 07 "Review findings on milestone 1": the site-chrome pseudo-page was deleted by
+# delete_pages_not_in right after organize_business created it, and no test caught it --
+# every test above covers one step in isolation. This one runs the whole crawl_business
+# pipeline against a fake site served from the saved pilot page, so a regression between
+# steps shows up here.
+
+E2E_HOST = "www.crawl-e2e.example.com"  # not the pilot's domain: never touch a real crawled business
+E2E_ROOT = f"https://{E2E_HOST}/"
+_MAIN_RE = re.compile(r"(<main\b[^>]*>).*?(</main>)", re.DOTALL)
+
+
+def _page_with_main(template: str, main_html: str) -> str:
+    """The real pilot page with its <main> swapped out: same header/footer (site chrome)
+    on every page, like the real site, but each page's own content."""
+    html, n = _MAIN_RE.subn(lambda m: f"{m.group(1)}{main_html}{m.group(2)}", template, count=1)
+    assert n == 1
+    return html
+
+
+def _sitemap(paths: list[str]) -> str:
+    urls = "".join(f"<url><loc>{E2E_ROOT}{p}</loc></url>" for p in paths)
+    return f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>'
+
+
+def _fake_site(homepage_html: str, robots_txt: str) -> dict[str, str]:
+    template = homepage_html.replace("abathhouse.com", "crawl-e2e.example.com")
+    text = "Our {0} location has two saunas, a cold plunge and a steam room. " * 3
+    return {
+        "/robots.txt": robots_txt.replace("abathhouse.com", "crawl-e2e.example.com"),
+        "/williamsburg": template,  # the start page: the real pilot page as-is
+        "/flatiron": _page_with_main(template, f"<h1>Flatiron</h1><p>{text.format('Flatiron')}</p>"),
+        "/faq": _page_with_main(
+            template, "<h1>FAQ</h1><h2>Do I need a towel?</h2><p>No, towels, robes and sandals are included with every visit.</p>"
+        ),
+        "/journal/sauna-benefits": _page_with_main(
+            template, "<h1>Sauna benefits</h1><p>September 3, 2025. Heat therapy helps sleep, recovery and mood in many ways.</p>"
+        ),
+        "/privacy-policy": _page_with_main(
+            template, "<h1>Privacy policy</h1><p>We collect only the data needed to process your bookings and payments.</p>"
+        ),
+        "/old-page": _page_with_main(
+            template, "<h1>Old offer</h1><p>A seasonal offer that the second crawl no longer finds in the sitemap.</p>"
+        ),
+        "/config/secret": "<html><body>robots.txt disallows this</body></html>",
+    }
+
+
+def test_crawl_business_end_to_end_on_fixtures(homepage_html: str, robots_txt: str, monkeypatch):
+    site = _fake_site(homepage_html, robots_txt)
+    page_paths = ["williamsburg", "flatiron", "faq", "journal/sauna-benefits", "privacy-policy", "old-page"]
+    sitemap_paths = [*page_paths, "config/secret"]
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == E2E_HOST, f"crawl left the fake site: {request.url}"
+        requested.append(request.url.path)
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=_sitemap(sitemap_paths))
+        body = site.get(request.url.path)
+        return httpx.Response(200, text=body) if body is not None else httpx.Response(404)
+
+    def fake_client(delay_seconds: float = 0.5) -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+        client._crawl_delay = 0
+        return client
+
+    monkeypatch.setattr(run, "make_client", fake_client)
+    start_url = f"{E2E_ROOT}williamsburg"
+    chrome_url = organize.chrome_pseudo_url(E2E_ROOT)
+
+    assert run._business_by_domain("crawl-e2e.example.com") is None  # left over from a failed run?
+    bid = run.resolve_business(start_url, None)
+    try:
+        summary = run.crawl_business(bid, start_url, extract_profile=False)
+
+        assert summary["pages_crawled"] == 6
+        assert summary["pages_changed"] == 6
+        assert summary["deleted_pages"] == 0
+        assert summary["locations_found"] == 4
+        assert "/config/secret" not in requested  # robots.txt honoured (R10)
+
+        with tenant_session(bid) as s:
+            business = s.get(Business, bid)
+            pages = {p.url: p for p in s.scalars(select(Page).where(Page.business_id == bid))}
+            locs = {l.name: l for l in s.scalars(select(Location).where(Location.business_id == bid))}
+            chunks = list(s.scalars(select(Chunk).where(Chunk.business_id == bid)))
+
+        assert business.name == "Bathhouse"  # og:site_name (A3)
+        assert set(pages) == {f"{E2E_ROOT}{p}" for p in page_paths} | {chrome_url}
+
+        # the regression: the chrome pseudo-page must survive the crawl's delete step
+        chrome = pages[chrome_url]
+        assert chrome.page_type == "site_chrome" and chrome.retrievable is False
+        assert "103 North 10th Street" in chrome.markdown  # footer addresses kept (K2)
+
+        assert set(locs) == {"Williamsburg", "Flatiron", "Atlantic Ave", "Philadelphia"}
+        assert [n for n, l in locs.items() if l.is_default] == ["Williamsburg"]
+        assert locs["Flatiron"].url == f"{E2E_ROOT}flatiron"
+
+        types = {urlparse(u).path: (p.page_type, p.retrievable) for u, p in pages.items() if u != chrome_url}
+        assert types == {
+            "/williamsburg": ("location", True),
+            "/flatiron": ("location", True),
+            "/faq": ("faq", True),
+            "/journal/sauna-benefits": ("blog", False),
+            "/privacy-policy": ("legal", False),
+            "/old-page": ("other", True),
+        }
+
+        chunks_by_page: dict[uuid.UUID, list[Chunk]] = {}
+        for c in chunks:
+            chunks_by_page.setdefault(c.page_id, []).append(c)
+        page_ids = {urlparse(u).path: p.id for u, p in pages.items()}
+        assert set(chunks_by_page) == {page_ids[p] for p in ("/williamsburg", "/flatiron", "/faq", "/old-page")}
+        for name, path in (("Williamsburg", "/williamsburg"), ("Flatiron", "/flatiron")):
+            for c in chunks_by_page[page_ids[path]]:
+                assert c.location_id == locs[name].id
+                assert c.text.startswith(f"Bathhouse {name} — ")  # A2
+        assert all(c.location_id is None for c in chunks_by_page[page_ids["/faq"]])
+        chunk_count = len(chunks)
+
+        # re-crawl after /old-page left the sitemap: it's deleted, nothing else changes,
+        # and the chrome pseudo-page is still there
+        sitemap_paths.remove("old-page")
+        summary2 = run.crawl_business(bid, start_url, extract_profile=False)
+        assert summary2["pages_crawled"] == 5
+        assert summary2["pages_changed"] == 0
+        assert summary2["pages_organized"] == 0
+        assert summary2["deleted_pages"] == 1
+
+        with tenant_session(bid) as s:
+            urls = set(s.scalars(select(Page.url).where(Page.business_id == bid)))
+            chunk_count2 = len(s.scalars(select(Chunk).where(Chunk.business_id == bid)).all())
+        assert urls == {f"{E2E_ROOT}{p}" for p in page_paths if p != "old-page"} | {chrome_url}
+        assert chunk_count2 == chunk_count - len(chunks_by_page[page_ids["/old-page"]])
     finally:
         _cleanup_business(bid)

@@ -415,10 +415,12 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
 - [ ] **Hours not retrievable (V23 still open):** hours survive cleaning but live only in
   the `page_type='site_chrome'` page, which is never chunked. `facts.py` must extract
   hours (per location) from it; re-run the eval's hours questions to confirm
-- [ ] **End-to-end crawl test:** run `crawl_business` against saved fixtures (no network)
+- [x] **End-to-end crawl test:** run `crawl_business` against saved fixtures (no network)
   and assert pages, chrome pseudo-page, locations and chunks. The chrome pseudo-page was
   deleted by `delete_pages_not_in` right after creation — caught only by inspecting the
-  DB, no test covered it
+  DB, no test covered it.
+  Done: `test_crawl_business_end_to_end_on_fixtures` in `tests/test_crawler.py` (fails
+  if the keep-the-chrome-page fix in `run.py` is reverted)
 - [ ] **Throwaway-DB procedure:** `CREATE DATABASE … TEMPLATE app` with open connections
   to `app` crashed the Postgres container once (it recovered, no data lost). Write down
   the safe way for migration round-trip tests (empty DB + `alembic upgrade head` +
