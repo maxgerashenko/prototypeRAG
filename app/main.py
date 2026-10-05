@@ -1,6 +1,7 @@
 """FastAPI app. The dashboard is added in a later step."""
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,7 +17,7 @@ from app.api.conversations import router as conversations_router
 from app.api.custom_replies import router as custom_replies_router
 from app.config import get_settings
 from app.db import engine
-from app.voice import google_auth
+from app.voice import google_auth, tts
 from app.voice.browser_ws import router as voice_browser_router
 from app.voice.twilio_routes import router as twilio_router
 from app.voice.ws import router as twilio_stream_router
@@ -31,6 +32,8 @@ if not (_settings.access_key and _settings.twilio_auth_token):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     google_auth.warm_up()  # missing Google credentials show at startup, not mid-call (V7)
+    # T4: warm the TTS connection in the background -- startup isn't held up by it
+    threading.Thread(target=tts.warm_up, daemon=True).start()
     yield
 
 

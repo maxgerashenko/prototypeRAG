@@ -13,7 +13,9 @@ from app.db import tenant_session
 from app.rag.prompt import format_chunks
 from app.rag.retrieve import retrieve
 
-SEARCH_TOP_N = 5
+# T1b (V16): 3, not 5 -- the LLM's post-search time grows with the tool result's length
+# (~3.7 s measured with 5); re-run the eval set when changing it
+SEARCH_TOP_N = 3
 
 TOOLS: list[dict] = [
     {
