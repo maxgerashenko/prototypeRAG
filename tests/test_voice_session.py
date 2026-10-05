@@ -207,6 +207,22 @@ def test_no_barge_in_when_bot_is_silent(business, monkeypatch):
     assert {"type": "clear"} not in events
 
 
+@pytest.mark.parametrize("chunk", [320, 3200, 32000])
+def test_turn_audio_not_clipped_by_large_chunks(monkeypatch, chunk):
+    # B4: audio after the VAD's trigger frame in the same chunk used to be dropped, so
+    # chunks bigger than one 20 ms frame clipped the start of the turn. No start(), no
+    # speech end: only the VAD → STT path runs, so no Postgres or LLM is needed.
+    s, _, _ = _make_session(uuid.uuid4(), FakeLLM(), monkeypatch)
+    audio = SILENCE_1S + _speech()
+    audio = audio[: len(audio) - len(audio) % 320]  # whole 20 ms frames
+    run_async(_feed(s, audio, chunk))
+    (turn,) = FakeTranscriber.created
+    # pre-roll reaching into the silence, then every frame to the end of the input:
+    # one gap-free tail, the same whatever the chunk size
+    assert len(turn.audio) > len(_speech())
+    assert audio.endswith(bytes(turn.audio))
+
+
 def test_unknown_business_raises(monkeypatch):
     s, _, _ = _make_session(uuid.uuid4(), FakeLLM(), monkeypatch)
     with pytest.raises(LookupError):
