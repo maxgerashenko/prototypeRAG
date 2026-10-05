@@ -173,6 +173,7 @@ docker-compose.yml, Dockerfile, .env.example
 - [ ] Run the eval with Gemini (only env vars changed) and compare to the local model
 - [ ] Show the full prompt in the chat page / a debug endpoint (only sources are shown today)
 - [ ] Measure `/chat` with thinking on vs `reasoning_effort="none"` — gemma-4-12b thinks by default (~8 s, see [03-voice-channel.md](03-voice-channel.md) V24)
+  — `/chat` now sends `CHAT_REASONING_EFFORT` (default `none`, 2026-10-05); the measurement is what's left
 - [ ] Find out why "Saturday opening hours" isn't answered on the pilot — data missing or retrieval miss (V23). Cause found (2026-10-04): data missing — hours are in the site footer, which `clean.py` removes; fixed by the organize step ([07-knowledge-quality.md](07-knowledge-quality.md) §4)
 - [ ] Knowledge quality (before step 5): location card + facts in prompt and retrieval, summary in the prompt, extended eval with `expected_in_context` — [07-knowledge-quality.md](07-knowledge-quality.md)
 - [ ] Log every LLM call (prompt size, response, tokens, latency) — needed to explain

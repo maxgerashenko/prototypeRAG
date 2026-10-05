@@ -119,12 +119,16 @@ def test_downsample_filters_out_aliasing_tones():
 # --- vad.py -----------------------------------------------------------------------
 
 
-def _feed_all(det: TurnDetector, pcm: bytes, chunk: int) -> list[tuple[float, VadEvent]]:
-    """Feed 8 kHz `pcm` in `chunk`-byte pieces; returns (seconds at the chunk end, event)."""
+def _feed_all(
+    det: TurnDetector, pcm: bytes, chunk: int, speech: bool = False
+) -> list[tuple[float, VadEvent]]:
+    """Feed 8 kHz `pcm` in `chunk`-byte pieces; returns (seconds at the chunk end, event).
+    `speech` events (the in-speech audio) are left out unless asked for."""
     events = []
     for i in range(0, len(pcm), chunk):
         for ev in det.feed(pcm[i : i + chunk]):
-            events.append((min(i + chunk, len(pcm)) / 2 / 8000, ev))
+            if speech or ev.kind != "speech":
+                events.append((min(i + chunk, len(pcm)) / 2 / 8000, ev))
     return events
 
 
@@ -174,6 +178,29 @@ def test_vad_odd_chunk_sizes_give_same_events_as_frame_sized_chunks():
     reference = [e for _, e in _feed_all(TurnDetector(), audio, 320)]
     for chunk in (1, 333, 1001):
         assert [e for _, e in _feed_all(TurnDetector(), audio, chunk)] == reference
+
+
+def _turn_audio(events: list[tuple[float, VadEvent]]) -> list[bytes]:
+    """Audio a caller of feed() would stream to STT, one entry per turn."""
+    turns: list[bytes] = []
+    for _, ev in events:
+        if ev.kind == "speech_start":
+            turns.append(ev.audio)
+        elif ev.kind == "speech":
+            turns[-1] += ev.audio
+    return turns
+
+
+def test_vad_turn_audio_is_contiguous_for_any_chunk_size():
+    # B4: with chunks larger than one frame, the audio after the trigger frame in the
+    # same chunk used to be dropped, clipping the start of the turn
+    audio, _, _ = _call_audio()
+    reference = _turn_audio(_feed_all(TurnDetector(), audio, 320, speech=True))
+    assert len(reference) == 1
+    assert reference[0] in audio  # one gap-free slice of the input
+    assert len(reference[0]) > len(_speech_8k()) // 2
+    for chunk in (1, 333, 1001, 3200, len(audio)):
+        assert _turn_audio(_feed_all(TurnDetector(), audio, chunk, speech=True)) == reference
 
 
 def test_vad_works_on_twilio_ulaw_audio():

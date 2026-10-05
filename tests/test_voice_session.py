@@ -20,7 +20,7 @@ from sqlalchemy import delete, select
 from app.db import tenant_session
 from app.db.models import Business, Chunk, Conversation, CustomReply, Message
 from app.voice import session as session_mod
-from app.voice.session import CallSession, split_sentences
+from app.voice.session import CallSession, speakable, split_sentences
 
 FIXTURES = Path(__file__).parent / "fixtures" / "voice"
 RATE = 8000
@@ -54,6 +54,10 @@ class FakeTranscriber:
 
 def fake_synthesize(text: str, sample_rate: int) -> bytes:
     return b"\0\0" * sample_rate * 3  # 3 s of "speech" per sentence
+
+
+def short_synthesize(text: str, sample_rate: int) -> bytes:
+    return b"\0\0" * (sample_rate // 20)  # 50 ms: a turn waits for its audio to play out
 
 
 def _chunk(content=None, tool_calls=None):
@@ -132,9 +136,105 @@ def test_split_sentences_keeps_unfinished_tail():
     assert split_sentences("no end yet") == ([], "no end yet")
 
 
+def test_speakable_strips_markdown_lists_and_urls():
+    assert speakable("**Hours:** we close at *5 pm*.") == "Hours: we close at 5 pm."
+    assert speakable("## Prices\n- Day pass $39\n2. Night pass") == "Prices Day pass $39 Night pass"
+    assert speakable("See [our site](https://www.zebra.lv/hours?x=1).") == "See our site."
+    assert speakable("Book at https://www.zebra.lv/book now.") == "Book at zebra.lv now."
+    assert speakable("Prices:\n1.") == "Prices:"  # list number cut off by the sentence splitter
+    assert speakable("**") == ""
+    # not markdown: keep
+    assert speakable("Open 24/7, 3-day pass is $99, 5 * 3, snake_case.") == "Open 24/7, 3-day pass is $99, 5 * 3, snake_case."
+
+
+class MarkdownLLM:
+    """One round, no tool call: an answer the prompt forbids but models still write."""
+
+    def __init__(self) -> None:
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs):
+        async def gen():
+            for piece in ["**We close** at 5 pm. ", "**\n", "See [our site](https://zebra.lv/hours)."]:
+                yield _chunk(piece)
+
+        return gen()
+
+
+def test_markdown_reply_is_spoken_and_saved_plain(business, monkeypatch):
+    spoken: list[str] = []
+
+    def synthesize(text, rate):
+        spoken.append(text)
+        return fake_synthesize(text, rate)
+
+    s, _, events = _make_session(business, MarkdownLLM(), monkeypatch)
+    s._synthesize = synthesize
+    s.turn_detection = "manual"
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.start_turn()
+        s.end_turn()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert spoken[1:] == ["We close at 5 pm.", "See our site."]  # the bare "**" is skipped
+    assert [e["text"] for e in events if e["type"] == "reply"][1:] == spoken[1:]
+    with tenant_session(business) as db:
+        last = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at)).all()[-1]
+        assert last.content == "We close at 5 pm. See our site."
+
+
+def test_stt_failure_tells_the_client(business, monkeypatch):
+    class FailingTranscriber(FakeTranscriber):
+        def finish(self, timeout=5.0):
+            raise RuntimeError("speech-to-text failed") from PermissionError("no ADC")
+
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    s._new_transcriber = FailingTranscriber
+    s.turn_detection = "manual"
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.start_turn()
+        s.end_turn()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert {"type": "error", "message": "speech-to-text failed: no ADC"} in events
+
+
+def test_missing_google_credentials_are_checked_once(monkeypatch):
+    from google.auth.exceptions import DefaultCredentialsError
+
+    from app.voice import google_auth
+
+    calls = []
+
+    def no_adc(*args, **kwargs):
+        calls.append(1)
+        raise DefaultCredentialsError("Your default credentials were not found.")
+
+    monkeypatch.setattr(google_auth.google.auth, "default", no_adc)
+    google_auth._problem.cache_clear()
+    try:
+        for _ in range(3):  # e.g. three turns of one call
+            with pytest.raises(RuntimeError, match="gcloud auth application-default login"):
+                google_auth.require_credentials()
+        assert len(calls) == 1  # the slow probe ran once, not per turn
+    finally:
+        google_auth._problem.cache_clear()
+
+
 def test_full_turn_with_tool_call(business, monkeypatch):
     llm = FakeLLM()
     s, audio_out, events = _make_session(business, llm, monkeypatch)
+    s._synthesize = short_synthesize
 
     async def run():
         await s.start()
@@ -177,6 +277,48 @@ def test_full_turn_with_tool_call(business, monkeypatch):
         ]
 
 
+class TwoToolRoundsLLM(FakeLLM):
+    """Each of two tool rounds speaks a sentence before its tool call; round 3 answers."""
+
+    async def _create(self, **kwargs):
+        self.requests.append({**kwargs, "messages": list(kwargs["messages"])})
+        n = len(self.requests)
+        if n <= 2:
+            text = "Let me check." if n == 1 else "One moment."
+            pieces = [_chunk(text), _chunk(tool_calls=[_tool_call_delta(
+                0, id=f"call_{n}", name="search_business_info", arguments='{"query": "zebrahours"}')])]
+        else:
+            pieces = [_chunk("We close at 5 pm.")]
+
+        async def gen():
+            for p in pieces:
+                yield p
+
+        return gen()
+
+
+def test_tool_rounds_send_only_their_own_text(business, monkeypatch):
+    llm = TwoToolRoundsLLM()
+    s, _, events = _make_session(business, llm, monkeypatch)
+    monkeypatch.setattr(session_mod, "run_tool", lambda *a: "zebrahours: Saturday 10-17")
+
+    async def run():
+        await s.start()
+        await s._reply_task  # greeting
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task  # the turn
+        await s.close()
+
+    run_async(run())
+
+    # B5: each assistant tool-call message carries only what was said in its own round
+    third = llm.requests[2]["messages"]
+    assert [m["content"] for m in third if m.get("tool_calls")] == ["Let me check.", "One moment."]
+    # the saved reply still has everything the caller heard
+    assert [e["text"] for e in events if e["type"] == "reply"][1:] == [
+        "Let me check.", "One moment.", "We close at 5 pm."]
+
+
 def test_barge_in_clears_playback_and_cancels_reply(business, monkeypatch):
     s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
 
@@ -205,6 +347,22 @@ def test_no_barge_in_when_bot_is_silent(business, monkeypatch):
 
     run_async(run())
     assert {"type": "clear"} not in events
+
+
+@pytest.mark.parametrize("chunk", [320, 3200, 32000])
+def test_turn_audio_not_clipped_by_large_chunks(monkeypatch, chunk):
+    # B4: audio after the VAD's trigger frame in the same chunk used to be dropped, so
+    # chunks bigger than one 20 ms frame clipped the start of the turn. No start(), no
+    # speech end: only the VAD → STT path runs, so no Postgres or LLM is needed.
+    s, _, _ = _make_session(uuid.uuid4(), FakeLLM(), monkeypatch)
+    audio = SILENCE_1S + _speech()
+    audio = audio[: len(audio) - len(audio) % 320]  # whole 20 ms frames
+    run_async(_feed(s, audio, chunk))
+    (turn,) = FakeTranscriber.created
+    # pre-roll reaching into the silence, then every frame to the end of the input:
+    # one gap-free tail, the same whatever the chunk size
+    assert len(turn.audio) > len(_speech())
+    assert audio.endswith(bytes(turn.audio))
 
 
 def test_unknown_business_raises(monkeypatch):
@@ -294,7 +452,8 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
     def slow_synthesize(text, rate):
         if text.startswith("Anything"):
             _time.sleep(0.3)  # caller interrupts while this sentence is being synthesized
-        return b"\0\0" * rate * 3
+            return b"\0\0" * rate * 3
+        return short_synthesize(text, rate)  # first sentence has played by the barge-in
 
     s, _, events = _make_session(business, FakeLLM(), monkeypatch)
     s._synthesize = slow_synthesize
@@ -306,6 +465,7 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
         await _feed(s, _speech() + SILENCE_1S)
         while not any(e.get("text") == "Anything else?" for e in events):
             await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)  # first sentence (50 ms) has played
         await _feed(s, _speech()[:8000])  # barge in
         await s.close()
 
@@ -316,6 +476,37 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
         assert [(m.role, m.content) for m in rows][1:] == [
             ("user", "What time do you close on Saturday?"),
             ("assistant", "We close at 5 pm on Saturday."),  # the unspoken sentence isn't stored
+        ]
+    assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
+
+
+def test_barge_in_after_reply_sent_keeps_only_what_was_heard(business, monkeypatch):
+    # B2: TTS is faster than playback, so the whole reply is sent while the caller has
+    # heard only part of it; a barge-in then must not store the unheard rest
+    def synthesize(text, rate):
+        return fake_synthesize(text, rate) if text.startswith("Anything") else short_synthesize(text, rate)
+
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    s._synthesize = synthesize
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        while not any(e["type"] == "latency" for e in events):  # all audio sent
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.2)  # first sentence (50 ms) played, second (3 s) still playing
+        await _feed(s, _speech()[:8000])  # barge in
+        await s.close()
+
+    run_async(run())
+    assert {"type": "clear"} in events
+    with tenant_session(business) as db:
+        rows = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at))
+        assert [(m.role, m.content) for m in rows][1:] == [
+            ("user", "What time do you close on Saturday?"),
+            ("assistant", "We close at 5 pm on Saturday."),
         ]
     assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
 
@@ -405,6 +596,7 @@ def test_barge_in_during_stt_finish_keeps_callers_words(business, monkeypatch):
 def test_manual_turns_ignore_vad_and_answer_on_release(business, monkeypatch):
     s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
     s.turn_detection = "manual"
+    s._synthesize = short_synthesize
 
     async def run():
         await s.start()

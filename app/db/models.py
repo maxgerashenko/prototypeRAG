@@ -102,8 +102,8 @@ class Location(Base):
     """One location of a business (plan/01-crawler.md: "assign a default location").
     The crawler's start URL becomes a location; the first one created for a business is
     its default. Exactly one default per business -- partial unique index below.
-    `timezone` is left for the owner/V22 to fill in; the business-level timezone is the
-    fallback until then.
+    `timezone` is filled by the crawler from the address (app/ingest/timezone.py, V22)
+    while empty, so an owner's correction sticks; `businesses.timezone` follows the default.
     """
 
     __tablename__ = "locations"
