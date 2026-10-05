@@ -1,6 +1,6 @@
 """Prompt builder (plan/02-local-rag.md "Answer pipeline" / "Prompt rules")."""
 
-from app.db.models import BusinessProfile
+from app.db.models import BusinessProfile, BusinessSummary
 from app.rag.retrieve import RetrievedChunk
 
 SYSTEM_PROMPT = (
@@ -37,6 +37,44 @@ def format_profile(profile: BusinessProfile | None) -> str:
     return "\n".join(lines) if lines else "No business profile available."
 
 
+SUMMARY_MAX_CHARS = 480  # plan 07 §6: the summary costs at most ~120 tokens of every prompt
+
+
+def format_summary(summary: BusinessSummary | None) -> str:
+    """The business summary (plan 07 §6), or "" when there's none. Not a source of facts:
+    guest themes are opinions and the model is told to attribute them. Highlights and
+    themes are dropped from the end until the block fits SUMMARY_MAX_CHARS."""
+    if summary is None:
+        return ""
+    highlights = list(summary.highlights or [])
+    themes = list(summary.guest_themes or [])
+
+    def render() -> list[str]:
+        lines = []
+        if summary.one_liner:
+            lines.append(f"About the business: {summary.one_liner}")
+        if highlights:
+            lines.append(f"Highlights: {'; '.join(highlights)}")
+        if themes:
+            lines.append(f"Guests often mention: {'; '.join(themes)}")
+        if summary.tone:
+            lines.append(f"Brand tone: {summary.tone}")
+        return lines
+
+    lines = render()
+    while len("\n".join(lines)) > SUMMARY_MAX_CHARS and (highlights or themes):
+        (highlights if len(highlights) >= len(themes) else themes).pop()
+        lines = render()
+    if not lines:
+        return ""
+    rule = (
+        "Business summary (for what the place is like and the tone to use; not a source of "
+        "prices, hours or other facts. What guests mention is their opinion: say \"guests "
+        "often say…\", never state it as fact):"
+    )
+    return "\n".join([rule, *lines])
+
+
 def format_chunks(chunks: list[RetrievedChunk]) -> str:
     """Retrieved chunks, numbered, with their section heading and text."""
     if not chunks:
@@ -46,8 +84,13 @@ def format_chunks(chunks: list[RetrievedChunk]) -> str:
 
 
 def build_prompt(
-    profile: BusinessProfile | None, chunks: list[RetrievedChunk], history: list[dict], question: str
+    profile: BusinessProfile | None,
+    chunks: list[RetrievedChunk],
+    history: list[dict],
+    question: str,
+    summary: BusinessSummary | None = None,
 ) -> list[dict]:
-    """System message (rules + profile + chunks) + history + the new question."""
-    system_content = f"{SYSTEM_PROMPT}\n\n{format_profile(profile)}\n\n{format_chunks(chunks)}"
+    """System message (rules + profile + summary + chunks) + history + the new question."""
+    sections = [SYSTEM_PROMPT, format_profile(profile), format_summary(summary), format_chunks(chunks)]
+    system_content = "\n\n".join(s for s in sections if s)
     return [{"role": "system", "content": system_content}, *history, {"role": "user", "content": question}]
