@@ -127,7 +127,7 @@ Details: [05-cloud-migration.md](05-cloud-migration.md)
   only once the pilot pays for it — until then Voice SDK calls (DEC-34).
 
 **Must be in stage 2 before going public:** access control on owner/debug routes and
-Twilio signature checks (OPEN-19).
+Twilio signature checks (OPEN-19; the Twilio part is done since stage 1 — DEC-43).
 
 **Deliberately not in stage 2:** load tests, service split,
 Terraform, CI/CD, staging/prod, RLS enforcement (only one business).
@@ -185,6 +185,12 @@ STT_MODEL=latest_short                       # `phone_call` for 8 kHz Twilio aud
 TTS_VOICE=en-US-Neural2-F                    # voice names change — re-check the catalog
 VOICE_REASONING_EFFORT=none                  # thinking off for voice (DEC-29)
 DEV_RELOAD=true                              # live reload of web/ pages; never set in cloud
+TWILIO_ACCOUNT_SID=AC...                     # Twilio (step 4, modes A/B — DEC-34, DEC-43)
+TWILIO_AUTH_TOKEN=...                        # webhook signatures + media stream token
+TWILIO_API_KEY_SID=SK...                     # API key + secret sign Voice SDK tokens (web/call.html)
+TWILIO_API_KEY_SECRET=...
+TWILIO_TWIML_APP_SID=AP...
+PUBLIC_BASE_URL=https://<id>.ngrok-free.app  # the URL Twilio calls; signatures cover it
 # in Docker Compose (end of stage 1): use host.docker.internal / service names instead of localhost
 
 # Stage 2 — Cloud Run env (secrets from Secret Manager)
@@ -198,6 +204,8 @@ EMBED_MODEL=gemini-embedding-001
 EMBED_DIM=768                     # reduced output dimension, keeps the column size —
                                   # the request must ask for it (default is larger);
                                   # app/llm.py fails fast on a mismatch
+TWILIO_AUTH_TOKEN=<secret>        # + the other TWILIO_* values as in stage 1
+PUBLIC_BASE_URL=https://<service>-<hash>.run.app   # or the custom domain Twilio calls
 
 # Stage 3 — adds
 DATABASE_URL=postgresql+psycopg://app_user:<secret>@...   # non-owner role, RLS applies
