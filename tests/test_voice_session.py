@@ -305,6 +305,43 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
     assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
 
 
+def test_hang_up_mid_reply_still_cleans_up(business, monkeypatch):
+    """B1: on hang-up the socket is closed before close() runs, so the cancelled reply's
+    `latency` event fails to send; close() must still cancel STT and end the conversation."""
+    import time as _time
+
+    def slow_synthesize(text, rate):
+        if text.startswith("Anything"):
+            _time.sleep(0.3)  # caller hangs up while this sentence is being synthesized
+        return b"\0\0" * rate * 3
+
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    s._synthesize = slow_synthesize
+    hung_up = False
+
+    async def send(_):
+        if hung_up:
+            raise ConnectionError("socket closed")
+
+    async def run():
+        nonlocal hung_up
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        while not any(e.get("text") == "Anything else?" for e in events):
+            await asyncio.sleep(0.01)
+        s._turn = FakeTranscriber(RATE)  # an STT stream open at hang-up
+        hung_up = True
+        s._send_event = s._send_audio = send
+        await s.close()
+
+    run_async(run())
+    assert FakeTranscriber.created[-1].cancelled
+    with tenant_session(business) as db:
+        assert db.get(Conversation, s.conversation_id).ended_at is not None
+
+
 def test_barge_in_during_stt_finish_keeps_callers_words(business, monkeypatch):
     """B3: speech starting while STT is still finishing the previous turn cancels that
     turn before it is answered; its words lead the next turn instead of being lost."""
