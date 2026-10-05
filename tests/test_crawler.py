@@ -445,6 +445,14 @@ def test_profile_placeholders_become_null_and_title_gives_fallback_name():
     assert name_from_title(None) is None and name_from_title("  ") is None
 
 
+def test_placeholder_business_names():
+    from app.ingest.profile import is_placeholder_name
+
+    for name in (None, "", "  ", "(pending)", "Pending", "business_name", "Name", "null", "N/A", "unknown"):
+        assert is_placeholder_name(name), name
+    assert not is_placeholder_name("Bathhouse")
+
+
 # --- identity.py ----------------------------------------------------------------------
 
 

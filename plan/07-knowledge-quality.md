@@ -428,8 +428,10 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
   LLM page-type fallback (or stricter rules) so test/landing pages are excluded
 - [ ] **Testimonials discarded:** `cut_testimonials()` returns the cut text but nothing
   stores it — persist it for `summary.py` (§6) instead of re-deriving it
-- [ ] **Duplicate placeholder check:** `app/voice/session.py:_load_business` has its own
-  placeholder-name set; reuse `profile._none_if_placeholder` (one rule in one place)
+- [x] **Duplicate placeholder check:** `app/voice/session.py:_load_business` has its own
+  placeholder-name set; reuse `profile._none_if_placeholder` (one rule in one place).
+  Done 2026-10-05: `profile.is_placeholder_name()` is the one rule, used by `session.py`,
+  `api/businesses.py`, `organize.py` and `run.py` (migration 0002 keeps its frozen copy)
 
 ### Stage 2 — cloud, one pilot
 

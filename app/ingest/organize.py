@@ -33,6 +33,7 @@ from app.db import tenant_session
 from app.db.models import Business, Location, Page
 from app.ingest.chunk import ChunkDraft
 from app.ingest.clean import content_hash as sha256_hash
+from app.ingest.profile import is_placeholder_name
 
 ORGANIZER_VERSION = "2"  # bump to force re-organizing every page regardless of content_hash (2: fill pages.testimonials)
 
@@ -426,7 +427,7 @@ def _upsert_locations(
         # single-location business with no footer address list) -- still must end up
         # with exactly one default location, named after the business itself.
         business = session.get(Business, business_id)
-        name = (business.name if business and business.name not in (None, "", "(pending)") else None) or "Main"
+        name = (business.name if business and not is_placeholder_name(business.name) else None) or "Main"
         fallback = Location(business_id=business_id, name=name, url=start_url, is_default=True)
         session.add(fallback)
         session.flush()
