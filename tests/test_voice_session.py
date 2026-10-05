@@ -212,6 +212,22 @@ def test_no_barge_in_when_bot_is_silent(business, monkeypatch):
     assert {"type": "clear"} not in events
 
 
+@pytest.mark.parametrize("chunk", [320, 3200, 32000])
+def test_turn_audio_not_clipped_by_large_chunks(monkeypatch, chunk):
+    # B4: audio after the VAD's trigger frame in the same chunk used to be dropped, so
+    # chunks bigger than one 20 ms frame clipped the start of the turn. No start(), no
+    # speech end: only the VAD → STT path runs, so no Postgres or LLM is needed.
+    s, _, _ = _make_session(uuid.uuid4(), FakeLLM(), monkeypatch)
+    audio = SILENCE_1S + _speech()
+    audio = audio[: len(audio) - len(audio) % 320]  # whole 20 ms frames
+    run_async(_feed(s, audio, chunk))
+    (turn,) = FakeTranscriber.created
+    # pre-roll reaching into the silence, then every frame to the end of the input:
+    # one gap-free tail, the same whatever the chunk size
+    assert len(turn.audio) > len(_speech())
+    assert audio.endswith(bytes(turn.audio))
+
+
 def test_unknown_business_raises(monkeypatch):
     s, _, _ = _make_session(uuid.uuid4(), FakeLLM(), monkeypatch)
     with pytest.raises(LookupError):
@@ -393,6 +409,48 @@ def test_hang_up_mid_reply_still_cleans_up(business, monkeypatch):
     assert FakeTranscriber.created[-1].cancelled
     with tenant_session(business) as db:
         assert db.get(Conversation, s.conversation_id).ended_at is not None
+
+
+def test_barge_in_during_stt_finish_keeps_callers_words(business, monkeypatch):
+    """B3: speech starting while STT is still finishing the previous turn cancels that
+    turn before it is answered; its words lead the next turn instead of being lost."""
+    import threading
+
+    stt_running, release_stt = threading.Event(), threading.Event()
+    texts = iter(["What if I want to come?", "Today at 9 pm."])
+
+    class SlowFirstTranscriber(FakeTranscriber):
+        def finish(self, timeout: float = 5.0) -> str:
+            text = next(texts)
+            if text.startswith("What if"):
+                stt_running.set()
+                release_stt.wait(5)  # still finishing when the caller speaks again
+            return text
+
+    llm = FakeLLM()
+    s, _, events = _make_session(business, llm, monkeypatch)
+    s._new_transcriber = SlowFirstTranscriber
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        await asyncio.to_thread(stt_running.wait, 5)
+        await _feed(s, _speech()[:8000])  # barge in during finish()
+        release_stt.set()
+        await _feed(s, _speech()[8000:] + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    combined = "What if I want to come? Today at 9 pm."
+    assert [e["text"] for e in events if e["type"] == "transcript"] == [combined]
+    asked = [m["content"] for m in llm.requests[0]["messages"] if m["role"] == "user"]
+    assert asked == [combined]
+    with tenant_session(business) as db:
+        rows = db.scalars(select(Message).where(Message.business_id == business, Message.role == "user"))
+        assert [m.content for m in rows] == [combined]
 
 
 # --- push-to-talk (turn_detection="manual") and the business picker ------------------
