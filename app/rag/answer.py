@@ -26,7 +26,7 @@ def answer_question(
         profile = session.get(BusinessProfile, business_id)
         chunks = retrieve(session, business_id, question, top_n)
         messages = build_prompt(profile, chunks, history or [], question)
-    answer = chat(messages)
+    answer = chat(messages, reasoning_effort=get_settings().chat_reasoning_effort)
     return AnswerResult(answer=answer, chunks=chunks, profile=profile)
 
 
@@ -41,8 +41,10 @@ def stream_answer(business_id: uuid.UUID, question: str, history: list[dict] | N
         chunks = retrieve(session, business_id, question, top_n)
         messages = build_prompt(profile, chunks, history or [], question)
 
+    settings = get_settings()
     stream = get_chat_client().chat.completions.create(
-        model=get_settings().llm_model, messages=messages, stream=True
+        model=settings.llm_model, messages=messages, stream=True,
+        reasoning_effort=settings.chat_reasoning_effort,
     )
     for piece in stream:
         content = piece.choices[0].delta.content
