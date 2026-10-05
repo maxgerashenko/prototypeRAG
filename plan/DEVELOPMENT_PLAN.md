@@ -189,6 +189,9 @@ DEV_RELOAD=true                              # live reload of web/ pages; never 
 
 # Stage 2 — Cloud Run env (secrets from Secret Manager)
 DATABASE_URL=postgresql+psycopg://app:<secret>@<neon-pooler-host>/app?sslmode=require
+ADMIN_DATABASE_URL=postgresql+psycopg://app:<secret>@<neon-direct-host>/app?sslmode=require  # migrations (R20)
+DB_POOL_SIZE=5                    # per instance; (size + overflow) x --max-instances must
+DB_MAX_OVERFLOW=5                 # stay under the pooler's limit (R20)
 LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 LLM_API_KEY=<secret>
 LLM_MODEL=gemini-2.5-flash        # use the current Flash model at deploy time
@@ -201,7 +204,7 @@ EMBED_DIM=768                     # reduced output dimension, keeps the column s
 
 # Stage 3 — adds
 DATABASE_URL=postgresql+psycopg://app_user:<secret>@...   # non-owner role, RLS applies
-ADMIN_DATABASE_URL=<secret>                               # owner role, migrations only (direct connection)
+ADMIN_DATABASE_URL=<secret>                               # now also the owner role (still the direct connection)
 ```
 
 Gemini is reachable through the Gemini API (API key, simplest) or Vertex AI (IAM, regional

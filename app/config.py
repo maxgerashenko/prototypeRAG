@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://app:app@localhost:5432/app"
+    # R20: in cloud the app uses Neon's pooled (-pooler) URL, migrations the direct one.
+    admin_database_url: str = ""  # Alembic only; empty -> database_url (fine locally)
+    db_pool_size: int = 5  # per instance: (size + overflow) x Cloud Run max-instances
+    db_max_overflow: int = 5  # must stay under the pooler's limit
 
     llm_base_url: str = "http://localhost:1234/v1"
     llm_api_key: str = "lm-studio"

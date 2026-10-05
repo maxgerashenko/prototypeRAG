@@ -121,6 +121,17 @@ Considered and rejected:
    (Neon has no GCP regions — e.g. `aws-eu-central-1` ↔ `europe-west3`); run Alembic
    migrations; store the pooled connection string (app) and the direct one (migrations)
    in Secret Manager (R20).
+   - `DATABASE_URL` = the `-pooler` URL, `ADMIN_DATABASE_URL` = the direct URL, both with
+     `?sslmode=require` (the app adds `sslmode=require` for any non-local host anyway).
+     `alembic upgrade head` refuses a `-pooler` host.
+   - Pool per instance: `DB_POOL_SIZE` + `DB_MAX_OVERFLOW` (default 5 + 5). Keep
+     (size + overflow) × Cloud Run `--max-instances` under the pooler's client limit.
+   - Through the `-pooler` host the app turns off psycopg's server-side prepared
+     statements (`prepare_threshold=None`, `app/db/session.py`): without pooler support
+     for them they fail in transaction mode (reproduced locally with PgBouncer 1.22).
+   - [ ] Check against real Neon: `uv run pytest` with `DATABASE_URL` = the pooler URL
+     and `ADMIN_DATABASE_URL` = the direct URL, then `alembic upgrade head`; confirm in
+     the Neon console that the app's connections go through the pooler.
 4. **Data:** re-run the crawler in cloud, or `pg_dump` the local database → restore into
    Neon; then run the indexer to re-embed chunks with Gemini embeddings (R6).
 5. **Build & push images:** Artifact Registry repo; build the **API** image

@@ -261,9 +261,13 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
     transaction mode); migrations (`ADMIN_DATABASE_URL`) use the **direct** connection.
   - Transaction mode rules: only `SET LOCAL` inside a transaction (never session `SET`),
     no session state (advisory locks, `LISTEN`, temp tables) across transactions;
-    check prepared-statement support of the driver/pooler.
+    psycopg's server-side prepared statements are turned off for `-pooler` hosts
+    (`prepare_threshold=None`): they break in transaction mode unless the pooler tracks
+    them (reproduced with PgBouncer 1.22, `max_prepared_statements = 0`).
+  - Pool size per instance from env (`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`); `sslmode=require`
+    for any non-local host; Alembic refuses a `-pooler` URL.
   - ~~**Cloud SQL (later)**~~ — ruled out by DEC-33 (fixed monthly cost).
-- Status: **Accepted** (details verified when implementing the foundation).
+- Status: **Accepted**, implemented (stage 2 step 3); not yet run against real Neon.
 
 
 ### Models
