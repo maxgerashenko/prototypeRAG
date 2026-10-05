@@ -43,7 +43,7 @@ uv run python -m app.rag.index --business-id <id>                               
 uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml
 ```
 
-Questions to ask by hand, with expected answers: [TEST_QUESTIONS.md](TEST_QUESTIONS.md).
+Questions to ask by hand, with expected answers, one file per business: [questions/](questions/).
 
 Then open a page:
 

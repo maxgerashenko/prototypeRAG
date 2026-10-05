@@ -1,18 +1,8 @@
-# Test questions per business
-
-Questions to ask the assistant (voice app `/web/`, `chat.html`, or a Twilio call) to see
-what it knows and how it behaves. The expected answers come from the crawled site as
-saved in `tests/fixtures/` and from `tests/eval/bathhouse.yaml`; the site can change, so
-a wrong-looking answer may be a stale expectation. Re-check before treating it as a bug.
-
-The scored subset lives in [`tests/eval/bathhouse.yaml`](tests/eval/bathhouse.yaml)
-(`uv run python -m app.rag.eval ...`); this file is for asking by hand.
-
-## Bathhouse (abathhouse.com), the only business so far (DEC-31)
+# Bathhouse (abathhouse.com)
 
 Default location: Williamsburg. Other locations: Flatiron, Atlantic Ave, Philadelphia.
 
-### Basics
+## Basics
 
 | Ask | Expected |
 |---|---|
@@ -23,7 +13,7 @@ Default location: Williamsburg. Other locations: Flatiron, Atlantic Ave, Philade
 | Are you open right now? | Should use the current time in New York, not just say yes or no (V22) |
 | What locations do you have? | Williamsburg, Flatiron, Atlantic Ave, Philadelphia |
 
-### Other locations
+## Other locations
 
 | Ask | Expected |
 |---|---|
@@ -31,7 +21,7 @@ Default location: Williamsburg. Other locations: Flatiron, Atlantic Ave, Philade
 | What's the phone number in Philadelphia? | (267) 802-2560, 1418 Walnut Street |
 | Where is Atlantic Ave? | 540 Atlantic Avenue, Brooklyn, NY 11217, (929) 822-5929 |
 
-### Prices and services
+## Prices and services
 
 | Ask | Expected |
 |---|---|
@@ -43,7 +33,7 @@ Default location: Williamsburg. Other locations: Flatiron, Atlantic Ave, Philade
 | Do you sell gift cards? | Yes (Gift Cards page) |
 | Is it good for first timers? | Should point to the First Timers info |
 
-### Amenities
+## Amenities
 
 | Ask | Expected |
 |---|---|
@@ -56,7 +46,7 @@ Default location: Williamsburg. Other locations: Flatiron, Atlantic Ave, Philade
 | Can I get a drink by the pool? | Rooftop Pool Bar: cocktails, Prosecco on tap, local beers, snacks |
 | Do you have guided sauna sessions? | Yes, complimentary, in the Event Sauna |
 
-### Should not know (expect "I don't know" or an offer to help another way)
+## Should not know (expect "I don't know" or an offer to help another way)
 
 | Ask | Why |
 |---|---|
@@ -64,7 +54,7 @@ Default location: Williamsburg. Other locations: Flatiron, Atlantic Ave, Philade
 | Why did the Williamsburg sauna get bigger in 2024? | Blog history, must not be stated as a current fact |
 | What's the manager's name? | Not on the site; must not guess |
 
-### Conversation and voice behaviour
+## Conversation and voice behaviour
 
 | Try | Expected |
 |---|---|
@@ -74,18 +64,3 @@ Default location: Williamsburg. Other locations: Flatiron, Atlantic Ave, Philade
 | "Thanks, bye" | Says goodbye and ends the call, not built yet (V17) |
 | "Can I book a massage for Saturday at 3?" | No booking tools yet (step 5); should not pretend it booked |
 | "Can I talk to a person?" | Transfer / take a message, not built yet |
-
-## Any new business (template)
-
-Copy this section for each business you crawl and fill in the expected column from its site.
-
-| Ask | Checks |
-|---|---|
-| What's your address / phone / email? | Contact facts from the page or footer |
-| What are your hours? Are you open now? | Hours from site chrome; local time zone |
-| What do you offer? How much is X? | Services and prices |
-| Where are your other locations? | Location detection (DEC-37) |
-| Something clearly not on the site | Refuses instead of inventing |
-| Something only in a blog post | Not stated as a current fact |
-| A custom reply you added via `/businesses/{id}/custom-replies` | Custom reply wins over page text |
-| "Bye" | Polite end of call (once V17 is built) |
