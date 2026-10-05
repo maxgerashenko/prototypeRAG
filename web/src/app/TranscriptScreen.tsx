@@ -2,7 +2,7 @@ import type { ConversationDetail } from "../api";
 import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
 import { ChevronLeft, PhoneIcon } from "./icons";
-import { SourceTag } from "./SourceIcon";
+import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, plural } from "./format";
 
 interface Props {
@@ -26,10 +26,12 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
         </button>
       </div>
       <div className="tr-head">
-        <h1>{c ? c.title : convo.status === "error" ? "Conversation" : "Loading…"}</h1>
+        <div className="tr-title">
+          {c && <SourceBadge source={c.source} size={20} />}
+          <h1>{c ? c.title : convo.status === "error" ? "Conversation" : "Loading…"}</h1>
+        </div>
         {c && (
           <div className="tr-meta">
-            <SourceTag source={c.source} />
             <span>{when}</span>
             <span>·</span>
             <span>{dur}</span>

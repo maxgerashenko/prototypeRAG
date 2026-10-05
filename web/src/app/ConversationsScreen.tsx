@@ -1,7 +1,7 @@
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
 import { ChatIcon, ChevronLeft, ClockIcon, PhoneIcon } from "./icons";
-import { SourceTag } from "./SourceIcon";
+import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
 
 interface Props {
@@ -53,12 +53,12 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
             <button key={c.id} className={`convo-card${isNew ? " new" : ""}`} style={{ animationDelay: `${i * 0.06}s` }}
               onClick={() => onOpen(c.id)}>
               <div className="convo-top">
+                <SourceBadge source={c.source} />
                 <div className="convo-title ellipsis">{c.title}</div>
                 {isNew && <span className="badge-new">NEW</span>}
               </div>
               <div className="convo-preview">{previewText(c.preview)}</div>
               <div className="convo-meta">
-                <SourceTag source={c.source} />
                 <span>{fmtWhen(c.started_at)}</span>
                 <span><ClockIcon />{fmtClock(c.duration_s)}</span>
                 <span><ChatIcon size={12} stroke={2.2} />{plural(c.message_count, "message", "messages")}</span>

@@ -2,7 +2,7 @@ import { useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
 import { CheckIcon, ChevronRight, MicIcon, PhoneIcon, SearchIcon } from "./icons";
-import { SourceIcon } from "./SourceIcon";
+import { SourceBadge } from "./SourceIcon";
 import { chatsLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
 
 const RECENT = 3;
@@ -116,7 +116,7 @@ export function SelectScreen(p: Props) {
                   )}
                   {convos?.data?.slice(0, RECENT).map((c) => (
                     <button key={c.id} className="recent-row" onClick={() => p.onOpen(b.id, c.id)}>
-                      <div className={`recent-icon src-${c.source}`}><SourceIcon source={c.source} /></div>
+                      <SourceBadge source={c.source} size={15} />
                       <div className="recent-text">
                         <div className="recent-title">
                           <span className="ellipsis">{c.title}</span>

@@ -268,9 +268,9 @@ test.describe("2 · a business's previous conversations", () => {
     await openApp(page, init);
     await pick(page, "Corner Bakery");
     const rows = page.locator(".recent-row");
-    await expect(rows.nth(0).locator(".recent-icon")).toHaveClass(/src-web/);
+    await expect(rows.nth(0).locator(".src-badge")).toHaveClass(/src-web/);
     await expect(rows.nth(0).getByRole("img", { name: "Web" })).toBeVisible();
-    await expect(rows.nth(1).locator(".recent-icon")).toHaveClass(/src-twilio/);
+    await expect(rows.nth(1).locator(".src-badge")).toHaveClass(/src-twilio/);
     await expect(rows.nth(1).getByRole("img", { name: "Phone" })).toBeVisible();
     // the colours themselves: --call (green) and --accent (blue) from app.css
     const color = (i: number) => rows.nth(i).locator(".src-icon").evaluate((el) => getComputedStyle(el).color);
@@ -279,10 +279,10 @@ test.describe("2 · a business's previous conversations", () => {
 
     await page.getByRole("button", { name: "See all 4 conversations" }).click();
     const cards = page.locator(".convo-card");
-    await expect(cards.nth(0).locator(".src-tag")).toHaveText("Web");
-    await expect(cards.nth(1).locator(".src-tag")).toHaveText("Phone");
+    await expect(cards.nth(0).locator(".convo-top .src-badge")).toHaveClass(/src-web/);
+    await expect(cards.nth(1).locator(".convo-top .src-badge")).toHaveClass(/src-twilio/);
     await cards.nth(1).click();
-    await expect(page.locator("[data-screen=transcript] .tr-meta .src-tag")).toHaveText("Phone");
+    await expect(page.locator("[data-screen=transcript] .tr-title .src-badge")).toHaveClass(/src-twilio/);
   });
 
   test("'Start new call' and Space call this business", async ({ page }) => {
@@ -305,7 +305,7 @@ test.describe("3 · read a past conversation", () => {
     await page.locator(".recent-row").first().click();
     const screen = page.locator("[data-screen=transcript]");
     await expect(screen.locator("h1")).toHaveText("When are you open on Sunday");
-    await expect(screen.locator(".tr-meta")).toHaveText("WebToday · 2:58 PM·4:12·5 messages");
+    await expect(screen.locator(".tr-meta")).toHaveText("Today · 2:58 PM·4:12·5 messages");
     await expect(screen.locator(".pill").first()).toHaveText("Call started · Today · 2:58 PM");
     await expect(screen.locator(".pill").last()).toHaveText("Call ended · 4:12");
     await expect(screen.getByRole("button", { name: "Back" })).toContainText("Corner Bakery");

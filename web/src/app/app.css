@@ -67,7 +67,7 @@ a:hover { color: var(--bot-light); }
 .screen.slide { animation: vw-slide .3s ease-out; }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .mono-font { font-family: "JetBrains Mono", ui-monospace, monospace; }
-.ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ellipsis { }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---------- shared bits ---------- */
@@ -159,17 +159,19 @@ a:hover { color: var(--bot-light); }
   display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; color: inherit;
 }
 .recent-row:hover, .recent-row:focus-visible { background: rgba(255, 255, 255, .04); }
-.recent-icon {
-  width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: var(--chip);
-  color: var(--chip-text); display: flex; align-items: center; justify-content: center;
-}
 /* call source: green phone = Twilio, blue globe = web app */
-.recent-icon.src-twilio { background: var(--glow); color: var(--call); }
-.recent-icon.src-web { background: var(--tint); color: var(--accent); }
+.src-badge {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.recent-row .src-badge { width: 32px; height: 32px; }
+.tr-title .src-badge { width: 40px; height: 40px; border-radius: 12px; }
+.src-badge.src-twilio { background: var(--glow); }
+.src-badge.src-web { background: var(--tint); }
+.tr-title { display: flex; align-items: center; gap: 12px; }
 .src-icon { display: inline-flex; align-items: center; justify-content: center; }
-.src-icon.src-twilio, .src-tag.src-twilio { color: var(--call); }
-.src-icon.src-web, .src-tag.src-web { color: var(--accent); }
-.src-tag { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; }
+.src-icon.src-twilio { color: var(--call); }
+.src-icon.src-web { color: var(--accent); }
 .recent-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .recent-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .recent-title span:first-child { font-size: 14px; font-weight: 700; color: var(--text); }
@@ -218,7 +220,7 @@ a:hover { color: var(--bot-light); }
 }
 .convo-card.new { background: var(--tint); border-color: var(--accent); }
 .convo-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.convo-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.convo-title { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; color: var(--text); }
 .convo-preview {
   font-size: 14px; line-height: 1.45; color: #b3b9c4; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden;
