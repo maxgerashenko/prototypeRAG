@@ -291,7 +291,14 @@ Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers).
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
 - [ ] **Real call through the React app** (`/web/`, push-to-talk): STT/TTS + LM Studio end
-  to end — the open task above
+  to end — the open task above. Steps:
+  - [ ] `gcloud auth application-default login` (Speech-to-Text and Text-to-Speech
+    enabled on the project)
+  - [ ] `lms ps` shows `google/gemma-4-12b` and the nomic embedding model loaded
+  - [ ] `docker compose up -d postgres`, then `uv run alembic upgrade head`; use a
+    business that's been crawled and indexed
+  - [ ] `npm run build` in `web/`, then `uv run uvicorn app.main:app`
+  - [ ] Open `/web/` and hold to talk: the reply is heard and the latency line looks sane
 - [ ] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
