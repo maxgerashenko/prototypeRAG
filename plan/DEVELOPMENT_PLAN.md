@@ -210,7 +210,8 @@ pages/chunks, VMs, Kubernetes. Reasons in [DECISIONS.md](DECISIONS.md).
 
 ```
 app/
-  main.py           FastAPI app
+  main.py           FastAPI app (`/` → voice app at /web/)
+  api/              chat, custom replies, businesses/conversations read API (DEC-38)
   config.py         settings from env (pydantic-settings)
   db/               SQLAlchemy models, Alembic migrations, tenant_session helper
   llm.py            OpenAI-compatible client: chat, embed
@@ -218,9 +219,12 @@ app/
   rag/              index, retrieve (SQL), prompt, answer
   voice/            Twilio routes, WebSocket session, Google STT/TTS
   actions/          tools: booking, appointment, summary, message, transfer
-  dashboard/        owner UI (Jinja + HTMX)
+  dashboard/        owner UI JSON API routes
+web/                React + TypeScript pages (Vite, DEC-37): voice app at /web/ (DEC-38), chat and
+                    mic test debug pages, later the dashboard; `npm run build` → web/dist,
+                    served by FastAPI under /web; tests: `npm test` (Vitest), `npm run e2e` (Playwright)
 docker-compose.yml  stage 1: postgres only · stage-1 exit: + api + crawler
-Dockerfile          API image
+Dockerfile          API image (Node build stage for web/dist, DEC-37)
 Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8) — once needed (DEC-36)
 .env.example
 ```

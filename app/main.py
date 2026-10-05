@@ -1,21 +1,32 @@
 """FastAPI app. Twilio voice routes and the dashboard are added in later steps."""
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.api.chat import router as chat_router
+from app.api.conversations import router as conversations_router
 from app.api.custom_replies import router as custom_replies_router
 from app.db import engine
 from app.voice.browser_ws import router as voice_browser_router
 
 app = FastAPI(title="prototypeRAG")
 app.include_router(chat_router)
+app.include_router(conversations_router)
 app.include_router(custom_replies_router)
 app.include_router(voice_browser_router)
-# mounted under /web, not /, so it can never shadow an API route like POST /chat;
-# fetch('/chat') from web/chat.html still resolves same-origin either way.
-app.mount("/web", StaticFiles(directory="web", html=True), name="web")
+# React + TypeScript pages, built by `npm run build` in web/ into web/dist (not committed).
+# Mounted under /web, not /, so it can never shadow an API route like POST /chat;
+# fetch('/chat') from /web/chat.html still resolves same-origin either way.
+# check_dir=False: the API (and the tests) still start before the frontend is built.
+app.mount("/web", StaticFiles(directory="web/dist", html=True, check_dir=False), name="web")
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    """The voice app lives under /web/ (DEC-38)."""
+    return RedirectResponse("/web/")
 
 
 @app.get("/health")

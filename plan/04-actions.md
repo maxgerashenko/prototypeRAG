@@ -82,7 +82,8 @@ throttles CPU after a response is sent (DEC-24, R19):
 - Knowledge base: pages scraped, last crawl, "re-crawl" button.
 - Settings: greeting, enabled tools, transfer number, booking rules, calendar connection.
 
-Start simple: server-rendered pages (FastAPI + Jinja + HTMX) — no separate frontend build.
+Start simple: React + TypeScript pages in `web/` (DEC-37) calling JSON API routes, served
+by the same FastAPI service from the built `web/dist` — no separate frontend service.
 Stages 1–2: minimal dashboard without login (local / single pilot, access restricted).
 Stage 3: login (Google sign-in or magic link — OPEN-12) and onboarding flow before the
 second business ([06-scale.md](06-scale.md)).
@@ -109,7 +110,8 @@ app/actions/
   messages.py        take_message, owner notifications
   sms.py             Twilio SMS
   summary.py         post-conversation summary job
-app/dashboard/       routes + Jinja templates
+app/dashboard/       JSON API routes for the owner UI
+web/src/dashboard/   React + TypeScript pages (DEC-37)
 ```
 
 ## Tasks

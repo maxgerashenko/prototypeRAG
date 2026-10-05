@@ -10,6 +10,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    case,
     CheckConstraint,
     MetaData,
     Computed,
@@ -191,3 +192,10 @@ class Message(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = _now()
+
+
+def message_order() -> tuple:
+    """ORDER BY for a conversation's messages. A question and its answer are saved in one
+    transaction, so both get the same `now()` (transaction start); `created_at` alone
+    leaves their order undefined. Within a tie the question comes first."""
+    return Message.created_at, case((Message.role == "user", 0), else_=1)

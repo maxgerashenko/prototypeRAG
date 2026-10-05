@@ -1,7 +1,8 @@
 """WebSocket /voice/browser — direct browser adapter, demo mode C (plan/03-voice-channel.md).
 
-No Twilio, $0 apart from Google Speech: `web/mic-test.html` sends binary PCM16 mono at
-16 kHz and plays back the binary PCM16 it receives; JSON text frames carry events
+No Twilio, $0 apart from Google Speech: the voice app (`/web/`, hold-to-talk) and
+`web/mic-test.html` (both via `web/src/voice/voiceCall.ts`) send binary PCM16 mono at
+16 kHz and play back the binary PCM16 they receive; JSON text frames carry events
 (transcript, reply, latency, clear). Used to tune STT/TTS/turn-taking without spending
 call minutes. The business comes from the `business_id` query parameter.
 """

@@ -87,7 +87,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-16 | Voice cold start | ~~Stage 3: `min-instances=1` for calls~~ — **Superseded by DEC-35** | 2 · 3 | — |
 | DEC-17 | DB wake-up on call | Lookup in Twilio webhook (caller hears ringing); pre-generated greeting | 2 | 🔄 |
 | DEC-18 | Actions | LLM tool calling; confirmation enforced in code; internal bookings first | 1 | ✅ |
-| DEC-19 | Dashboard | FastAPI + Jinja + HTMX, no SPA | 1 (minimal) · 3 (login) | ✅ |
+| DEC-19 | Dashboard | ~~FastAPI + Jinja + HTMX, no SPA~~ — **Superseded by DEC-37** | 1 (minimal) · 3 (login) | — |
 | DEC-20 | Frameworks | No LangChain / LlamaIndex | 1 | ✅ |
 | DEC-21 | Secrets | `.env` locally, Secret Manager in cloud | 1 · 2 | ✅ |
 | DEC-22 | Recordings | Transcripts only; audio recording off by default | 1 · 3 (opt-in) | 🔄 (R16) |
@@ -105,6 +105,8 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-35 | Voice cold start (supersedes DEC-16) | `min-instances=0` in every stage; Cloud Run starts while the caller hears ringing; measure in stage 2 | 2 · 3 | 🔄 (measure) |
 | DEC-32 | Local models split by role | `google/gemma-4-12b` for chat/voice; `qwen/qwen3.6-35b-a3b` (thinking on) for code-drafting delegation — both fit in memory together | 1 | ✅ |
 | DEC-36 | Crawler fetcher order | httpx first (stage 1, pilot site is server-rendered); Crawl4AI + separate crawler image added when a JS-rendered site is hit | 1 · 2 | 🔄 (first JS site) |
+| DEC-38 | Voice app UI | The "Voice Chat Bot" design built as the main page `/web/`: pick a business → past conversations → call with **hold-to-talk** → saved transcript; read-only API for businesses/conversations | 1 · 3 (scope `/businesses` to the owner) | ✅ |
+| DEC-37 | Web UI (supersedes DEC-19) | React + TypeScript, Vite multi-page build in `web/`; FastAPI serves the built `web/dist` under `/web` — still one service, no Node at runtime | 1 · 2 (image build) · 3 (login) | ✅ |
 
 ---
 
@@ -484,9 +486,66 @@ DEC-33 exception first.
 - Booking backends in order: internal Postgres table → Google Calendar → Cal.com → OpenTable etc.
 - Tools developed with 20–32B local models (DEC-29); final booking tests against Gemini (R1).
 
-### DEC-19 — Dashboard
+### DEC-19 — Dashboard — **Superseded by DEC-37**
 
-FastAPI + Jinja templates + HTMX. No separate frontend build (React/SPA) — D4.
+~~FastAPI + Jinja templates + HTMX. No separate frontend build (React/SPA) — D4.~~
+
+### DEC-37 — Web UI in React + TypeScript (stage 1; supersedes DEC-19)
+
+Context: the user chose to move all web pages (`chat.html`, `mic-test.html`, and the
+future owner dashboard) to React with TypeScript, keeping their behaviour and design.
+The pages were growing client-side state (mic test: audio graph, WebSocket, playback
+queue, event log) that typed components handle better than hand-written DOM code.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **React + TypeScript, Vite multi-page build, served as static files by FastAPI** | Typed API/event shapes shared by all pages; component reuse for the dashboard; one deployment kept (built files served by the API, no Node server) | A Node build step (`npm run build`) in dev and in the API image; `node_modules` in the repo tree | ✅ |
+| FastAPI + Jinja + HTMX (DEC-19) | No build step, no JS toolchain | Plain JS for stateful pages (audio/WebSocket), no types; templates and API grow two ways of rendering | ❌ |
+| React SPA on its own host (separate service / CDN) | Independent deploys | Second service (D4), CORS, two URLs | ❌ |
+
+Consequences:
+- `web/` is a Vite project; each page keeps its URL (`/web/chat.html`, `/web/mic-test.html`).
+  `npm run build` writes `web/dist` (not committed); `app/main.py` mounts it under `/web`.
+  `npm run dev` (port 5173) proxies `/chat`, `/debug`, `/businesses` and the
+  `/voice` WebSocket to uvicorn on :8000.
+- The dashboard (part 4) becomes React pages calling JSON API routes, not Jinja templates.
+- Stage-1 exit / stage 2: the API `Dockerfile` gets a Node build stage that copies
+  `web/dist` into the Python image — still one Cloud Run service (DEC-26), D4 bent only
+  by the build step.
+
+### DEC-38 — Voice app UI from the "Voice Chat Bot" design (stage 1)
+
+Context: the user designed a phone-sized app (Claude Design artifact "Voice Chat Bot",
+`39NZFVruiDY7NNH95uf6KR`) with six screens — pick a business (search, recent
+conversations), a business's previous conversations, a past transcript, connecting, live
+call with **hold-to-talk**, call ended — and asked for it to be fully implemented in the
+React app (DEC-37), working against the real backend. Extra features on top are fine.
+The mic test and chat test pages stay as debug tools.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Hold-to-talk in the browser app: mic frames go out only while held, silence otherwise** | As designed; the user decides when a turn starts, so speaker echo can't barge in (no headphones needed); the server is unchanged — its VAD sees the silence and ends the turn ~0.5 s after release; pressing stops bot audio at once | Less natural than an open mic; a tap too short for the VAD (< ~160 ms of speech) gets no answer → the app shows a hint after 6 s | ✅ |
+| Open mic with server VAD (like the mic test and the phone) | Same as a phone call | Not the design; needs headphones against echo | ❌ for the app (kept in `mic-test.html` and for phones) |
+| Hold-to-talk with an explicit "end of turn" message to the server | Turn ends on release without waiting for VAD silence | New protocol message and a second turn path in `session.py` for one client | 🔄 if the 0.5 s VAD wait feels slow |
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Read-only JSON endpoints: `GET /businesses`, `/businesses/{id}/conversations`, `/businesses/{id}/conversations/{cid}`** | The design's lists and transcripts come from the saved `conversations`/`messages` (voice and chat); reusable by the dashboard (part 4) | `/businesses` lists every business — fine with one operator and no login | ✅ |
+| Keep the design's sample data | No backend work | Not "working" | ❌ |
+
+Consequences:
+- `/web/` (and `/` → redirect) is the voice app; `/web/chat.html` and `/web/mic-test.html` stay.
+- A business has no category column: the app shows `settings.category`, else the website host.
+- Conversation title = the first question (end punctuation dropped), preview = the last
+  message; only user/assistant messages are shown.
+- Fixed with it: a question and its answer are saved in one transaction and get the same
+  `created_at` (`now()` is the transaction start), so `ORDER BY created_at` could put the
+  answer first — also in `/chat`'s LLM history. Ordering now breaks the tie user-first
+  (`message_order()` in `app/db/models.py`).
+- Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
+  second business.
+- Tests: `tests/test_conversations.py` (API, local Postgres); `web/` unit tests (Vitest)
+  and browser tests (Playwright, mocked backend) for all six screens and both debug pages.
 
 ### DEC-20 — Frameworks
 

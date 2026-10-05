@@ -107,7 +107,7 @@ short, short spoken-style answers, play a quiet repeated "working" sound while a
 |---|---|---|---|---|
 | **A. Phone** | Dialling a Twilio number | `POST /twilio/voice` → WebSocket `/voice/ws` (8 kHz μ-law) | Dialled number (`To`) → `businesses.phone_numbers` | Per minute + number rental (≈ $1.15/month) — only during a Twilio trial or once a business pays (DEC-34) |
 | **B. Browser via Twilio** (Voice SDK) | "Call" button on a web page → TwiML App | **Same** `POST /twilio/voice` → `/voice/ws` | Custom parameter sent by the page (`business_id`) | ≈ $0.004/min, no number; needs an active Twilio account |
-| **C. Browser direct** (mic test page) | "Talk" button on `web/mic-test.html` | Our own WebSocket `/voice/browser` (PCM16) — no Twilio | Query parameter on the WebSocket URL | $0 (only Google Speech usage) |
+| **C. Browser direct** (voice app / mic test page) | "Call about …" in the voice app at `/web/` (hold-to-talk, DEC-38), or "Talk" on `web/mic-test.html` (open mic) | Our own WebSocket `/voice/browser` (PCM16) — no Twilio | Query parameter on the WebSocket URL | $0 (only Google Speech usage) |
 
 Design rule: **transport adapters are thin; the call loop doesn't know which one is used.**
 `session.py` runs the pipeline (VAD → STT → LLM + tools → TTS) on PCM16 frames in and out.
@@ -144,8 +144,9 @@ app/voice/
   tts.py             Google Text-to-Speech
   live.py            Live mode: Gemini Live session, same tools (stage 2)
   tools.py           shared tool definitions: search_business_info + Part 4 actions
-web/mic-test.html    browser mic test client (mode C)
-web/call.html        Twilio Voice SDK call page (mode B)
+web/index.html       voice app (mode C, hold-to-talk, DEC-38) — web/src/app/; audio + socket in web/src/voice/voiceCall.ts
+web/mic-test.html    browser mic test client (mode C, open mic) — React + TS, code in web/src/mic-test/ (DEC-37)
+web/call.html        Twilio Voice SDK call page (mode B) — React + TS like the others
 ```
 
 ## Known problems — test or fix when the environment allows
@@ -248,6 +249,8 @@ Findings:
 - [x] Google STT/TTS streaming code (`stt.py` one stream per VAD turn, `tts.py` per sentence)
 - [x] Transport-agnostic call loop in `session.py` (PCM16 in/out, tool loop, sentence-by-sentence TTS) + tests with fake STT/TTS/LLM
 - [x] Mic test adapter + page (mode C, `browser_ws.py`, `web/mic-test.html`)
+- [x] Voice app from the design (DEC-38): businesses → past conversations → hold-to-talk call → transcript; read API in `app/api/conversations.py`; Vitest + Playwright tests
+- [ ] Voice app: try hold-to-talk with real STT/TTS + LM Studio; check the ~0.5 s VAD wait after release (DEC-38 🔄 option)
 - [x] Google STT/TTS checked live (ADC set up; results under "Known problems")
 - [x] Mic test end-to-end in the browser with real STT/TTS + LM Studio (results under "Known problems")
 - [ ] Twilio webhook + TwiML + media stream WebSocket — tested with the trial number (mode A) and a Voice SDK browser call (mode B)

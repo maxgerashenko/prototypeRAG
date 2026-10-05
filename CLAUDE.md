@@ -75,6 +75,10 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
   `qwen/qwen3.6-35b-a3b` (thinking on) for whole-file code-drafting delegation — see
   below.
 - Crawled pages and chunks stored in Postgres, not files. Crawler in its own Docker image.
+- Web UI: React + TypeScript (Vite multi-page) in `web/`, built to `web/dist` and served by
+  FastAPI under `/web` — no separate frontend service (DEC-37, supersedes DEC-19's HTMX).
+  `/web/` is the voice app from the "Voice Chat Bot" design with hold-to-talk (DEC-38);
+  `chat.html` and `mic-test.html` are debug pages. Frontend tests: `npm test`, `npm run e2e`.
 - Cloud Run + Cloud Run Jobs, `min-instances=0` always (DEC-35); Neon free tier, then Neon Launch
   (usage-based). No Cloud SQL.
 - Cost model (DEC-33): only free or pay-per-use services — no monthly fees, minimums or trials

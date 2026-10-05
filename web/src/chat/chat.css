@@ -1,0 +1,20 @@
+/* Same styles as the pre-React web/chat.html. */
+body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
+.container { max-width: 800px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.input-group { margin-bottom: 16px; }
+label { display: block; margin-bottom: 6px; font-weight: 500; color: #333; }
+input[type="text"] { width: 100%; padding: 8px 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+#messages { height: 400px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 4px; padding: 12px; margin-bottom: 16px; background: #fafafa; }
+.message { margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; max-width: 85%; line-height: 1.4; word-wrap: break-word; }
+.user { background: #e3f2fd; margin-left: auto; text-align: right; }
+.assistant { background: #f1f8e9; margin-right: auto; }
+.error { background: #ffebee; color: #c62828; margin: 0 auto; max-width: 100%; text-align: center; }
+.sources { margin-top: 8px; font-size: 0.85em; color: #555; }
+.sources summary { cursor: pointer; font-weight: 500; user-select: none; }
+.source-list { list-style: none; padding: 0; margin: 6px 0 0 0; }
+.source-item { padding: 4px 0; border-bottom: 1px solid #eee; }
+.source-item:last-child { border-bottom: none; }
+.controls { display: flex; gap: 8px; }
+#question { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+#send { padding: 8px 16px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+#send:disabled { background: #90caf9; cursor: not-allowed; }
