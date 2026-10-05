@@ -325,6 +325,9 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
 - [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
   work, does the mic stream?
+- [ ] **Call source icons**: `uv run pytest tests/test_conversations.py` (needs Postgres;
+  not run in the cloud session), then make one Twilio call and one `/web/` call: the
+  history shows a green phone for the Twilio one and a blue globe for the web one
 - [ ] **V17 silence** (`voice-debug.html`, VAD mode): stay quiet after the greeting →
   "Are you still there?" after ~6 s, then the goodbye line, played to the end, then the
   call closes ("call ended by the assistant: silence"). Speak after the re-prompt → answered,

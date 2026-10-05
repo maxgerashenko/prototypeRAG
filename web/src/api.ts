@@ -60,10 +60,14 @@ export interface Business {
   default_location: Location | null;
 }
 
+/** "twilio": came through Twilio (a phone call or a Voice SDK call); "web": the browser voice app or chat page. */
+export type ConversationSource = "twilio" | "web";
+
 /** Calls nobody spoke in are not listed. `preview` already starts with "You: " when the caller spoke last. */
 export interface ConversationSummary {
   id: string;
   channel: "chat" | "voice";
+  source: ConversationSource;
   title: string;
   preview: string;
   started_at: string;
@@ -80,6 +84,7 @@ export interface StoredMessage {
 export interface ConversationDetail {
   id: string;
   channel: "chat" | "voice";
+  source: ConversationSource;
   title: string;
   started_at: string;
   duration_s: number;

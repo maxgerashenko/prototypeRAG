@@ -26,7 +26,7 @@ function data(now = Date.now()): Partial<ApiState> {
     conversations: {
       b1: [
         convo("c1", "When are you open on Sunday", [greet, "When are you open on Sunday?", "From 8am to 2pm.", "Thanks!", "Anything else?"], 2 * MIN, 252, now),
-        convo("c2", "Do you take reservations", [greet, "Do you take reservations?", "Yes, online or by phone."], 26 * 60 * MIN, 95, now),
+        convo("c2", "Do you take reservations", [greet, "Do you take reservations?", "Yes, online or by phone."], 26 * 60 * MIN, 95, now, "twilio"),
         convo("c3", "Gift cards", [greet, "How much is a gift card?"], 40 * 24 * 60 * MIN, 95, now),
       ],
       b2: [convo("a1", "Oil change price", [greet, "How much is an oil change?", "About forty dollars."])],
@@ -260,6 +260,29 @@ test.describe("2 · a business's previous conversations", () => {
     await expect(page.locator("[data-screen=transcript] h1")).toHaveText("Hung up early");
     await page.getByRole("button", { name: "Back" }).click();
     await expect(page.locator("[data-screen=convos]")).toBeVisible(); // returns where it came from
+  });
+
+  test("call source: green phone for Twilio calls, blue globe for web calls", async ({ page }) => {
+    const init = data();
+    init.conversations!.b1.push(convo("c4", "Parking", [greet, "Where can I park?"], 50 * 24 * 60 * MIN));
+    await openApp(page, init);
+    await pick(page, "Corner Bakery");
+    const rows = page.locator(".recent-row");
+    await expect(rows.nth(0).locator(".src-badge")).toHaveClass(/src-web/);
+    await expect(rows.nth(0).getByRole("img", { name: "Web" })).toBeVisible();
+    await expect(rows.nth(1).locator(".src-badge")).toHaveClass(/src-twilio/);
+    await expect(rows.nth(1).getByRole("img", { name: "Phone" })).toBeVisible();
+    // the colours themselves: --call (green) and --accent (blue) from app.css
+    const color = (i: number) => rows.nth(i).locator(".src-icon").evaluate((el) => getComputedStyle(el).color);
+    expect(await color(0)).toBe("rgb(138, 180, 248)");
+    expect(await color(1)).toBe("rgb(127, 214, 168)");
+
+    await page.getByRole("button", { name: "See all 4 conversations" }).click();
+    const cards = page.locator(".convo-card");
+    await expect(cards.nth(0).locator(".convo-top .src-badge")).toHaveClass(/src-web/);
+    await expect(cards.nth(1).locator(".convo-top .src-badge")).toHaveClass(/src-twilio/);
+    await cards.nth(1).click();
+    await expect(page.locator("[data-screen=transcript] .tr-title .src-badge")).toHaveClass(/src-twilio/);
   });
 
   test("'Start new call' and Space call this business", async ({ page }) => {

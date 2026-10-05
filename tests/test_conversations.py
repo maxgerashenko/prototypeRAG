@@ -33,7 +33,10 @@ def two_businesses():
     for bid, specs in ((a, [("talked", True), ("silent", False)]), (b, [("other", True)])):
         for key, talked in specs:
             with tenant_session(bid) as s:
-                c = Conversation(business_id=bid, channel="voice", started_at=T0, ended_at=T0 + timedelta(seconds=95))
+                # "other" came in through Twilio (call_sid set), the rest from the web app
+                call_sid = f"CA{uuid.uuid4().hex}" if key == "other" else None
+                c = Conversation(business_id=bid, channel="voice", started_at=T0, ended_at=T0 + timedelta(seconds=95),
+                                 call_sid=call_sid)
                 s.add(c)
                 s.flush()
                 convs[key] = c.id
@@ -65,6 +68,15 @@ def test_list_hides_silent_calls_and_other_businesses(two_businesses):
     assert r["title"] == "Do you have a sauna talked"
     assert r["preview"] == "Yes, two."
     assert r["duration_s"] == 95 and r["message_count"] == 3
+    assert r["source"] == "web"
+
+
+def test_twilio_calls_have_source_twilio(two_businesses):
+    a, b, convs = two_businesses
+    client = TestClient(app)
+    assert [r["source"] for r in client.get(f"/businesses/{b}/conversations").json()] == ["twilio"]
+    assert client.get(f"/businesses/{b}/conversations/{convs['other']}").json()["source"] == "twilio"
+    assert client.get(f"/businesses/{a}/conversations/{convs['talked']}").json()["source"] == "web"
 
 
 def test_detail_and_cross_tenant_404(two_businesses):

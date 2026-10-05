@@ -1,6 +1,7 @@
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
 import { ChatIcon, ChevronLeft, ClockIcon, PhoneIcon } from "./icons";
+import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
 
 interface Props {
@@ -52,6 +53,7 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
             <button key={c.id} className={`convo-card${isNew ? " new" : ""}`} style={{ animationDelay: `${i * 0.06}s` }}
               onClick={() => onOpen(c.id)}>
               <div className="convo-top">
+                <SourceBadge source={c.source} />
                 <div className="convo-title ellipsis">{c.title}</div>
                 {isNew && <span className="badge-new">NEW</span>}
               </div>
