@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     voice_reasoning_effort: str = "none"
     # same for /chat (V24): a chat user waits for the first word just like a caller
     chat_reasoning_effort: str = "none"
+    # T2: prime the LLM's prompt cache while the greeting plays. Helps LM Studio; whether
+    # Gemini needs or allows it (it costs one extra request per call) is checked in stage 2.
+    voice_llm_warmup: bool = True
 
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 

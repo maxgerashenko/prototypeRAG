@@ -73,9 +73,13 @@ class FakeLLM:
 
     def __init__(self) -> None:
         self.requests: list[dict] = []
+        self.warmups: list[dict] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:  # T2 warm-up during the greeting, not a turn
+            self.warmups.append(kwargs)
+            return SimpleNamespace(choices=[])
         self.requests.append(kwargs)
         if len(self.requests) == 1:
             pieces = [
@@ -110,6 +114,7 @@ def business():
 
 def _make_session(business_id, llm, monkeypatch):
     monkeypatch.setattr(session_mod, "get_async_chat_client", lambda: llm)
+    session_mod._greeting_audio.clear()
     FakeTranscriber.created = []
     audio_out: list[bytes] = []
     events: list[dict] = []
@@ -134,6 +139,15 @@ def test_split_sentences_keeps_unfinished_tail():
     assert split_sentences("We close at 5. Anything") == (["We close at 5."], "Anything")
     assert split_sentences("Yes! Sure? ok") == (["Yes!", "Sure?"], "ok")
     assert split_sentences("no end yet") == ([], "no end yet")
+
+
+def test_split_sentences_keeps_abbreviations():
+    assert split_sentences("We open at 9 a.m. on Monday. Dr. Lee is in. Bye") == (
+        ["We open at 9 a.m. on Monday.", "Dr. Lee is in."], "Bye")
+    assert split_sentences("Treatments (e.g. massage) and more. Come by 5 P.M. today! ok") == (
+        ["Treatments (e.g. massage) and more.", "Come by 5 P.M. today!"], "ok")
+    assert split_sentences("Visit 12 Main St. ") == ([], "Visit 12 Main St. ")  # waits for more text
+    assert split_sentences("Ask for Mrs. ") == ([], "Ask for Mrs. ")
 
 
 def test_speakable_strips_markdown_lists_and_urls():
@@ -253,7 +267,8 @@ def test_full_turn_with_tool_call(business, monkeypatch):
     assert replies[0] == "Hi, you've reached Zebra Spa. I'm an AI assistant. How can I help?"
     assert replies[1:] == ["We close at 5 pm on Saturday.", "Anything else?"]
     assert {"type": "transcript", "text": "What time do you close on Saturday?"} in events
-    assert len(audio_out) == 3  # greeting + 2 sentences
+    speech = [a for a in audio_out if len(a) == len(short_synthesize("", RATE))]
+    assert len(speech) == 3  # greeting + 2 sentences; the rest is T1's working sound during the search
 
     # the tool ran against this business's data and its result went back to the LLM
     second = llm.requests[1]["messages"]
@@ -281,6 +296,8 @@ class TwoToolRoundsLLM(FakeLLM):
     """Each of two tool rounds speaks a sentence before its tool call; round 3 answers."""
 
     async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:  # T2 warm-up, not a round
+            return await super()._create(**kwargs)
         self.requests.append({**kwargs, "messages": list(kwargs["messages"])})
         n = len(self.requests)
         if n <= 2:
@@ -465,7 +482,8 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
         await _feed(s, _speech() + SILENCE_1S)
         while not any(e.get("text") == "Anything else?" for e in events):
             await asyncio.sleep(0.01)
-        await asyncio.sleep(0.1)  # first sentence (50 ms) has played
+        # first sentence (50 ms) has played, after up to ~0.3 s of T1 ticks queued ahead of it
+        await asyncio.sleep(0.1 + 0.3)
         await _feed(s, _speech()[:8000])  # barge in
         await s.close()
 
@@ -496,7 +514,8 @@ def test_barge_in_after_reply_sent_keeps_only_what_was_heard(business, monkeypat
         await _feed(s, _speech() + SILENCE_1S)
         while not any(e["type"] == "latency" for e in events):  # all audio sent
             await asyncio.sleep(0.01)
-        await asyncio.sleep(0.2)  # first sentence (50 ms) played, second (3 s) still playing
+        # first sentence (50 ms, after up to ~0.3 s of T1 ticks) played, second (3 s) still playing
+        await asyncio.sleep(0.2 + 0.3)
         await _feed(s, _speech()[:8000])  # barge in
         await s.close()
 
@@ -655,3 +674,170 @@ def test_businesses_endpoint_uses_real_name_over_placeholder(business):
         "id": str(business), "name": "Zebra Spa", "website": None, "domain": None,
         "conversation_count": 0, "default_location": None,
     } in rows
+
+
+# --- stage 1 tuning T1, T2, T4 ------------------------------------------------------
+
+
+def test_llm_warm_up_sends_turn_prefix_once(business, monkeypatch):
+    llm = FakeLLM()
+    s, _, _ = _make_session(business, llm, monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._warmup_task
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert len(llm.warmups) == 1 and llm.requests == []
+    warm = llm.warmups[0]
+    assert warm["messages"] == [{"role": "system", "content": s._system_prompt}]
+    assert warm["tools"] == session_mod.TOOLS and not warm.get("stream")
+
+
+def test_llm_warm_up_failure_or_off_does_not_break_the_call(business, monkeypatch):
+    class DownLLM(FakeLLM):
+        async def _create(self, **kwargs):
+            if kwargs.get("max_tokens") == 1:
+                raise ConnectionError("LM Studio not running")
+            return await super()._create(**kwargs)
+
+    s, _, events = _make_session(business, DownLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._warmup_task  # logged, not raised
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert not any(e["type"] == "error" for e in events)
+
+    monkeypatch.setattr(session_mod.get_settings(), "voice_llm_warmup", False)
+    llm = FakeLLM()
+    s, _, _ = _make_session(business, llm, monkeypatch)
+
+    async def run_off():
+        await s.start()
+        await s._reply_task
+        await s.close()
+
+    run_async(run_off())
+    assert s._warmup_task is None and llm.warmups == []
+
+
+def test_greeting_audio_is_synthesized_once_per_text_and_rate(business, monkeypatch):
+    calls: list[str] = []
+
+    def counting_synthesize(text, rate):
+        calls.append(text)
+        return fake_synthesize(text, rate)
+
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+    for _ in range(2):
+        s = CallSession(business, RATE, s._send_audio, s._send_event, synthesize=counting_synthesize)
+
+        async def run():
+            await s.start()
+            await s._reply_task
+            await s.close()
+
+        run_async(run())
+    assert calls == ["Hi, you've reached Zebra Spa. I'm an AI assistant. How can I help?"]
+    assert len(audio_out) == 2 and audio_out[0] == audio_out[1]
+
+    # a "welcome back" greeting carries the earlier topic: synthesized every time, not cached
+    s._save_message("user", "Do you have a sauna?")
+    s = CallSession(business, RATE, s._send_audio, s._send_event, synthesize=counting_synthesize,
+                    continue_from=s.conversation_id)
+
+    async def run_again():
+        await s.start()
+        await s._reply_task
+        await s.close()
+
+    run_async(run_again())
+    assert calls[-1].startswith("Welcome back to Zebra Spa.")
+    assert len(session_mod._greeting_audio) == 1
+
+
+@pytest.mark.parametrize("rate", [8000, 16000])
+def test_working_sound_is_quiet_and_not_speech_for_the_vad(rate):
+    import numpy as np
+
+    from app.voice.audio import working_sound
+    from app.voice.vad import TurnDetector
+
+    loop = working_sound(rate)
+    assert len(loop) == rate * 2  # 1 s of PCM16
+    samples = np.frombuffer(loop, dtype="<i2")
+    assert 0 < np.abs(samples).max() < 0.1 * 32767
+    vad = TurnDetector(sample_rate=rate)
+    assert vad.feed(loop * 5) == []  # 5 s of it never starts a turn
+
+
+def _slow_tool(monkeypatch, seconds=0.6):
+    import time as _time
+
+    real = session_mod.run_tool
+
+    def slow(*args):
+        _time.sleep(seconds)
+        return real(*args)
+
+    monkeypatch.setattr(session_mod, "run_tool", slow)
+
+
+def test_working_sound_plays_during_search_and_stops_for_the_answer(business, monkeypatch):
+    _slow_tool(monkeypatch)
+    s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
+    tick_chunk = round(RATE * session_mod.WORKING_SOUND_CHUNK_S) * 2
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        await s._reply_task
+        await asyncio.sleep(0.3)  # a stray tick after the answer would show up here
+        await s.close()
+
+    run_async(run())
+    sizes = [len(a) for a in audio_out]
+    answer = len(fake_synthesize("", RATE))
+    # greeting, ticks while the 0.6 s search runs (paced in real time: ~one per 0.2 s), answer
+    assert sizes[0] == answer and sizes[-2:] == [answer, answer]
+    ticks = sizes[1:-2]
+    assert 2 <= len(ticks) <= 6 and set(ticks) == {tick_chunk}
+    assert s._working_task is None
+    latency = next(e for e in events if e["type"] == "latency")
+    assert latency["working_sound_ms"] <= latency["tool_end_ms"]
+    with tenant_session(business) as db:  # never in the transcript
+        rows = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at))
+        assert [m.content for m in rows][-1] == "We close at 5 pm on Saturday. Anything else?"
+
+
+def test_barge_in_stops_working_sound(business, monkeypatch):
+    _slow_tool(monkeypatch)
+    s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        while s._working_task is None:
+            await asyncio.sleep(0.01)
+        working = s._working_task
+        await asyncio.sleep(0.1)
+        await _feed(s, _speech()[:8000])  # caller talks over the ticks
+        assert {"type": "clear"} in events
+        await asyncio.sleep(0)
+        assert working.done()
+        sent = len(audio_out)
+        await asyncio.sleep(0.5)
+        assert len(audio_out) == sent  # no more ticks, no answer
+        await s.close()
+
+    run_async(run())
