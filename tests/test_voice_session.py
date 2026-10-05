@@ -213,6 +213,21 @@ def test_unknown_business_raises(monkeypatch):
         run_async(s.start())
 
 
+def test_bad_timezone_falls_back_to_utc(business, monkeypatch):
+    # B6: an invalid timezone used to raise ZoneInfoNotFoundError (a LookupError),
+    # which browser_ws reports as 4404 "unknown business"
+    with tenant_session(business) as db:
+        db.get(Business, business).timezone = "Not/A_Zone"
+    s, _, _ = _make_session(business, FakeLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s.close()
+
+    run_async(run())
+    assert "Current local time at the business:" in s._system_prompt
+
+
 # --- stt.py / tts.py with a fake Google client (no credentials needed) ------------
 
 
@@ -303,6 +318,85 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
             ("assistant", "We close at 5 pm on Saturday."),  # the unspoken sentence isn't stored
         ]
     assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
+
+
+def test_hang_up_mid_reply_still_cleans_up(business, monkeypatch):
+    """B1: on hang-up the socket is closed before close() runs, so the cancelled reply's
+    `latency` event fails to send; close() must still cancel STT and end the conversation."""
+    import time as _time
+
+    def slow_synthesize(text, rate):
+        if text.startswith("Anything"):
+            _time.sleep(0.3)  # caller hangs up while this sentence is being synthesized
+        return b"\0\0" * rate * 3
+
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    s._synthesize = slow_synthesize
+    hung_up = False
+
+    async def send(_):
+        if hung_up:
+            raise ConnectionError("socket closed")
+
+    async def run():
+        nonlocal hung_up
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        while not any(e.get("text") == "Anything else?" for e in events):
+            await asyncio.sleep(0.01)
+        s._turn = FakeTranscriber(RATE)  # an STT stream open at hang-up
+        hung_up = True
+        s._send_event = s._send_audio = send
+        await s.close()
+
+    run_async(run())
+    assert FakeTranscriber.created[-1].cancelled
+    with tenant_session(business) as db:
+        assert db.get(Conversation, s.conversation_id).ended_at is not None
+
+
+def test_barge_in_during_stt_finish_keeps_callers_words(business, monkeypatch):
+    """B3: speech starting while STT is still finishing the previous turn cancels that
+    turn before it is answered; its words lead the next turn instead of being lost."""
+    import threading
+
+    stt_running, release_stt = threading.Event(), threading.Event()
+    texts = iter(["What if I want to come?", "Today at 9 pm."])
+
+    class SlowFirstTranscriber(FakeTranscriber):
+        def finish(self, timeout: float = 5.0) -> str:
+            text = next(texts)
+            if text.startswith("What if"):
+                stt_running.set()
+                release_stt.wait(5)  # still finishing when the caller speaks again
+            return text
+
+    llm = FakeLLM()
+    s, _, events = _make_session(business, llm, monkeypatch)
+    s._new_transcriber = SlowFirstTranscriber
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        await asyncio.to_thread(stt_running.wait, 5)
+        await _feed(s, _speech()[:8000])  # barge in during finish()
+        release_stt.set()
+        await _feed(s, _speech()[8000:] + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    combined = "What if I want to come? Today at 9 pm."
+    assert [e["text"] for e in events if e["type"] == "transcript"] == [combined]
+    asked = [m["content"] for m in llm.requests[0]["messages"] if m["role"] == "user"]
+    assert asked == [combined]
+    with tenant_session(business) as db:
+        rows = db.scalars(select(Message).where(Message.business_id == business, Message.role == "user"))
+        assert [m.content for m in rows] == [combined]
 
 
 # --- push-to-talk (turn_detection="manual") and the business picker ------------------

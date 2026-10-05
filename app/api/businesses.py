@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func
 from app.db.session import SessionLocal
 from app.db.models import Business, BusinessProfile, Location, Message
+from app.ingest.profile import is_placeholder_name
 
 router = APIRouter()
 
@@ -25,8 +26,7 @@ class BusinessOut(BaseModel):
 
 def display_name(business_name: str, profile_name: str | None) -> str:
     """Return profile name if valid, otherwise fall back to business name."""
-    placeholders = {"business_name", "(pending)", "pending", ""}
-    if profile_name and profile_name.strip().lower() not in placeholders:
+    if not is_placeholder_name(profile_name):
         return profile_name
     return business_name
 
