@@ -306,6 +306,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
 - [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
   work, does the mic stream?
+- [ ] **Voice session tests that need LM Studio** (embeddings for `run_tool`):
+  `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
+  In cloud sessions the first two fail with `APIConnectionError` and
+  `test_barge_in_mid_reply_keeps_only_what_was_spoken` hangs (same on main)
 
 ## Notes
 
