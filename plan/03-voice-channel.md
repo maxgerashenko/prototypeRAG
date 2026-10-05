@@ -219,6 +219,24 @@ Findings:
 | V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
 | V15 | Reply-task sends and feed-path sends (`clear`) can interleave on one WebSocket | Potential | Barge-in many times quickly | One send queue per connection |
 
+**Fixed or closed in code 2026-10-05** (stage 1 tuning, the locally testable items not owned
+by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to do):
+
+- **V3 ✅ code** `finish()` waits at most 2 s (`stt.FINISH_TIMEOUT_S`), not 5 s — the final
+  result came in 90–180 ms live. VAD `end_silence_ms` tuning stays open.
+- **V7 ✅ code** `app/voice/google_auth.py` checks ADC once per process and caches the
+  outcome; the STT/TTS client getters call it, so a missing login fails at once with
+  "run `gcloud auth application-default login`" instead of ~3 s per turn. Checked at app
+  startup in the background (warning in the log). An STT failure now sends an `error`
+  event instead of leaving the client waiting.
+- **V14 ✅ code** `speakable()` in `session.py` strips markdown, line-start bullets and
+  numbers, and turns URLs into their domain before TTS; the transcript and saved reply use
+  the same plain text. A sentence that is only markup is skipped.
+- **V15 ✅ not a problem** — every uvicorn WebSocket implementation writes a whole message
+  to the transport in one synchronous call, so two sends can't interleave mid-message, and
+  `_on_speech_start` awaits the cancelled reply task before sending `clear`, so no audio
+  of that reply follows it. The Twilio adapter must keep that order (cancel, then `clear`).
+
 ### Latency (LM Studio, measured with fake STT/TTS — see "Latency budget")
 
 | # | Problem | Kind | How to test | Fix idea if it fails |
@@ -241,7 +259,7 @@ Findings:
 | V21 | Greeting says "you've reached business_name" — profile `name` holds the placeholder; `businesses.name` is "(pending)" | Real | [01-crawler.md](01-crawler.md) tasks |
 | V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Fixed in code (2026-10-05): crawler sets it per location from the address; re-crawl the pilot to apply | [01-crawler.md](01-crawler.md) tasks |
 | V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real (cause unknown) | `/debug/retrieve`, eval set |
-| V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had | Potential | [02-local-rag.md](02-local-rag.md) tasks |
+| V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had — **fixed 2026-10-05**: `CHAT_REASONING_EFFORT` (default `none`); measuring is still open | Potential | [02-local-rag.md](02-local-rag.md) tasks |
 | V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Real | Delete when convenient |
 
 ## Tasks
@@ -266,6 +284,28 @@ Findings:
 - [x] Record real latency numbers against the budget above (first mic test; repeat over Twilio)
 - [x] `search_business_info` tool + shared tool definitions (used by both modes)
 - [ ] Stage 2: Live mode spike on Cloud Run; compare with pipeline mode (OPEN-08)
+
+### Test on Mac (stage 1)
+
+Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
+cloud sessions can only run unit tests with fakes. Record results under "Known problems".
+
+- [ ] **Real call through the React app** (`/web/`, push-to-talk): STT/TTS + LM Studio end
+  to end — the open task above
+- [ ] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
+  or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
+  shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
+- [ ] **V3** 10+ turns: no "STT final result not in after 2.0s" log line; if it shows,
+  compare the transcript with what was said
+- [ ] **V14** Ask for "the address and the website": no markup or full URL read aloud;
+  the transcript shows the same plain text
+- [ ] **V24** Time `/chat` (and `/chat/stream` first token) with `CHAT_REASONING_EFFORT=none`
+  vs thinking on; also re-run the eval set — same task in [02-local-rag.md](02-local-rag.md)
+- [ ] **V9** VAD mode (`voice-debug.html`) without headphones: does the bot's own voice
+  trigger a barge-in?
+- [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
+- [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
+  work, does the mic stream?
 
 ## Notes
 

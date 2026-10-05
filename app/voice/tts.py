@@ -13,6 +13,7 @@ import wave
 import google.cloud.texttospeech as texttospeech
 
 from app.config import get_settings
+from app.voice.google_auth import require_credentials
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 @functools.lru_cache(maxsize=1)
 def get_tts_client() -> texttospeech.TextToSpeechClient:
     """Created on first use, so importing this module never needs credentials."""
+    require_credentials()  # fails at once if ADC is missing, not after ~3 s each time (V7)
     return texttospeech.TextToSpeechClient()
 
 

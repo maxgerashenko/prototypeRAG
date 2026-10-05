@@ -14,12 +14,13 @@ from app.api.conversations import router as conversations_router
 from app.api.custom_replies import router as custom_replies_router
 from app.config import get_settings
 from app.db import engine
-from app.voice import tts
+from app.voice import google_auth, tts
 from app.voice.browser_ws import router as voice_browser_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    google_auth.warm_up()  # missing Google credentials show at startup, not mid-call (V7)
     # T4: warm the TTS connection in the background -- startup isn't held up by it
     threading.Thread(target=tts.warm_up, daemon=True).start()
     yield

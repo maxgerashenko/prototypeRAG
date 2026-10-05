@@ -17,13 +17,19 @@ from collections.abc import Iterator
 from google.cloud import speech
 
 from app.config import get_settings
+from app.voice.google_auth import require_credentials
 
 log = logging.getLogger(__name__)
+
+# V3: the final result normally lands 90-180 ms after the audio ends (live check
+# 2026-10-03); waiting longer than this only makes the caller wait for the same interim text
+FINISH_TIMEOUT_S = 2.0
 
 
 @functools.lru_cache(maxsize=1)
 def get_stt_client() -> speech.SpeechClient:
     """Created on first use, so importing this module never needs credentials."""
+    require_credentials()  # fails at once if ADC is missing, not after ~3 s each time (V7)
     return speech.SpeechClient()
 
 
@@ -82,7 +88,7 @@ class TurnTranscriber:
         except BaseException as exc:  # never raise from the thread; finish() reports it
             self._error = exc
 
-    def finish(self, timeout: float = 5.0) -> str:
+    def finish(self, timeout: float = FINISH_TIMEOUT_S) -> str:
         """End the audio stream and wait for the final transcript (blocking)."""
         self._audio.put(None)
         self._thread.join(timeout)
