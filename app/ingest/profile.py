@@ -45,18 +45,31 @@ def extract_profile_from_text(pages_markdown: list[str], business_name_hint: str
     return {k: _none_if_placeholder(k, v) for k, v in result.items()}
 
 
+PENDING_NAME = "(pending)"  # businesses.name until the first profile extraction (run.py)
+
 _PLACEHOLDERS = {"null", "none", "n/a", "unknown"}
 
 
-def _none_if_placeholder(key: str, value):
+def _is_placeholder(key: str, value) -> bool:
     """Models sometimes fill an unstated field with a placeholder instead of JSON null:
     the string "null" (seen with qwen3.6-35b-a3b) or the field's own name ("business_name"
     for `name`, seen on the pilot -- the voice greeting then said "you've reached
-    business_name"). Treat those like null."""
+    business_name"). Blank strings count too."""
     if not isinstance(value, str):
-        return value
+        return False
     v = value.strip().lower()
-    return None if v in _PLACEHOLDERS or v in (key, f"business_{key}") else value
+    return not v or v in _PLACEHOLDERS or v in (key, f"business_{key}")
+
+
+def _none_if_placeholder(key: str, value):
+    return None if _is_placeholder(key, value) else value
+
+
+def is_placeholder_name(name: str | None) -> bool:
+    """True when a business name isn't a real one: missing, the "(pending)" stand-in, or
+    a model placeholder echo. The one rule for businesses.name and business_profile.name
+    (crawler, voice greeting, /businesses)."""
+    return name is None or name.strip().lower() in (PENDING_NAME, "pending") or _is_placeholder("name", name)
 
 
 _TITLE_SEPARATORS = (" | ", " — ", " – ", " - ", " · ", " :: ")

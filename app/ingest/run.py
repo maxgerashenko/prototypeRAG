@@ -33,10 +33,15 @@ from app.ingest.organize import (
     organize_business,
     prefix_chunk_drafts,
 )
-from app.ingest.profile import extract_profile_from_text, merge_profile, name_from_title
+from app.ingest.profile import (
+    PENDING_NAME,
+    extract_profile_from_text,
+    is_placeholder_name,
+    merge_profile,
+    name_from_title,
+)
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 
-PENDING_NAME = "(pending)"  # businesses.name until the first profile extraction
 
 _PROFILE_FIELDS = (
     "name", "address", "phone", "email",
@@ -128,14 +133,22 @@ def _expand_by_links(
 def _rechunk_page(session, business_id: uuid.UUID, page: Page, business_name: str) -> None:
     """Chunk one page per its organize-step metadata (A2/A4): never for the site-chrome
     pseudo-page or a page organize marked not retrievable (duplicate/blog/legal/...);
-    testimonials cut and junk chunks dropped before storing; chunks from a page that is
+    testimonials cut (and kept in `page.testimonials` for summary.py, plan 07 §6) and
+    junk chunks dropped before storing; chunks from a page that is
     itself one location's page are prefixed with "<business> <location> — " and tagged
     with that location_id so both keyword and filtered vector search can use it (A2)."""
-    if not page.retrievable or page.page_type == "site_chrome":
+    if page.page_type == "site_chrome":
+        page.testimonials = []
         replace_chunks(session, business_id, page.id, [])
         return
 
-    cleaned_markdown, _testimonials = cut_testimonials(page.markdown)
+    # cut before the retrievable check: a non-retrievable page's testimonials still feed
+    # the summary (summary.py picks its source pages, e.g. skipping duplicate_of ones)
+    cleaned_markdown, page.testimonials = cut_testimonials(page.markdown)
+    if not page.retrievable:
+        replace_chunks(session, business_id, page.id, [])
+        return
+
     drafts = filter_junk_chunks(chunk_markdown(cleaned_markdown))
 
     location_name = None
@@ -231,7 +244,7 @@ def crawl_business(
 
         with tenant_session(business_id) as session:
             business = session.get(Business, business_id)
-            business_name = business.name if business and business.name != PENDING_NAME else "the business"
+            business_name = business.name if business and not is_placeholder_name(business.name) else "the business"
             for page_id in organize_result.organized_page_ids:
                 page = session.get(Page, page_id)
                 if page is not None:
@@ -272,7 +285,7 @@ def crawl_business(
                     # businesses.name starts as a placeholder (main()); replace it with the
                     # extracted name, else the start page's title -- never overwrite a real name
                     business = session.get(Business, business_id)
-                    if business is not None and business.name == PENDING_NAME:
+                    if business is not None and is_placeholder_name(business.name):
                         title = session.scalar(
                             select(Page.title).where(Page.business_id == business_id, Page.url == start_url)
                         )
