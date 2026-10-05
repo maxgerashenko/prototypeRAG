@@ -6,7 +6,7 @@ Details live in the part plans; this file is the index of reasoning.
 Related files:
 - [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) — drivers (D1–D7), wants (W1–W9), restrictions (R1–R21), stage focus
 - [PROJECT_PLAN.md](PROJECT_PLAN.md) — what we build · [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — how
-- Parts: [01 crawler](01-crawler.md) · [02 local RAG](02-local-rag.md) · [03 voice](03-voice-channel.md) · [04 actions](04-actions.md) · [05 cloud (stage 2)](05-cloud-migration.md) · [06 scale (stage 3)](06-scale.md)
+- Parts: [01 crawler](01-crawler.md) · [02 local RAG](02-local-rag.md) · [03 voice](03-voice-channel.md) · [04 actions](04-actions.md) · [05 cloud (stage 2)](05-cloud-migration.md) · [06 scale (stage 3)](06-scale.md) · [07 knowledge quality](07-knowledge-quality.md)
 
 How to use:
 - New decision → add a row to the summary + a section with options table.
@@ -54,6 +54,14 @@ correctness & legal; the **focus** below decides trade-offs inside a stage.
 | 9 | 3 | RLS enforcement → second business | Hard gate for multi-tenancy |
 | 10 | 3 | Onboarding, cost per business, reliability, ops, DB growth, cost reduction | By trigger, see [06-scale.md](06-scale.md) |
 
+Between step 4 and step 5: **knowledge quality** (DEC-37–DEC-40) — business = domain
+with locations, organize step, facts library, business summary; tasks in
+[07-knowledge-quality.md](07-knowledge-quality.md). Not a numbered step. Placed before
+step 5 (not in the tuning block) because bookings need services, durations and prices
+per location as structured facts, step 6's Gemini comparison should measure the final
+retrieval, and V22/V23 and the tuning item T1b depend on it. It may overlap with step 4's
+Twilio part (different modules).
+
 Between step 7 and step 8: **stage 1 tuning** — fixes found while building (voice
 latency, greeting, crawler profile, call-loop bugs B1–B6), listed in [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
 → "Stage 1 tuning". Not a numbered step, so step numbers stay stable.
@@ -87,7 +95,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-16 | Voice cold start | ~~Stage 3: `min-instances=1` for calls~~ — **Superseded by DEC-35** | 2 · 3 | — |
 | DEC-17 | DB wake-up on call | Lookup in Twilio webhook (caller hears ringing); pre-generated greeting | 2 | 🔄 |
 | DEC-18 | Actions | LLM tool calling; confirmation enforced in code; internal bookings first | 1 | ✅ |
-| DEC-19 | Dashboard | ~~FastAPI + Jinja + HTMX, no SPA~~ — **Superseded by DEC-37** | 1 (minimal) · 3 (login) | — |
+| DEC-19 | Dashboard | ~~FastAPI + Jinja + HTMX, no SPA~~ — **Superseded by DEC-41** | 1 (minimal) · 3 (login) | — |
 | DEC-20 | Frameworks | No LangChain / LlamaIndex | 1 | ✅ |
 | DEC-21 | Secrets | `.env` locally, Secret Manager in cloud | 1 · 2 | ✅ |
 | DEC-22 | Recordings | Transcripts only; audio recording off by default | 1 · 3 (opt-in) | 🔄 (R16) |
@@ -105,8 +113,12 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-35 | Voice cold start (supersedes DEC-16) | `min-instances=0` in every stage; Cloud Run starts while the caller hears ringing; measure in stage 2 | 2 · 3 | 🔄 (measure) |
 | DEC-32 | Local models split by role | `google/gemma-4-12b` for chat/voice; `qwen/qwen3.6-35b-a3b` (thinking on) for code-drafting delegation — both fit in memory together | 1 | ✅ |
 | DEC-36 | Crawler fetcher order | httpx first (stage 1, pilot site is server-rendered); Crawl4AI + separate crawler image added when a JS-rendered site is hit | 1 · 2 | 🔄 (first JS site) |
-| DEC-38 | Voice app UI | The "Voice Chat Bot" design built as the main page `/web/`: pick a business → past conversations → call with **hold-to-talk** → saved transcript; read-only API for businesses/conversations | 1 · 3 (scope `/businesses` to the owner) | ✅ |
-| DEC-37 | Web UI (supersedes DEC-19) | React + TypeScript, Vite multi-page build in `web/`; FastAPI serves the built `web/dist` under `/web` — still one service, no Node at runtime | 1 · 2 (image build) · 3 (login) | ✅ |
+| DEC-37 | Business identity and locations | One business = one main website host without `www.` (paths never matter); crawler reuses the `business_id` per domain; locations come from site content (not the start URL path); every business has a default location; address/hours/timezone are location-scoped | 1 | ✅ |
+| DEC-38 | Facts library | Atomic, sourced, location-scoped facts (`facts` + `fact_sources`), extracted per page by the LLM with a verbatim quote checked in code; retrieved as `chunks` rows `kind='fact'` in the same hybrid search (DEC-12); raw chunks as fallback (OPEN-22); core location facts always in the prompt | 1 · 2 (Gemini re-extract) · 3 (owner review) | ✅ |
+| DEC-39 | Reviews and marketing text | Website testimonials + marketing → a short business summary (description, highlights, guest themes, tone) in the system prompt; never a source of facts; no Google reviews (R9) | 1 | ✅ |
+| DEC-40 | Organize / clean step | New step between crawl and index: crawl priority, site chrome kept once (not thrown away), page type, location, language, duplicates, staleness, junk filter; idempotent by content hash + version; owner-confirmed facts never overwritten | 1 | ✅ |
+| DEC-41 | Web UI stack | React + TypeScript (Vite multi-page build) in `web/`, built to `web/dist` and served by the one FastAPI service under `/web`; voice app, debug pages and later the owner dashboard | 1 · 2 (image build) | ✅ |
+| DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
 
 ---
 
@@ -384,6 +396,10 @@ owner's profile form at onboarding.
 | BM25 keyword ranking instead of `ts_rank` | 🔄 later — only if the eval shows weak keyword ranking. Google's native BM25 is AlloyDB/Cloud SQL only (not on Neon); check open-source Postgres BM25 extensions and whether Neon supports them |
 
 Critical facts (hours, address, phone) go into the prompt from `business_profile`, not via search.
+Update (DEC-38): the principle stays; the source becomes the current location's core
+facts (DEC-37), and `business_profile` is retired once that passes the eval. Facts join
+the same hybrid search as `chunks` rows `kind='fact'` (boost between custom replies and
+scraped chunks).
 
 ### DEC-13 — Speech
 
@@ -457,7 +473,8 @@ the end rather than kept at a monthly fee. After that, demos use the direct brow
 ($0, no Twilio) or Voice SDK calls — see the demo modes in [03-voice-channel.md](03-voice-channel.md).
 
 When a pilot business goes live, its number is the only fixed cost; it's charged to
-that business (one number per business, DEC-01 data model unchanged).
+that business (one number per business, DEC-01 data model unchanged; per location for
+multi-location businesses is open — OPEN-21, DEC-37).
 
 ### DEC-35 — Voice cold start with scale to zero (supersedes DEC-16)
 
@@ -486,66 +503,9 @@ DEC-33 exception first.
 - Booking backends in order: internal Postgres table → Google Calendar → Cal.com → OpenTable etc.
 - Tools developed with 20–32B local models (DEC-29); final booking tests against Gemini (R1).
 
-### DEC-19 — Dashboard — **Superseded by DEC-37**
+### DEC-19 — Dashboard — **Superseded by DEC-41**
 
 ~~FastAPI + Jinja templates + HTMX. No separate frontend build (React/SPA) — D4.~~
-
-### DEC-37 — Web UI in React + TypeScript (stage 1; supersedes DEC-19)
-
-Context: the user chose to move all web pages (`chat.html`, `mic-test.html`, and the
-future owner dashboard) to React with TypeScript, keeping their behaviour and design.
-The pages were growing client-side state (mic test: audio graph, WebSocket, playback
-queue, event log) that typed components handle better than hand-written DOM code.
-
-| Option | Pros | Cons | Verdict |
-|---|---|---|---|
-| **React + TypeScript, Vite multi-page build, served as static files by FastAPI** | Typed API/event shapes shared by all pages; component reuse for the dashboard; one deployment kept (built files served by the API, no Node server) | A Node build step (`npm run build`) in dev and in the API image; `node_modules` in the repo tree | ✅ |
-| FastAPI + Jinja + HTMX (DEC-19) | No build step, no JS toolchain | Plain JS for stateful pages (audio/WebSocket), no types; templates and API grow two ways of rendering | ❌ |
-| React SPA on its own host (separate service / CDN) | Independent deploys | Second service (D4), CORS, two URLs | ❌ |
-
-Consequences:
-- `web/` is a Vite project; each page keeps its URL (`/web/chat.html`, `/web/mic-test.html`).
-  `npm run build` writes `web/dist` (not committed); `app/main.py` mounts it under `/web`.
-  `npm run dev` (port 5173) proxies `/chat`, `/debug`, `/businesses` and the
-  `/voice` WebSocket to uvicorn on :8000.
-- The dashboard (part 4) becomes React pages calling JSON API routes, not Jinja templates.
-- Stage-1 exit / stage 2: the API `Dockerfile` gets a Node build stage that copies
-  `web/dist` into the Python image — still one Cloud Run service (DEC-26), D4 bent only
-  by the build step.
-
-### DEC-38 — Voice app UI from the "Voice Chat Bot" design (stage 1)
-
-Context: the user designed a phone-sized app (Claude Design artifact "Voice Chat Bot",
-`39NZFVruiDY7NNH95uf6KR`) with six screens — pick a business (search, recent
-conversations), a business's previous conversations, a past transcript, connecting, live
-call with **hold-to-talk**, call ended — and asked for it to be fully implemented in the
-React app (DEC-37), working against the real backend. Extra features on top are fine.
-The mic test and chat test pages stay as debug tools.
-
-| Option | Pros | Cons | Verdict |
-|---|---|---|---|
-| **Hold-to-talk in the browser app: mic frames go out only while held, silence otherwise** | As designed; the user decides when a turn starts, so speaker echo can't barge in (no headphones needed); the server is unchanged — its VAD sees the silence and ends the turn ~0.5 s after release; pressing stops bot audio at once | Less natural than an open mic; a tap too short for the VAD (< ~160 ms of speech) gets no answer → the app shows a hint after 6 s | ✅ |
-| Open mic with server VAD (like the mic test and the phone) | Same as a phone call | Not the design; needs headphones against echo | ❌ for the app (kept in `mic-test.html` and for phones) |
-| Hold-to-talk with an explicit "end of turn" message to the server | Turn ends on release without waiting for VAD silence | New protocol message and a second turn path in `session.py` for one client | 🔄 if the 0.5 s VAD wait feels slow |
-
-| Option | Pros | Cons | Verdict |
-|---|---|---|---|
-| **Read-only JSON endpoints: `GET /businesses`, `/businesses/{id}/conversations`, `/businesses/{id}/conversations/{cid}`** | The design's lists and transcripts come from the saved `conversations`/`messages` (voice and chat); reusable by the dashboard (part 4) | `/businesses` lists every business — fine with one operator and no login | ✅ |
-| Keep the design's sample data | No backend work | Not "working" | ❌ |
-
-Consequences:
-- `/web/` (and `/` → redirect) is the voice app; `/web/chat.html` and `/web/mic-test.html` stay.
-- A business has no category column: the app shows `settings.category`, else the website host.
-- Conversation title = the first question (end punctuation dropped), preview = the last
-  message; only user/assistant messages are shown.
-- Fixed with it: a question and its answer are saved in one transaction and get the same
-  `created_at` (`now()` is the transaction start), so `ORDER BY created_at` could put the
-  answer first — also in `/chat`'s LLM history. Ordering now breaks the tie user-first
-  (`message_order()` in `app/db/models.py`).
-- Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
-  second business.
-- Tests: `tests/test_conversations.py` (API, local Postgres); `web/` unit tests (Vitest)
-  and browser tests (Playwright, mocked backend) for all six screens and both debug pages.
 
 ### DEC-20 — Frameworks
 
@@ -618,7 +578,153 @@ OpenAI-compatible LLM API, env-var configuration, `business_id` data model.
 
 At stage-1 exit the app and crawler are containerized and run via Compose with the same
 env vars — that is the proof of stage-2 readiness (D2 applies from then on).
+
+### DEC-37 — Business identity and locations (stage 1)
+
+Context: the pilot was crawled from `abathhouse.com/williamsburg`, but the domain serves
+four open locations (Williamsburg, Flatiron, Atlantic Ave, Philadelphia) and lists all
+their addresses, phones and hours in a shared footer. Treating a URL as a business would
+create duplicate businesses per sub-page and per re-crawl; address, hours and timezone
+differ per location (V22). Decided by the user; the schema (`businesses.domain`,
+`locations` with a default flag) is built as a separate change.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **One business = one main website host without `www.` (user decision 2026-10-04: no Public Suffix List in stage 1); crawler reuses `business_id` per domain; pages are pages, locations come from site content; every business has a default location; location-scoped facts** | Re-crawls are idempotent; one brand = one knowledge base; per-location address/hours/timezone; fits DEC-01 (still rows, no infrastructure); no extra dependency | Other subdomains (`shop.example.com`) stay separate businesses until stage 3; shared hosts (e.g. a site on a platform subdomain) and brands with one domain per location need a manual override later | ✅ |
+| One business per crawled start URL (today) | No schema change | Same brand crawled twice = two businesses; the other locations' facts mixed into one "business" without scope | ❌ |
+| One business per location | Matches "one number per business" (DEC-34) | Shared brand facts (memberships, policies) duplicated per business; one crawl must split into N tenants | ❌ |
+
+Consequences:
+- Facts, pages and chunks carry an optional `location_id` (NULL = business-wide) —
+  [07-knowledge-quality.md](07-knowledge-quality.md) §3.
+- Pilot: the business is **Bathhouse** (`abathhouse.com`), Williamsburg is its default
+  location. DEC-31 stands (same pilot, now modelled with locations).
+- A multi-location business publishes one phone number per location → OPEN-21 (stage 3).
+- Timezone per location fixes V22 ([03-voice-channel.md](03-voice-channel.md)).
+
+### DEC-38 — Facts library (stage 1; Gemini re-extract stage 2; owner review stage 3)
+
+Context: the pilot's knowledge is 28 page chunks, mostly blog prose; hours were never
+extracted (footer removed), prices sit inside a 2,589-char mixed chunk, and the one flat
+`business_profile` row mis-files values. Voice search turns are ≈ 5.7 s to first audio,
+≈ 3.7 s of it after the search over 5 chunks (V16).
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **`facts` table (type, subject, attribute, value, statement, location, status, confidence, validity, owner lock) + `fact_sources` (page + verbatim quote); retrieved as `chunks` rows `kind='fact'`, like custom replies** | Short, dense embedding units; per-location scope; provenance for every answer; dedupe/conflict handling in SQL; indexer, re-index (R6), keyword search and `tenant_session` reused unchanged | Extraction step per page (LLM, offline); local models are weaker (R1) → quote validation needed | ✅ |
+| Facts table with its own embedding column and a second search query | Clean separation | Duplicates the indexer and the hybrid search; two rankings to fuse | ❌ |
+| Only chunks with a metadata `jsonb` (type, location) | Smallest change | No place for conflicts, owner confirmation, validity; chunk text is still long prose | ❌ |
+| Extend the flat `business_profile` row with more columns | Simple | Can't hold "per location, per service" facts; already mis-files values | ❌ |
+| Knowledge graph / LlamaIndex extractors | Ready-made | Against DEC-20 and W8; second store against D7 | ❌ |
+| Drop raw chunks entirely once facts exist | Smallest context | Extraction recall is never 100 % → long-tail answers lost | ❌ now; OPEN-22 decides how much they're used |
+
+Rules:
+- Every fact carries a verbatim quote that code finds in the source page; numbers in
+  the value must appear in the quote — otherwise rejected (correctness first).
+- Core location facts (address, phone, hours, timezone) are always in the prompt — DEC-12
+  still holds; the long tail is retrieved.
+- DEC-11 unchanged in principle; confirmation moves from the profile row to each fact
+  (`owner_confirmed_at`): a re-crawl never overwrites a confirmed fact, a differing crawl
+  value becomes a `conflict` for the owner.
+- Design and tasks: [07-knowledge-quality.md](07-knowledge-quality.md) §5.
+
+### DEC-39 — Reviews and marketing text → business summary (stage 1)
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Website testimonials + about/marketing pages → one short summary (one-liner, description, highlights, guest themes, tone) in the system prompt; not a source of facts** | Answers "what is this place / what's it like"; gives the assistant the brand's tone; opinions kept out of fact retrieval; website = DEC-11 source of truth | Another LLM step; summary must be regenerated when sources change | ✅ |
+| Keep testimonials and blog prose as retrievable chunks (today) | No work | Opinions and essays compete with facts in retrieval and bloat tool results (V16) | ❌ |
+| Google reviews (Places API) summarized and stored | Many, recent reviews | R9/DEC-11: reviews are not stored; a stored summary derived from them is likely not allowed either (verify, OPEN-04) | ❌ |
+| Live Places rating lookup when asked | Fresh, compliant if not stored | Latency + cost in the call path; rarely asked | 🔄 stage 3 at most |
+
+Guest themes are attributed as opinions ("guests often mention…"); customer names from
+testimonials are never repeated (R16); no prices/hours/numbers in the summary.
+
+### DEC-40 — Organize / clean step between crawl and index (stage 1)
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Separate organize step: crawl priority, site chrome kept once as its own pseudo-page (facts extracted, never chunked), page type, location, language, duplicates, staleness, junk-chunk filter; re-run only for changed `content_hash` or a new organizer/extractor version** | Fixes the observed causes (hours dropped with the footer, 7 of 8 pages blog, junk chunks); inspectable per step (W8); idempotent re-crawls; owner-confirmed facts untouched (DEC-11) | More pipeline code; some LLM classification calls (offline, only for changed pages) | ✅ |
+| Better boilerplate removal inside `clean.py` only | Small change | Throws facts away (footer hours) instead of extracting them once; no page types/locations | ❌ |
+| Crawl only the start URL's subtree | Fewer pages | Misses `/contact`, `/day-pass`, `/treatments` and the other locations (DEC-37) | ❌ |
+| Re-extract everything on every crawl | Simplest | LLM cost and time on unchanged pages; churns fact ids and embeddings | ❌ |
+
+Placement in the build order: before step 5 (see section 1).
 ---
+
+
+### DEC-41 — Web UI stack: React + TypeScript with a build (stage 1, supersedes DEC-19)
+
+User decision 2026-10-04. The voice test page had grown into a 6-screen app (~1250 lines
+of vanilla JS: call state machine, audio worklet, caches) — typed components and a
+proper module structure now pay off more than "no build step". The dashboard (step 5)
+uses the same app instead of Jinja + HTMX.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| Vanilla JS pages, no build (status quo) | Zero toolchain; FastAPI serves files as is | One huge file per page; no types; state bugs found only in review/UI tests | ❌ |
+| FastAPI + Jinja + HTMX (DEC-19) | Server-rendered, no build, fits forms/tables | Poor fit for the real-time voice app (audio, WebSocket, push-to-talk state) | ❌ |
+| **React + TypeScript, Vite build, static files served by FastAPI** | Types for the API/WebSocket protocol; components per screen; HMR dev server; still ONE deployed service (D4) | Node toolchain + build step; Docker image needs a build stage (step 7); bundle to keep small | ✅ |
+| Separate frontend hosting (e.g. a static host/CDN) | Independent deploys, CDN | Second service/bill, CORS — breaks D4/DEC-33 for no gain at this scale | ❌ |
+
+- ~~Source `frontend/` (Vite, React, TypeScript strict, vitest); `npm run build` → `frontend/dist/`,
+  mounted at `/web` (URLs unchanged: `/web/mic-test.html`, `/web/chat.html`).~~ The same
+  decision was made in parallel on branch `claude/web-react-ts` (as its DEC-37); at the merge
+  (2026-10-05) that branch's complete app replaced the unfinished `frontend/` port (user
+  decision: the branch wins for the web, main wins for the backend). Source is `web/` (Vite
+  multi-page, React 19, TypeScript strict): `index.html` = voice app (DEC-42), `chat.html`,
+  `voice-debug.html` (open mic + raw event log); `npm run build` → `web/dist/`, mounted at
+  `/web` with `check_dir=False` (the API starts before the first build). `/` and the old
+  `/web/mic-test.html` redirect to `/web/`.
+- Dev: `npm run dev` (Vite HMR on :5173, proxies the API, `/dev` and the `/voice` WebSocket to
+  uvicorn). `DEV_RELOAD` is kept for the built pages: it now watches `web/dist` (all of `web/`
+  would include `node_modules`), `dev-reload.js` lives in `web/public/`, and the app blocks
+  reloads during a call — so `npm run build -- --watch` + `DEV_RELOAD=true` reloads pages.
+- Bends D4 slightly (toolchain), not the infrastructure: no extra service, no extra cost.
+- Stage 1 step 7 (containerize): multi-stage Dockerfile — Node build stage → copy `web/dist/`.
+- Tests: `npm test` (Vitest units) and `npm run e2e` (Playwright, TypeScript, mocked backend,
+  runs the built pages) — these replaced `tests/test_ui.py` (`pytest -m ui`), whose 12
+  scenarios were ported into `web/e2e/app.spec.ts`.
+### DEC-42 — Voice app UI from the "Voice Chat Bot" design (stage 1)
+
+Context: the user designed a phone-sized app (Claude Design artifact "Voice Chat Bot",
+`39NZFVruiDY7NNH95uf6KR`) with six screens — pick a business (search, recent
+conversations), a business's previous conversations, a past transcript, connecting, live
+call with push-to-talk, call ended — to be fully implemented, working on real data. It was
+built twice in parallel: as a plain-HTML page on main (`web/mic-test.html`, with server
+push-to-talk, `continue_from`, `app/api/businesses.py`, `app/api/conversations.py`) and as
+a React app on branch `claude/web-react-ts`. Merged 2026-10-05: the React app, adapted to
+main's backend, with every behaviour of main's page (its 12 browser tests ported).
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Server push-to-talk: `mode=ptt`, `ptt_start`/`ptt_end` text frames open and close the turn, no VAD; `no_speech` for an empty turn** (main) | Answers at once on release (no 0.5 s VAD wait); mic audio sent only during a turn; echo can't barge in | A protocol message per turn | ✅ |
+| Client-only hold-to-talk: silence frames while not held, server VAD ends the turn (branch) | No server change | ~0.5 s extra wait per turn; a tap shorter than the VAD's start (~160 ms) gets no answer | ❌ replaced at the merge |
+| Open mic with server VAD | Same as a phone call | Not the design; needs headphones against echo | ❌ for the app (kept in `voice-debug.html` and for phones) |
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Read-only JSON API: `GET /businesses` (`businesses.py`), `/businesses/{id}/conversations[/{cid}]` (`conversations.py`)** (main) | Lists and transcripts from the saved `conversations`/`messages`; durations and message offsets computed on the server; silent calls hidden; reusable by the dashboard | `/businesses` lists every business — fine with one operator and no login | ✅ |
+| The branch's own versions of the same endpoints (category column fallback, `ended_at`/`created_at` returned) | — | Duplicate of main's | ❌ dropped at the merge |
+
+Consequences:
+- `/web/` (and `/`, and the old `/web/mic-test.html`) is the voice app; debug pages
+  `/web/chat.html` and `/web/voice-debug.html` (open mic, raw events).
+- Card subtitle = business domain (DEC-37), else website host, else "No website"; search by
+  name or host. Conversation title = first question, preview = last message ("You: " when
+  the caller spoke last), as computed by `conversations.py`.
+- "Continue in a new call" sends `continue_from` (earlier messages become LLM history, the
+  greeting names the topic). Keyboard as on main's page: Space calls / holds to talk, Esc
+  backs out or ends the call, Backspace ends a call. Answers show the time to first audio
+  ("· 1.4 s", all timings on hover) and "· interrupted" after a barge-in. A call nobody
+  spoke in shows "Nothing was said" (not saved for reading). 4404 → "Unknown business".
+- Fixed at the merge: a question and its answer are saved in one transaction and get the
+  same `created_at` (`now()` = transaction start); `ORDER BY created_at, id` then ordered
+  them by a random UUID, so a transcript, `continue_from` history or `/chat`'s LLM history
+  could put the answer first. Ordering now breaks the tie user-first (`message_order()` in
+  `app/db/models.py`, used by every message query).
+- Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
+  second business.
 
 ## 4. Still considering (open questions)
 
@@ -627,9 +733,12 @@ Grouped by the stage in which the answer is needed.
 | ID | Stage | Question | Options | Depends on / trigger |
 |---|---|---|---|---|
 | OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
-| OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? | Read current Places terms (R9) |
+| OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? May a summary derived from Places reviews be stored (assumed no, DEC-39)? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
 | OPEN-18 | 1 | Phone/booking tests with the pilot (DEC-31) | Browser test calls by the developer only (Voice SDK, DEC-34), with the pilot's data as a fixture · swap in a consenting business first | DEC-31 caveat (R10) — needed before stage 1 step 4 (Twilio) |
+| OPEN-20 | 1 | Local model for fact extraction (DEC-38) | `google/gemma-4-12b` with thinking on (already loaded) · `qwen/qwen3.6-35b-a3b` thinking on (stronger, ~27 GB, shares memory with code delegation) · Gemini Flash already in stage 1 (cents per crawl, approx.) | Precision audit on 5 pilot pages — needed before `facts.py` ([07-knowledge-quality.md](07-knowledge-quality.md)) |
+| OPEN-22 | 1 | Role of raw page chunks once facts exist (DEC-38) | Fallback only when no fact scores above a threshold · always 1–2 chunks after the facts · equal ranking with a fact boost · facts only | A/B eval with `RETRIEVAL_MODE` + V16 latency — needed before the retrieval change is final |
+| OPEN-23 | 1 | How a conversation picks its location (DEC-37) | Default location only · location named in the question (tool argument) else default · ask the caller when a location-scoped question is ambiguous · phone number → location (stage 3, OPEN-21) | Needed before location-scoped retrieval and the per-location eval questions |
 | OPEN-02 | 2 | Target country / region | EU (`europe-west3` Frankfurt — next to Neon `aws-eu-central-1`) · US (`us-east4` — next to Neon `aws-us-east-1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
@@ -642,6 +751,7 @@ Grouped by the stage in which the answer is needed.
 | OPEN-15 | 3 | Voice concurrency per instance | 10 · 20 · 40 … | Load test with real call audio (DEC-25) |
 | OPEN-17 | 3 | Production database upgrade | Stay on Neon (free → Launch) · Cloud SQL Enterprise, 1 dedicated vCPU ≈ $50/month (no wake-up, SLA), HA later | First paying client; whether DEC-33's no-fixed-cost rule gets a production exception; measured Neon wake-up on calls (R3) |
 | OPEN-16 | 3 | Dedicated database for some businesses? | No — everything in one shared DB · a full cell (Cloud Run + DB) per region · dedicated DB for a business that requires it by contract | Clients in a second region (OPEN-02, R16); a future clinic/health client with stricter data rules; a business whose traffic slows others |
+| OPEN-21 | 3 | Phone number per location or per business (DEC-37) | One number per location (matches what multi-location sites publish, e.g. 4 on the pilot) · one number per business, caller picks the location · both | DEC-34 (each number has a monthly rental, charged to the business); needed before assigning numbers at onboarding ([06-scale.md](06-scale.md)) |
 ---
 
 ## 5. Knowledge from the discussion (facts behind decisions)
@@ -693,6 +803,12 @@ Corrections to external advice (Gemini) and facts we rely on:
 | GCP equivalent of Neon | None scales Postgres to zero: Cloud SQL and AlloyDB bill an always-on instance, Spanner has a capacity minimum; Firestore is pay-per-use but not Postgres (rejected, DEC-02) | DEC-03, DEC-33 |
 | Google Cloud free trial | $300 / 90 days; ends without charging unless upgraded by hand. Budget alerts warn but don't cap spend | DEC-33 |
 | Gemma thinking in LM Studio | `google/gemma-4-12b` thinks by default (~8 s before the first word, measured 2026-10-03). `reasoning_effort="none"` turns it off (~0.3 s); `chat_template_kwargs.enable_thinking=False` does not. The voice call loop sends `VOICE_REASONING_EFFORT=none`; whether Gemini accepts the same value is unverified (step 6, [03-voice-channel.md](03-voice-channel.md) V20) | DEC-29, DEC-32 |
+| Pilot crawl coverage (2026-10-04) | `--max-pages 8` stored `/williamsburg` + 7 `/journal/` posts: the sitemap (60 URLs) lists the journal first, and the crawl takes sitemap order. Service, contact and other location pages were never crawled | DEC-40 |
+| Pilot opening hours (V23) | Hours are on the site — in the shared `<footer>` ("Hours 7 days a week 8am to 11:30pm", all 4 locations' addresses/phones) and on `/contact`; `clean.py` removes `<footer>`, so they never reached extraction. Cause = data removed by cleaning, not a retrieval miss | DEC-40, V23 |
+| Flat profile extraction | `profile.py` joins all pages and cuts at 12,000 chars; it filed "Day Pass, Starts at $39" as `booking_policy` | DEC-38 |
+| Squarespace "Previous/Next" links | Become `## [Title](/journal/…)` headings in Markdown → 5 of 28 pilot chunks are 11-char link fragments | DEC-40 |
+| Registrable domain | Stripping `www.` doesn't merge other subdomains (`shop.example.co.uk` vs `example.co.uk`), and some platform subdomains are separate sites; a Public Suffix List would be needed for that — deliberately not in stage 1 (user decision 2026-10-04: host without `www.` is enough) | DEC-37 |
+| Website testimonials | Published by the business on its own site (curated) → allowed source under DEC-11, but opinions, not facts; Google reviews stay excluded (R9) | DEC-39 |
 
 Free-tier limits, model names and pricing change — re-check before each decision that
 depends on them.

@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties, type KeyboardEvent, type Point
 import type { Business } from "../api";
 import { Bubble } from "./Bubbles";
 import { CheckIcon, MicIcon, PhoneIcon } from "./icons";
-import { callStatus, elapsed, spokenCount, type CallState } from "./callState";
+import { callStatus, callerSpoke, elapsed, spokenCount, type CallState } from "./callState";
 import { fmtClock, monogram } from "./format";
 
 export function ConnectingScreen({ biz, onCancel }: { biz: Business; onCancel: () => void }) {
@@ -164,7 +164,10 @@ export function EndedScreen({ biz, call, onRead, onBack }: EndedProps) {
         </div>
       </div>
       <div className="ended-actions">
-        <button className="btn-pill btn-accent" onClick={onRead} disabled={!call.conversationId}>Read this conversation</button>
+        {/* a call nobody spoke in isn't saved for reading (the API hides it) */}
+        <button className="btn-pill btn-accent" onClick={onRead} disabled={!call.conversationId || !callerSpoke(call)}>
+          {callerSpoke(call) ? "Read this conversation" : "Nothing was said"}
+        </button>
         <button className="btn-pill btn-ghost" onClick={onBack}>Back to conversations</button>
       </div>
     </div>

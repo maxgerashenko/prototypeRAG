@@ -6,6 +6,10 @@ that sends PCM16 back to the caller and one that sends events (transcript, reply
 latency, and `clear` = stop playback now, for barge-in). The session never knows which
 transport is used.
 
+Turns are detected by the VAD (phone, hands-free) or marked by the client
+(`turn_detection="manual"`, push-to-talk: `start_turn()`/`end_turn()`), which also
+skips the VAD's 500 ms end-of-speech wait.
+
 Per turn: VAD (`vad.py`) marks speech start/end → audio streams into Google STT while
 the caller speaks → on speech end the final transcript goes to the LLM with the shared
 tools (`tools.py`; RAG is `search_business_info`) → the reply streams back sentence by
@@ -14,6 +18,9 @@ sentence, each sentence synthesized by Google TTS and sent as soon as it's ready
 Barge-in: caller speech while the bot is replying or its audio is still playing cancels
 the reply task and sends `clear`. Playback time is estimated from audio duration sent,
 because audio goes out faster than real time and the transport plays it from a buffer.
+
+Pass `continue_from` to load an earlier conversation of the same business as LLM history
+(a new conversation row is still created).
 """
 
 import asyncio
@@ -23,17 +30,19 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.db import tenant_session
-from app.db.models import Business, BusinessProfile, Conversation, Message
+from app.db.models import Business, BusinessProfile, Conversation, Message, message_order
 from app.llm import get_async_chat_client
 from app.rag.prompt import format_profile
 from app.voice import tts
 from app.voice.stt import TurnTranscriber
 from app.voice.tools import TOOLS, run_tool
 from app.voice.vad import TurnDetector
+from sqlalchemy import select
 
 log = logging.getLogger(__name__)
 
@@ -70,10 +79,15 @@ class CallSession:
         send_audio: SendAudio,
         send_event: SendEvent,
         *,
+        turn_detection: Literal["vad", "manual"] = "vad",
         channel_caller: str | None = None,
         transcriber_factory: Callable[[int], TurnTranscriber] = TurnTranscriber,
         synthesize: Callable[[str, int], bytes] = tts.synthesize,
+        continue_from: uuid.UUID | None = None,
     ) -> None:
+        if turn_detection not in ("vad", "manual"):
+            raise ValueError(f"turn_detection must be 'vad' or 'manual', got {turn_detection!r}")
+        self.turn_detection = turn_detection
         self.business_id = business_id
         self.sample_rate = sample_rate
         self._send_audio = send_audio
@@ -81,6 +95,8 @@ class CallSession:
         self._caller = channel_caller
         self._new_transcriber = transcriber_factory
         self._synthesize = synthesize
+        self._continue_from = continue_from
+        self._topic: str | None = None
 
         self._vad = TurnDetector(sample_rate=sample_rate)
         self._turn: TurnTranscriber | None = None
@@ -97,7 +113,10 @@ class CallSession:
         Raises LookupError for an unknown business_id."""
         name = await asyncio.to_thread(self._load_business)
         # AI disclosure always (DEC-17); "may be recorded" only once recording exists (DEC-22)
-        greeting = f"Hi, you've reached {name}. I'm an AI assistant. How can I help?"
+        if self._topic is not None:
+            greeting = f"Welcome back to {name}. I'm an AI assistant. Let's pick up where we left off: {self._topic}."
+        else:
+            greeting = f"Hi, you've reached {name}. I'm an AI assistant. How can I help?"
         self._reply_task = self._spawn(self._speak_greeting(greeting))
 
     async def close(self) -> None:
@@ -112,6 +131,10 @@ class CallSession:
 
     async def feed(self, pcm: bytes) -> None:
         """PCM16 mono at `sample_rate`, any chunk size."""
+        if self.turn_detection == "manual":
+            if self._turn is not None:
+                self._turn.push(pcm)
+            return
         was_in_speech = self._vad.in_speech
         events = self._vad.feed(pcm)
         # speech_start's event carries the pre-roll + triggering frames; after that,
@@ -123,6 +146,18 @@ class CallSession:
                 await self._on_speech_start(event.audio)
             else:
                 self._on_speech_end()
+
+    async def start_turn(self) -> None:
+        """Caller pressed talk. Ignores repeated presses if a turn is already open."""
+        if self._turn is not None:
+            return
+        await self._on_speech_start(b"")
+
+    def end_turn(self) -> None:
+        """Caller released talk."""
+        if self._turn is None:
+            return
+        self._on_speech_end()
 
     async def _on_speech_start(self, preroll: bytes) -> None:
         if self._bot_active():
@@ -179,7 +214,10 @@ class CallSession:
             return
         timings = {"stt_ms": _ms(speech_end)}
         if not text:
-            return  # noise the VAD took for speech
+            # noise the VAD took for speech, or push-to-talk with nothing said; the client
+            # needs to know so it doesn't wait for an answer
+            await self._send_event({"type": "no_speech"})
+            return
         await self._send_event({"type": "transcript", "text": text})
 
         spoken: list[str] = []
@@ -273,6 +311,26 @@ class CallSession:
             if business is None:
                 raise LookupError(f"unknown business {self.business_id}")
             profile = session.get(BusinessProfile, self.business_id)
+            if self._continue_from is not None:
+                rows = session.scalars(
+                    select(Message).where(
+                        Message.business_id == self.business_id,
+                        Message.conversation_id == self._continue_from,
+                        Message.role.in_(("user", "assistant")),
+                    ).order_by(*message_order())
+                ).all()
+                if rows:
+                    self._history = [{"role": m.role, "content": m.content} for m in rows]
+                    user_msgs = [m for m in rows if m.role == "user"]
+                    if user_msgs:
+                        raw = user_msgs[0].content.strip()
+                        if raw and raw[-1] in ".!?":
+                            raw = raw[:-1]
+                        if len(raw) > 60:
+                            raw = raw[:59] + "…"
+                        self._topic = raw
+                    else:
+                        self._topic = None
             conversation = Conversation(business_id=self.business_id, channel="voice", caller=self._caller)
             session.add(conversation)
             session.flush()
@@ -281,6 +339,14 @@ class CallSession:
             self._system_prompt = (
                 f"{VOICE_SYSTEM_PROMPT}\n\nCurrent local time at the business: {now}\n\n{format_profile(profile)}"
             )
+            # A3 (plan/07-knowledge-quality.md §3): business.name is now the brand
+            # ("Bathhouse"), kept in sync from the site's og:site_name on every crawl
+            # (app/ingest/run.py) -- preferred over business_profile.name, which still
+            # holds the old LLM-extracted "Bathhouse Williamsburg" (profile table is
+            # retired once the facts/location card replaces it, plan 07 §5.5).
+            placeholder = {"business_name", "(pending)", "pending", ""}
+            if business.name and business.name.strip().lower() not in placeholder:
+                return business.name
             return (profile.name if profile and profile.name else None) or business.name
 
     def _save_message(self, role: str, content: str) -> None:

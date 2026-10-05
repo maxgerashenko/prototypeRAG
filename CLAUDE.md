@@ -23,6 +23,7 @@ Stage 1 build is in progress — see the build order in `DECISIONS.md` for what 
 | `01-crawler.md` … `04-actions.md` | Detailed plan per feature part (built in stage 1): goal, done-when, tech, code layout, tasks | Details of that part change |
 | `05-cloud-migration.md` | Stage 2: move to Google Cloud with one pilot business | Cloud setup changes |
 | `06-scale.md` | Stage 3: many businesses — isolation, onboarding, reliability, cost, ops | Scale topics change |
+| `07-knowledge-quality.md` | Business = domain with locations, organize/clean step, facts library, business summary (built in stage 1, before step 5) | Fact/summary/organize design changes |
 
 `README.md` links to all plan files — keep it in sync when files are added or renamed.
 
@@ -76,9 +77,9 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
   below.
 - Crawled pages and chunks stored in Postgres, not files. Crawler in its own Docker image.
 - Web UI: React + TypeScript (Vite multi-page) in `web/`, built to `web/dist` and served by
-  FastAPI under `/web` — no separate frontend service (DEC-37, supersedes DEC-19's HTMX).
-  `/web/` is the voice app from the "Voice Chat Bot" design with hold-to-talk (DEC-38);
-  `chat.html` and `mic-test.html` are debug pages. Frontend tests: `npm test`, `npm run e2e`.
+  FastAPI under `/web` — no separate frontend service (DEC-41, supersedes DEC-19's HTMX).
+  `/web/` is the voice app from the "Voice Chat Bot" design with server push-to-talk (DEC-42);
+  `chat.html` and `voice-debug.html` are debug pages. Frontend tests: `npm test`, `npm run e2e`.
 - Cloud Run + Cloud Run Jobs, `min-instances=0` always (DEC-35); Neon free tier, then Neon Launch
   (usage-based). No Cloud SQL.
 - Cost model (DEC-33): only free or pay-per-use services — no monthly fees, minimums or trials
@@ -144,13 +145,33 @@ not a one-off.
   isn't proof for every case.
 - `qwen/qwen3.6-35b-a3b` is ~27 GB resident — check `lms ps` first and unload other
   models to fit it (same memory-budget note as DEC-29's 64 GB Mac).
-- Draft via `python3 .claude/tools/delegate_code.py <spec_file> [model-id]` — prints
-  the module source only (the model's `reasoning_content` isn't surfaced by this
+- Draft via `uv run python .claude/tools/delegate_code.py <spec_file> [model-id] [--web]`
+  (`uv run`: it needs the `openai` package; `--web` drafts one self-contained HTML page
+  instead of a Python module). Several drafts can run in parallel (LM Studio serves 4).
+  For a change to existing files, put the current file content in the spec and ask for
+  the full new file; review it as a diff. Prints the source only (the model's `reasoning_content` isn't surfaced by this
   script; read it directly via the `openai` client if you want to inspect it for a
   specific draft).
 - **Still review and test every draft against something real** before accepting it —
   fixtures, a live DB, or the actual target site, matching the workflow used in stage 1
   step 2. A good reasoning trace lowers the bug rate; it doesn't replace verification.
+
+## Task summaries for delegated / parallel work
+
+Whenever a delegated task finishes — a subagent (Sonnet, Opus, …), a local-model draft,
+or any of several tasks run in parallel — write one short Markdown summary for it, right
+when its result arrives:
+
+- Path: `tmp/agent-tasks/<MM-DD>_<HH-MM>_<who>_<task-slug>.md` — no year, local time the task finished to the minute (`tmp/` is git-ignored —
+  these are working notes, not project history; commit messages and `plan/` stay the
+  record).
+- Content: title line `# Task: <name> — <who> — ✅ done / 🔄 in progress / ❌ failed`,
+  what was asked, the result (files changed, decisions, numbers, test results), problems
+  found in review, and follow-ups. Link files instead of pasting them; keep it short.
+- Update the same file when the task continues (review fixes, a second round) instead of
+  creating a new one.
+- Subagents don't write these themselves — the session that delegated and reviewed the
+  work writes them, so the summary includes the review.
 
 ## Ask before submitting
 

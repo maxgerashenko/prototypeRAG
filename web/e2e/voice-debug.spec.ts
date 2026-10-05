@@ -1,4 +1,4 @@
-// /web/mic-test.html — the raw mode-C voice debug page: always transmitting (server VAD
+// /web/voice-debug.html — the raw mode-C voice debug page: always transmitting (server VAD
 // decides turns), every server event printed as a log line.
 
 import { expect, test, type Page } from "@playwright/test";
@@ -7,14 +7,14 @@ import { hasSound, mockVoice, type VoiceServer } from "./mocks";
 let voice: VoiceServer;
 test.beforeEach(async ({ page }) => {
   voice = await mockVoice(page, { accept: false });
-  await page.goto("/web/mic-test.html");
+  await page.goto("/web/voice-debug.html");
 });
 
 const talk = (page: Page) => page.locator("#talk");
 const lines = (page: Page) => page.locator("#log .line");
 
 test("page structure", async ({ page }) => {
-  await expect(page).toHaveTitle("Voice Mic Test");
+  await expect(page).toHaveTitle("Voice Debug");
   await expect(page.getByLabel("Business ID (UUID):")).toHaveAttribute("placeholder", "Paste UUID here");
   await expect(page.locator(".hint")).toContainText("Mode C: mic → WebSocket /voice/browser (PCM16, 16 kHz)");
   await expect(talk(page)).toHaveText("Talk");

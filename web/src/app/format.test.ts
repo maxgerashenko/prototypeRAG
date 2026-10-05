@@ -1,15 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  chatsLabel,
-  durationSeconds,
-  fmtClock,
-  fmtWhen,
-  matchesQuery,
-  monogram,
-  offsetSeconds,
-  plural,
-  previewText,
-} from "./format";
+import { chatsLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText } from "./format";
 
 // dates are built in local time, so the tests pass in any time zone
 const local = (y: number, mo: number, d: number, h: number, mi: number, s = 0) =>
@@ -60,18 +50,13 @@ describe("fmtWhen", () => {
   });
 });
 
-describe("durationSeconds / offsetSeconds", () => {
-  const start = "2026-10-01T09:00:00Z";
-  it("prefers ended_at, then the last message, else 0", () => {
-    expect(durationSeconds({ started_at: start, ended_at: "2026-10-01T09:04:12Z" })).toBe(252);
-    expect(durationSeconds({ started_at: start, ended_at: null }, "2026-10-01T09:01:00Z")).toBe(60);
-    expect(durationSeconds({ started_at: start, ended_at: null })).toBe(0);
-    expect(durationSeconds({ started_at: "bad", ended_at: null })).toBe(0);
-  });
-  it("never goes negative", () => {
-    expect(durationSeconds({ started_at: start, ended_at: "2026-10-01T08:00:00Z" })).toBe(0);
-    expect(offsetSeconds(start, "2026-10-01T08:59:00Z")).toBe(0);
-    expect(offsetSeconds(start, "2026-10-01T09:00:41.6Z")).toBe(42);
+describe("hostOf", () => {
+  it("prefers the domain, else the website host without www., else 'No website'", () => {
+    expect(hostOf({ website: "https://www.abathhouse.com/williamsburg", domain: "abathhouse.com" })).toBe("abathhouse.com");
+    expect(hostOf({ website: "https://www.abathhouse.com/williamsburg", domain: null })).toBe("abathhouse.com");
+    expect(hostOf({ website: "https://shop.example:8080/x" })).toBe("shop.example:8080");
+    expect(hostOf({ website: null, domain: null })).toBe("No website");
+    expect(hostOf({ website: "not a url" })).toBe("No website");
   });
 });
 
@@ -83,19 +68,20 @@ describe("labels", () => {
     expect(plural(1, "msg", "msgs")).toBe("1 msg");
     expect(plural(5, "msg", "msgs")).toBe("5 msgs");
   });
-  it("prefixes the caller's last line with 'You: '", () => {
-    expect(previewText({ preview: "Hi", preview_role: "user" })).toBe("You: Hi");
-    expect(previewText({ preview: "Hello", preview_role: "assistant" })).toBe("Hello");
-    expect(previewText({ preview: "", preview_role: null })).toBe("No messages");
+  it("shows the API's preview, or 'No messages'", () => {
+    expect(previewText("You: Hi")).toBe("You: Hi");
+    expect(previewText("")).toBe("No messages");
   });
 });
 
 describe("matchesQuery", () => {
-  const b = { name: "Corner Bakery", category: "Bakery" };
-  it("matches name or category, case-insensitive, trimmed", () => {
+  const b = { name: "Corner Bakery", website: "https://www.cornerbakery.example/", domain: null };
+  it("matches name or host, case-insensitive, trimmed", () => {
     expect(matchesQuery(b, "")).toBe(true);
     expect(matchesQuery(b, "  corner ")).toBe(true);
-    expect(matchesQuery({ name: "Lumen", category: "Coffee shop" }, "COFFEE")).toBe(true);
+    expect(matchesQuery({ name: "Bathhouse", website: null, domain: "abathhouse.com" }, "ABATH")).toBe(true);
+    expect(matchesQuery(b, "cornerbakery.example")).toBe(true);
     expect(matchesQuery(b, "dental")).toBe(false);
+    expect(matchesQuery({ name: "X", website: null }, "no website")).toBe(true); // like main's page
   });
 });

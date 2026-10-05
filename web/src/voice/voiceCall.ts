@@ -2,15 +2,16 @@
 // frames up, PCM16 audio + JSON events down. Plain class, not React state: the audio graph,
 // socket and playback queue change per frame and must not trigger renders.
 //
-// Used by the mic test (always transmitting, server VAD decides turns) and by the voice app
-// (hold-to-talk, DEC-38): with setTalking(false) the mic frames are replaced by silence, so
-// the server's VAD still sees the speech end ~0.5 s after the button is released.
+// Two modes, as app/voice/browser_ws.py offers them:
+// - "vad" (voice-debug page): the mic always streams, the server's VAD decides turns.
+// - "ptt" (voice app, hold-to-talk, DEC-42): setTalking(true) sends {"type":"ptt_start"} and
+//   then the mic frames, setTalking(false) sends {"type":"ptt_end"} and stops them; the server
+//   answers at once on release (no VAD wait) and says "no_speech" if nothing was heard.
 
 import type { VoiceEvent } from "../api";
 
 export const RATE = 16000;
 const FRAME = RATE / 50; // 20 ms per message, same as Twilio frames
-const SILENCE = new ArrayBuffer(FRAME * 2);
 
 export type LineKind = "user" | "assistant" | "meta";
 
@@ -45,8 +46,10 @@ export interface VoiceCallHandlers {
 }
 
 export interface VoiceCallOptions {
-  /** Start with the mic transmitting (mic test) or muted until setTalking(true). */
-  transmitting?: boolean;
+  /** "vad" (default): always transmitting. "ptt": nothing goes out until setTalking(true). */
+  mode?: "vad" | "ptt";
+  /** Continue an earlier conversation of the same business (its messages become LLM history). */
+  continueFrom?: string;
 }
 
 export class VoiceCall {
@@ -56,6 +59,8 @@ export class VoiceCall {
   private nextPlay = 0;
   private playing: AudioBufferSourceNode[] = [];
   private ended = false; // set by stop(); start() checks it after each await (hang up during the mic prompt)
+  private readonly mode: "vad" | "ptt";
+  private readonly continueFrom?: string;
   private transmitting: boolean;
   private dropAudio = false; // while the user holds to talk, bot audio is not played
 
@@ -63,7 +68,9 @@ export class VoiceCall {
     private readonly handlers: VoiceCallHandlers,
     options: VoiceCallOptions = {},
   ) {
-    this.transmitting = options.transmitting ?? true;
+    this.mode = options.mode ?? "vad";
+    this.continueFrom = options.continueFrom;
+    this.transmitting = this.mode === "vad";
   }
 
   async start(businessId: string): Promise<void> {
@@ -88,7 +95,10 @@ export class VoiceCall {
     ctx.createMediaStreamSource(this.stream).connect(capture);
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/voice/browser?business_id=${encodeURIComponent(businessId)}`);
+    const params = new URLSearchParams({ business_id: businessId });
+    if (this.mode === "ptt") params.set("mode", "ptt");
+    if (this.continueFrom) params.set("continue_from", this.continueFrom);
+    const ws = new WebSocket(`${proto}://${location.host}/voice/browser?${params.toString().replace(/\+/g, "%20")}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = (m: MessageEvent<string | ArrayBuffer>) =>
       typeof m.data === "string" ? this.onEvent(JSON.parse(m.data) as VoiceEvent) : this.play(m.data);
@@ -99,15 +109,18 @@ export class VoiceCall {
     };
     this.ws = ws;
     capture.port.onmessage = (m: MessageEvent<ArrayBuffer>) => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(this.transmitting ? m.data : SILENCE);
+      if (this.transmitting && this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(m.data);
     };
   }
 
-  /** Hold-to-talk: mic audio goes out only while talking; pressing also silences the bot. */
+  /** Hold-to-talk ("ptt" mode): opens/closes a turn on the server; mic audio goes out only
+   * in between; pressing also silences the bot (the server cancels its reply too). */
   setTalking(on: boolean): void {
-    this.transmitting = on;
-    this.dropAudio = on;
+    if (this.mode !== "ptt") return;
     if (on) this.clearPlayback();
+    this.dropAudio = on;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: on ? "ptt_start" : "ptt_end" }));
+    this.transmitting = on; // after ptt_start, so the server never gets audio before the turn opens
   }
 
   // Idempotent: called by the user (hang up), by ws.onclose, and on start() failure.

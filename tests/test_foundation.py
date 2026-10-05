@@ -92,3 +92,10 @@ def test_vector_and_fulltext_search(business_id):
             Chunk.tsv.op("@@")(text("plainto_tsquery('simple', 'truffle')")),
         ))
         assert hit == "Vegan pizza with truffle"
+
+
+def test_root_and_old_voice_page_redirect_to_the_voice_app():
+    client = TestClient(app, follow_redirects=False)
+    for path in ("/", "/web/mic-test.html"):
+        r = client.get(path)
+        assert r.status_code == 307 and r.headers["location"] == "/web/", path

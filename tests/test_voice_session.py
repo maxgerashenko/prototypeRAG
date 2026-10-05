@@ -3,7 +3,7 @@
 Real parts: VAD on the real speech fixture, Postgres (business, conversation, messages)
 and `run_tool` (keyword retrieval). Faked: Google STT/TTS (need ADC credentials) and the
 LLM stream (so tool calling is deterministic). Live Google/LM Studio runs are manual,
-through web/mic-test.html.
+through the voice app at /web/ (push-to-talk) or web/voice-debug.html (VAD).
 """
 
 import asyncio
@@ -13,6 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from tests.async_helpers import run_async
 from sqlalchemy import delete, select
 
 from app.db import tenant_session
@@ -141,7 +143,7 @@ def test_full_turn_with_tool_call(business, monkeypatch):
         await s._reply_task  # the turn
         await s.close()
 
-    asyncio.run(run())
+    run_async(run())
 
     # STT got the pre-roll and the whole utterance, not just what came after the trigger
     assert len(FakeTranscriber.created) == 1
@@ -186,7 +188,7 @@ def test_barge_in_clears_playback_and_cancels_reply(business, monkeypatch):
         assert s._playing_until == 0.0
         await s.close()
 
-    asyncio.run(run())
+    run_async(run())
     # the abandoned turn's STT stream was closed on hang-up
     assert FakeTranscriber.created[-1].cancelled
 
@@ -201,14 +203,14 @@ def test_no_barge_in_when_bot_is_silent(business, monkeypatch):
         await _feed(s, _speech()[:8000])
         await s.close()
 
-    asyncio.run(run())
+    run_async(run())
     assert {"type": "clear"} not in events
 
 
 def test_unknown_business_raises(monkeypatch):
     s, _, _ = _make_session(uuid.uuid4(), FakeLLM(), monkeypatch)
     with pytest.raises(LookupError):
-        asyncio.run(s.start())
+        run_async(s.start())
 
 
 # --- stt.py / tts.py with a fake Google client (no credentials needed) ------------
@@ -292,7 +294,7 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
         await _feed(s, _speech()[:8000])  # barge in
         await s.close()
 
-    asyncio.run(run())
+    run_async(run())
     assert {"type": "clear"} in events
     with tenant_session(business) as db:
         rows = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at))
@@ -301,3 +303,69 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
             ("assistant", "We close at 5 pm on Saturday."),  # the unspoken sentence isn't stored
         ]
     assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
+
+
+# --- push-to-talk (turn_detection="manual") and the business picker ------------------
+
+
+def test_manual_turns_ignore_vad_and_answer_on_release(business, monkeypatch):
+    s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
+    s.turn_detection = "manual"
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech())  # talking without pressing: ignored, VAD not used
+        assert FakeTranscriber.created == []
+        await s.start_turn()
+        await s.start_turn()  # repeated press: same turn
+        await _feed(s, _speech())
+        s.end_turn()  # release: answered at once, no 500 ms silence needed
+        await s._reply_task
+        s.end_turn()  # stray release: no-op
+        await s.close()
+
+    run_async(run())
+    assert len(FakeTranscriber.created) == 1
+    assert len(FakeTranscriber.created[0].audio) == len(_speech())
+    assert [e["text"] for e in events if e["type"] == "reply"][1:] == ["We close at 5 pm on Saturday.", "Anything else?"]
+
+
+def test_manual_press_during_reply_barges_in(business, monkeypatch):
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    s.turn_detection = "manual"
+
+    async def run():
+        await s.start()
+        await s._reply_task  # greeting audio still "playing"
+        await s.start_turn()
+        assert {"type": "clear"} in events
+        await s.close()
+
+    run_async(run())
+
+
+def test_invalid_turn_detection_rejected():
+    with pytest.raises(ValueError):
+        CallSession(uuid.uuid4(), RATE, None, None, turn_detection="push")
+
+
+def test_businesses_endpoint_uses_real_name_over_placeholder(business):
+    from fastapi.testclient import TestClient
+
+    from app.api.businesses import display_name
+    from app.db.models import BusinessProfile
+    from app.main import app
+
+    assert display_name("Zebra Spa", "business_name") == "Zebra Spa"
+    assert display_name("(pending)", "Bathhouse") == "Bathhouse"
+    assert display_name("(pending)", "  ") == "(pending)"
+
+    with tenant_session(business) as db:
+        db.add(BusinessProfile(business_id=business, name="business_name"))
+    rows = TestClient(app).get("/businesses").json()
+    assert {
+        "id": str(business), "name": "Zebra Spa", "website": None, "domain": None,
+        "conversation_count": 0, "default_location": None,
+    } in rows

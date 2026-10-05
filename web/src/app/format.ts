@@ -1,7 +1,5 @@
 // Pure formatting helpers for the voice app (unit-tested in format.test.ts).
 
-import type { ConversationSummary } from "../api";
-
 /** Seconds -> "m:ss", or "h:mm:ss" from one hour. */
 export function fmtClock(totalSeconds: number): string {
   const sec = Math.max(0, Math.floor(totalSeconds));
@@ -47,22 +45,6 @@ export function fmtWhen(iso: string, now: Date = new Date()): string {
   return `${day} · ${time}`;
 }
 
-/** Call length: ended_at - started_at, else up to the last message, else 0. */
-export function durationSeconds(c: Pick<ConversationSummary, "started_at" | "ended_at">, lastMessageAt?: string): number {
-  const start = Date.parse(c.started_at);
-  const end = Date.parse(c.ended_at ?? lastMessageAt ?? c.started_at);
-  if (Number.isNaN(start) || Number.isNaN(end)) return 0;
-  return Math.max(0, Math.round((end - start) / 1000));
-}
-
-/** Seconds of `iso` since the conversation started — the "m:ss" next to each bubble. */
-export function offsetSeconds(startedAt: string, iso: string): number {
-  const s = Date.parse(startedAt);
-  const t = Date.parse(iso);
-  if (Number.isNaN(s) || Number.isNaN(t)) return 0;
-  return Math.max(0, Math.round((t - s) / 1000));
-}
-
 export function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
@@ -72,14 +54,25 @@ export function chatsLabel(n: number): string {
   return n === 0 ? "No chats yet" : plural(n, "chat", "chats");
 }
 
-/** Card preview: the last message, "You: " when the caller said it. */
-export function previewText(c: Pick<ConversationSummary, "preview" | "preview_role">): string {
-  if (!c.preview) return "No messages";
-  return (c.preview_role === "user" ? "You: " : "") + c.preview;
+/** Card subtitle host like main's page: the business domain, else the website's host
+ * without "www.", else "No website". */
+export function hostOf(b: { website: string | null; domain?: string | null }): string {
+  if (b.domain) return b.domain;
+  if (!b.website) return "No website";
+  try {
+    return new URL(b.website).host.replace(/^www\./, "") || "No website";
+  } catch {
+    return "No website";
+  }
 }
 
-/** Search like the design: name or category contains the query (case-insensitive). */
-export function matchesQuery(b: { name: string; category: string }, query: string): boolean {
+/** Card preview: the API already prefixes "You: " when the caller spoke last. */
+export function previewText(preview: string): string {
+  return preview || "No messages";
+}
+
+/** Search: name or host contains the query (case-insensitive). */
+export function matchesQuery(b: { name: string; website: string | null; domain?: string | null }, query: string): boolean {
   const q = query.trim().toLowerCase();
-  return !q || b.name.toLowerCase().includes(q) || b.category.toLowerCase().includes(q);
+  return !q || b.name.toLowerCase().includes(q) || hostOf(b).toLowerCase().includes(q);
 }

@@ -11,7 +11,9 @@ unload others to fit this one (~27 GB resident) — see CLAUDE.md for the memory
 note (DEC-29).
 
 Usage:
-    python3 .claude/tools/delegate_code.py <spec_file> [model-id]
+    uv run python .claude/tools/delegate_code.py <spec_file> [model-id] [--web]
+
+`--web` drafts one self-contained HTML page (inline CSS/JS) instead of a Python module.
 
 Prints the drafted module's source to stdout (code only, no fences — though the model
 doesn't always honor that; Claude strips fences before writing the file). The
@@ -38,17 +40,32 @@ Rules:
 """
 
 
+SYSTEM_WEB = """You write one self-contained web page for the prototypeRAG project (a
+multi-business RAG voice/chat assistant), served as a static file by FastAPI.
+
+Rules:
+- Output ONLY the file content, starting with <!doctype html>. No markdown fences, no
+  commentary before or after.
+- Plain HTML + inline <style> + inline <script>; no frameworks, no build step, no
+  external scripts, fonts or images.
+- Implement every behaviour in the spec exactly; keep code readable with short comments
+  where the logic isn't obvious.
+"""
+
+
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("usage: delegate_code.py <spec_file> [model-id]", file=sys.stderr)
+    args = [a for a in sys.argv[1:] if a != "--web"]
+    web = "--web" in sys.argv
+    if not args:
+        print("usage: delegate_code.py <spec_file> [model-id] [--web]", file=sys.stderr)
         raise SystemExit(2)
-    spec = open(sys.argv[1]).read()
-    model = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_MODEL
+    spec = open(args[0]).read()
+    model = args[1] if len(args) > 1 else DEFAULT_MODEL
 
     client = OpenAI(base_url=BASE_URL, api_key="lm-studio")
     resp = client.chat.completions.create(
         model=model,
-        messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": spec}],
+        messages=[{"role": "system", "content": SYSTEM_WEB if web else SYSTEM}, {"role": "user", "content": spec}],
         temperature=0,
     )
     print(resp.choices[0].message.content)

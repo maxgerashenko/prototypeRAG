@@ -4,35 +4,32 @@
 import type { Page, Request, WebSocketRoute } from "@playwright/test";
 import type { Business, ConversationDetail, ConversationSummary, VoiceEvent } from "../src/api";
 
-export const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 const MIN = 60_000;
 
-export function biz(id: string, name: string, category: string, conversation_count = 0): Business {
-  return { id, name, category, conversation_count };
+export function biz(id: string, name: string, website: string | null, conversation_count = 0, domain: string | null = null): Business {
+  return { id, name, website, domain, conversation_count, default_location: null };
 }
 
-/** A stored conversation: messages alternate assistant/user starting with the greeting, 19 s apart. */
+/** A stored conversation, shaped like app/api/conversations.py: messages alternate
+ * assistant/user starting with the greeting, 19 s apart (at_s 2, 21, 40, …). */
 export function convo(
   id: string, title: string, lines: string[], startedMsAgo = 60 * MIN, durS = 95, now = Date.now(),
 ): ConversationDetail {
-  const started = now - startedMsAgo;
   const messages = lines.map((content, i) => ({
-    id: `${id}-m${i}`,
     role: (i % 2 === 0 ? "assistant" : "user") as "assistant" | "user",
     content,
-    created_at: new Date(started + (2 + i * 19) * 1000).toISOString(),
+    at_s: 2 + i * 19,
   }));
-  const last = messages[messages.length - 1];
-  return {
-    id, channel: "voice", title,
-    started_at: new Date(started).toISOString(),
-    ended_at: new Date(started + durS * 1000).toISOString(),
-    preview: last?.content ?? "", preview_role: last?.role ?? null,
-    message_count: messages.length, messages,
-  };
+  return { id, channel: "voice", title, started_at: new Date(now - startedMsAgo).toISOString(), duration_s: durS, messages };
 }
 
-export const summary = ({ messages: _m, ...s }: ConversationDetail): ConversationSummary => s;
+/** List row for a conversation: preview = last message, "You: " first if the caller said it. */
+export function summary(c: ConversationDetail): ConversationSummary {
+  const last = c.messages[c.messages.length - 1];
+  const preview = last ? (last.role === "user" ? "You: " : "") + last.content : "";
+  const { messages, ...rest } = c;
+  return { ...rest, preview, message_count: messages.length };
+}
 
 export interface ApiState {
   businesses: Business[];
@@ -78,6 +75,8 @@ export interface VoiceServer {
   connected: Promise<WebSocketRoute>;
   url: () => string;
   frames: Buffer[];
+  /** JSON text frames from the page (ptt_start / ptt_end). */
+  texts: Record<string, unknown>[];
   send: (ev: VoiceEvent) => void;
   sendAudio: (samples: number, value?: number) => void;
   close: (code?: number, reason?: string) => Promise<void>;
@@ -95,13 +94,15 @@ export async function mockVoice(page: Page, init: VoiceOptions = {}): Promise<Vo
   let wsUrl = "";
   let clientClosed = false;
   const frames: Buffer[] = [];
+  const texts: Record<string, unknown>[] = [];
   let resolve!: (ws: WebSocketRoute) => void;
   const connected = new Promise<WebSocketRoute>((r) => (resolve = r));
   await page.routeWebSocket(/\/voice\/browser/, (ws) => {
     socket = ws;
     wsUrl = ws.url();
     ws.onMessage((m) => {
-      if (typeof m !== "string") frames.push(m);
+      if (typeof m === "string") texts.push(JSON.parse(m));
+      else frames.push(m);
     });
     ws.onClose((code, reason) => {
       clientClosed = true;
@@ -121,6 +122,7 @@ export async function mockVoice(page: Page, init: VoiceOptions = {}): Promise<Vo
     connected,
     url: () => wsUrl,
     frames,
+    texts,
     send: (ev) => socket!.send(JSON.stringify(ev)),
     sendAudio: (samples, value = 1000) => {
       const pcm = new Int16Array(samples).fill(value);

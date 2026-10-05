@@ -1,11 +1,12 @@
 // Live-call state for the voice app: a pure reducer over server events and hold-to-talk
 // input (unit-tested in callState.test.ts). useVoiceCall.ts wires it to VoiceCall.
 //
-// Turn flow with hold-to-talk (DEC-38): press -> "listening" (mic transmits, bot audio
-// stops) -> release -> "thinking" until the server's transcript and first reply sentence
-// -> "speaking" while reply audio plays -> idle once the turn is done (latency event) and
-// the playback queue is empty. A release the server's VAD never heard as speech gets no
-// transcript at all: the hook fires `noSpeech` after NO_SPEECH_MS to leave "thinking".
+// Turn flow with hold-to-talk (DEC-42, server push-to-talk: ptt_start/ptt_end): press ->
+// "listening" (mic transmits, bot audio stops) -> release -> "thinking" until the server's
+// transcript and first reply sentence -> "speaking" while reply audio plays -> idle once the
+// turn is done (latency event) and the playback queue is empty. A turn with nothing said
+// gets `no_speech` from the server; if even that never comes, the hook fires `noSpeech`
+// after NO_SPEECH_MS so the call never hangs in "thinking".
 
 import type { VoiceEvent } from "../api";
 
@@ -18,6 +19,9 @@ export interface CallMessage {
   role: "bot" | "user" | "system";
   text: string;
   at: number; // seconds since the call went live
+  latency?: string; // bot: seconds to the first audio of this answer, e.g. "1.4"
+  latencyTitle?: string; // bot: every timing of the turn, one "name: value" per line
+  interrupted?: boolean; // bot: cut off by the caller (barge-in)
 }
 
 export interface CallState {
@@ -34,6 +38,7 @@ export interface CallState {
   messages: CallMessage[];
   hint: string | null;
   endReason: string | null; // set when the server closed the call
+  endCode: number | null; // the server's close code (4404 = unknown business)
 }
 
 export type CallAction =
@@ -60,9 +65,10 @@ export const initialCallState: CallState = {
   messages: [],
   hint: null,
   endReason: null,
+  endCode: null,
 };
 
-export const NO_SPEECH_HINT = "Didn’t catch that. Hold the button while you speak.";
+export const NO_SPEECH_HINT = "Didn't catch that — hold and try again";
 
 function at(s: CallState, now: number): number {
   return s.startedAt == null ? 0 : Math.max(0, Math.floor((now - s.startedAt) / 1000));
@@ -93,12 +99,29 @@ function onEvent(s: CallState, ev: VoiceEvent, now: number): CallState {
           : push(s, "bot", ev.text, now);
       return { ...s, messages, mergeReply: true, botState: s.talking ? s.botState : "speaking" };
     }
-    case "latency":
+    case "latency": {
+      // the answer being built, else the last one (main's applyLatency)
+      let idx = -1;
+      for (let i = s.messages.length - 1; i >= 0; i--) if (s.messages[i].role === "bot") { idx = i; break; }
+      const { type: _type, ...timings } = ev;
+      const messages = [...s.messages];
+      if (idx >= 0) {
+        const ms = timings.tts_first_audio_ms;
+        messages[idx] = {
+          ...messages[idx],
+          ...(typeof ms === "number" ? { latency: (ms / 1000).toFixed(1) } : {}),
+          latencyTitle: Object.entries(timings).map(([k, v]) => `${k}: ${v}`).join("\n"),
+        };
+      }
       return {
         ...s,
+        messages,
         pendingTurn: false,
         botState: s.talking || (s.botState === "speaking" && s.playing) ? s.botState : null,
       };
+    }
+    case "no_speech":
+      return { ...s, pendingTurn: false, botState: s.talking ? s.botState : null, hint: s.talking ? s.hint : NO_SPEECH_HINT };
     case "error":
       return {
         ...s,
@@ -106,8 +129,12 @@ function onEvent(s: CallState, ev: VoiceEvent, now: number): CallState {
         pendingTurn: false,
         botState: s.talking ? s.botState : null,
       };
-    case "clear":
-      return s; // playback stop arrives as a `playback` action
+    case "clear": {
+      // barge-in: the answer being spoken is cut off (playback stop arrives as a `playback` action)
+      const last = s.messages[s.messages.length - 1];
+      if (!last || last.role !== "bot" || !s.mergeReply) return s;
+      return { ...s, mergeReply: false, messages: [...s.messages.slice(0, -1), { ...last, interrupted: true }] };
+    }
     default:
       return s;
   }
@@ -143,6 +170,7 @@ export function callReducer(s: CallState, a: CallAction): CallState {
         botState: null,
         pendingTurn: false,
         endReason: a.byServer ? a.reason || `Connection closed (code ${a.code})` : null,
+        endCode: a.byServer ? a.code : null,
       };
     case "reset":
       return initialCallState;
@@ -161,6 +189,11 @@ export function elapsed(s: CallState, now: number): number {
 /** Messages the caller sees counted on the "Call ended" screen (system notices excluded). */
 export function spokenCount(s: CallState): number {
   return s.messages.filter((m) => m.role !== "system").length;
+}
+
+/** A call is saved for reading only if the caller said something (the API hides silent calls). */
+export function callerSpoke(s: CallState): boolean {
+  return s.messages.some((m) => m.role === "user");
 }
 
 export interface CallStatus {

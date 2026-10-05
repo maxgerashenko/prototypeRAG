@@ -37,8 +37,10 @@ Trigger: second business. Details in [04-actions.md](04-actions.md) (dashboard).
 1. Owner login (Google sign-in or magic link — OPEN-12).
 2. Create business, enter website URL (+ Google `place_id`) → crawler job runs.
 3. Owner confirms/edits the business profile (hours, address, booking rules) — source of
-   truth for stored facts (DEC-11).
-4. Assign a Twilio number → `business_id` (its monthly rental is charged to the business, DEC-34); generate greeting audio (DEC-17).
+   truth for stored facts (DEC-11). With the facts library this is per fact and per
+   location, incl. conflicts, stale facts and the summary (DEC-38,
+   [07-knowledge-quality.md](07-knowledge-quality.md)).
+4. Assign a Twilio number → `business_id` (per location or per business: OPEN-21) (its monthly rental is charged to the business, DEC-34); generate greeting audio (DEC-17).
 5. Owner tests answers, adds custom replies, enables tools, connects calendar (OAuth, R14).
 
 ## 3. Cost visibility and pricing

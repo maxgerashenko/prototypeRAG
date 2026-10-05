@@ -1,7 +1,7 @@
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
 import { ChatIcon, ChevronLeft, ClockIcon, PhoneIcon } from "./icons";
-import { durationSeconds, fmtClock, fmtWhen, monogram, plural, previewText } from "./format";
+import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
 
 interface Props {
   biz: Business;
@@ -27,7 +27,7 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
         <div className="big-mono">{monogram(biz.name)}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
           <h1>{biz.name}</h1>
-          <div>{biz.category}</div>
+          <div>{hostOf(biz)}</div>
         </div>
       </div>
 
@@ -55,10 +55,10 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
                 <div className="convo-title ellipsis">{c.title}</div>
                 {isNew && <span className="badge-new">NEW</span>}
               </div>
-              <div className="convo-preview">{previewText(c)}</div>
+              <div className="convo-preview">{previewText(c.preview)}</div>
               <div className="convo-meta">
                 <span>{fmtWhen(c.started_at)}</span>
-                <span><ClockIcon />{fmtClock(durationSeconds(c))}</span>
+                <span><ClockIcon />{fmtClock(c.duration_s)}</span>
                 <span><ChatIcon size={12} stroke={2.2} />{plural(c.message_count, "message", "messages")}</span>
               </div>
             </button>

@@ -1,4 +1,5 @@
-// Shapes of the backend's JSON — app/api/chat.py, app/api/conversations.py, app/voice/browser_ws.py.
+// Shapes of the backend's JSON — app/api/chat.py, app/api/businesses.py, app/api/conversations.py,
+// app/voice/browser_ws.py.
 
 export interface Source {
   chunk_id: string;
@@ -38,36 +39,49 @@ export type VoiceEvent =
   | { type: "clear" }
   | { type: "latency"; [metric: string]: string | number }
   | { type: "error"; message: string }
-  | { type: "conversation_id"; id: string };
+  | { type: "conversation_id"; id: string }
+  | { type: "no_speech" }; // push-to-talk turn with nothing said (or noise the VAD took for speech)
 
-// --- voice app (app/api/conversations.py) ---
+// --- voice app (app/api/businesses.py, app/api/conversations.py) ---
+
+export interface Location {
+  id: string;
+  name: string | null;
+  url: string | null;
+}
 
 export interface Business {
   id: string;
   name: string;
-  category: string;
-  conversation_count: number;
+  website: string | null;
+  domain: string | null; // website host without "www." (DEC-37)
+  conversation_count: number; // conversations with at least one user message
+  default_location: Location | null;
 }
 
+/** Calls nobody spoke in are not listed. `preview` already starts with "You: " when the caller spoke last. */
 export interface ConversationSummary {
   id: string;
   channel: "chat" | "voice";
-  started_at: string;
-  ended_at: string | null;
   title: string;
   preview: string;
-  preview_role: "user" | "assistant" | null;
+  started_at: string;
+  duration_s: number;
   message_count: number;
 }
 
 export interface StoredMessage {
-  id: string;
   role: "user" | "assistant";
   content: string;
-  created_at: string;
+  at_s: number; // seconds since the conversation started
 }
 
-export interface ConversationDetail extends ConversationSummary {
+export interface ConversationDetail {
+  id: string;
+  channel: "chat" | "voice";
+  title: string;
+  started_at: string;
+  duration_s: number;
   messages: StoredMessage[];
 }
 

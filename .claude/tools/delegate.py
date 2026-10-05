@@ -51,6 +51,9 @@ def main() -> None:
             {"role": "user", "content": task},
         ],
         "temperature": 0,
+        # gemma-4-12b thinks by default; with thinking a one-line command draft sometimes
+        # ran past the 60 s timeout (2026-10-04) -- drafting a command doesn't need it
+        "reasoning_effort": "none",
     }).encode()
     req = urllib.request.Request(
         f"{BASE_URL}/chat/completions", data=body,

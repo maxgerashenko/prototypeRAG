@@ -7,7 +7,7 @@ interface Line {
   text: string;
 }
 
-export function MicTestApp() {
+export function VoiceDebugApp() {
   const [businessId, setBusinessId] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
   const [live, setLive] = useState(false);

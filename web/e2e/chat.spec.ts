@@ -1,5 +1,5 @@
 // /web/chat.html — the RAG chat test page (POST /chat, sources under each answer).
-// Same behaviour as the pre-React page; checked side by side when it was migrated (DEC-37).
+// Same behaviour as the pre-React page; checked side by side when it was migrated (DEC-41).
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 

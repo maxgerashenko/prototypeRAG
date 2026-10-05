@@ -1,10 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { MicTestApp } from "./MicTestApp";
-import "./mic-test.css";
+import { VoiceDebugApp } from "./VoiceDebugApp";
+import "./voice-debug.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <MicTestApp />
+    <VoiceDebugApp />
   </StrictMode>,
 );

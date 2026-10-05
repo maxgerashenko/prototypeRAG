@@ -148,6 +148,9 @@ __pycache__/
 .venv/
 .pytest_cache/
 
+# Agent task reports (temporary, local only)
+tmp/
+
 # Playwright (web/)
 web/test-results/
 web/playwright-report/

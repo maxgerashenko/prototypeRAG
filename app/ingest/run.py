@@ -1,4 +1,13 @@
-"""CLI entry (plan/01-crawler.md): `python -m app.ingest.run --url <site>`."""
+"""CLI entry (plan/01-crawler.md, plan/07-knowledge-quality.md §2/§8):
+`python -m app.ingest.run --url <site>`.
+
+Pipeline (plan 07 §2): discover (priority order) -> fetch -> clean (main text + site
+chrome kept apart) -> store every page -> ORGANIZE (dedupe chrome into one pseudo-page,
+detect locations from site content, assign page_type/location/retrievable per page,
+idempotent on re-crawl) -> CHUNK only the pages organize says changed, tagged with
+their location -> delete pages no longer linked -> profile extraction. Indexing
+(embedding) is a separate step: `python -m app.rag.index`.
+"""
 
 import argparse
 import time
@@ -9,18 +18,71 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 
 from app.db import tenant_session
-from app.db.models import Business, BusinessProfile
+from app.db.models import Business, BusinessProfile, Location, Page
+from app.db.session import SessionLocal
 from app.ingest.chunk import chunk_markdown
-from app.ingest.clean import content_hash, extract_title, html_to_markdown
-from app.ingest.discover import RobotsChecker, discover_links, discover_pages
+from app.ingest.clean import clean_page, content_hash, extract_og_site_name, extract_title
+from app.ingest.discover import RobotsChecker, discover_links, discover_pages, has_noindex
 from app.ingest.fetch import fetch_robots_txt, fetch_sitemap, fetch_text, make_client
-from app.ingest.profile import extract_profile_from_text, merge_profile
+from app.ingest.identity import domain_of, site_root
+from app.ingest.organize import (
+    chrome_pseudo_url,
+    chunk_prefix,
+    cut_testimonials,
+    filter_junk_chunks,
+    organize_business,
+    prefix_chunk_drafts,
+)
+from app.ingest.profile import extract_profile_from_text, merge_profile, name_from_title
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
+
+PENDING_NAME = "(pending)"  # businesses.name until the first profile extraction
 
 _PROFILE_FIELDS = (
     "name", "address", "phone", "email",
     "booking_policy", "price_range", "opening_hours", "languages", "place_id",
 )
+
+
+def _business_by_domain(domain: str) -> Business | None:
+    """Cross-tenant lookup by domain: the business_id isn't known yet at this point, so
+    there's no id to scope a `tenant_session` to -- same exception as the dev listing in
+    app/api/businesses.py. Read-only, single row."""
+    with SessionLocal() as session:
+        return session.scalar(select(Business).where(Business.domain == domain))
+
+
+def resolve_business(url: str, business_id: uuid.UUID | None) -> uuid.UUID:
+    """Find or create the business identified by `url`'s domain (same website -> same
+    business_id, regardless of which page or location of it `url` points at).
+
+    `business_id` still works as an override, but it's an error for it to disagree with
+    an existing domain match either way: a different business already owns this domain,
+    or this id already belongs to a business with a different domain.
+    """
+    domain = domain_of(url)
+    existing = _business_by_domain(domain) if domain else None
+    if existing is not None:
+        if business_id is not None and business_id != existing.id:
+            raise SystemExit(
+                f"--business-id {business_id} conflicts: domain {domain!r} already "
+                f"belongs to existing business {existing.id} ({existing.name!r})"
+            )
+        print(f"existing business: {existing.id} ({existing.name})")
+        return existing.id
+
+    bid = business_id or uuid.uuid4()
+    with tenant_session(bid) as session:
+        by_id = session.get(Business, bid)
+        if by_id is None:
+            session.add(Business(id=bid, name=PENDING_NAME, website=site_root(url) or url, domain=domain))
+        elif by_id.domain and by_id.domain != domain:
+            raise SystemExit(
+                f"--business-id {bid} conflicts: it already has domain {by_id.domain!r}, "
+                f"which differs from {domain!r} for {url!r}"
+            )
+    print(f"business_id: {bid}")
+    return bid
 
 
 def _expand_by_links(
@@ -63,6 +125,29 @@ def _expand_by_links(
     return all_urls[:max_pages], fetched
 
 
+def _rechunk_page(session, business_id: uuid.UUID, page: Page, business_name: str) -> None:
+    """Chunk one page per its organize-step metadata (A2/A4): never for the site-chrome
+    pseudo-page or a page organize marked not retrievable (duplicate/blog/legal/...);
+    testimonials cut and junk chunks dropped before storing; chunks from a page that is
+    itself one location's page are prefixed with "<business> <location> — " and tagged
+    with that location_id so both keyword and filtered vector search can use it (A2)."""
+    if not page.retrievable or page.page_type == "site_chrome":
+        replace_chunks(session, business_id, page.id, [])
+        return
+
+    cleaned_markdown, _testimonials = cut_testimonials(page.markdown)
+    drafts = filter_junk_chunks(chunk_markdown(cleaned_markdown))
+
+    location_name = None
+    if page.location_id is not None:
+        location = session.get(Location, page.location_id)
+        location_name = location.name if location else None
+    if location_name:
+        drafts = prefix_chunk_drafts(drafts, chunk_prefix(business_name, location_name))
+
+    replace_chunks(session, business_id, page.id, drafts, location_id=page.location_id)
+
+
 def crawl_business(
     business_id: uuid.UUID,
     start_url: str,
@@ -71,11 +156,14 @@ def crawl_business(
     delay_seconds: float = 0.5,
     extract_profile: bool = True,
 ) -> dict:
-    """One full crawl: discover → fetch → clean → chunk → store, then profile extraction."""
+    """One full crawl: discover -> fetch -> clean -> store every page -> organize
+    (locations, page type, retrievable) -> chunk the pages organize touched -> delete
+    pages no longer linked -> profile extraction (plan 07 §2)."""
     client = make_client(delay_seconds)
     try:
         origin = urlparse(start_url)
         base_url = f"{origin.scheme}://{origin.netloc}"
+        root = site_root(start_url) or f"{base_url}/"
         robots_txt = fetch_robots_txt(base_url, client)
         sitemap_xml = fetch_sitemap(base_url, client)
         robots_checker = RobotsChecker(robots_txt) if robots_txt else None
@@ -92,6 +180,8 @@ def crawl_business(
         pages_crawled = 0
         pages_changed = 0
         all_markdown: list[str] = []
+        brand_name: str | None = None  # first og:site_name seen (A3) -- site-wide, so one hit is enough
+        noindex_urls: set[str] = set()  # K1: honoured by organize_business as "not retrievable"
 
         for url in urls_to_crawl:
             try:
@@ -100,30 +190,62 @@ def crawl_business(
                     html = fetch_text(url, client)
                     time.sleep(client._crawl_delay)
 
+                if has_noindex(html):
+                    noindex_urls.add(url)
                 title = extract_title(html)
-                markdown = html_to_markdown(html)
-                hash_ = content_hash(markdown)
+                cleaned = clean_page(html)
+                hash_ = content_hash(cleaned.main_markdown)
+                if brand_name is None:
+                    brand_name = extract_og_site_name(html)
 
                 with tenant_session(business_id) as session:
-                    page, changed = upsert_page(session, business_id, url, title, markdown, hash_)
-                    # only re-chunk (and wipe embeddings back to NULL) when content actually
-                    # changed -- plan/01-crawler.md step 7: "only re-chunk/re-embed changed
-                    # pages". Calling this unconditionally silently de-indexes every page on
-                    # every re-crawl, even a no-op one, with no error to notice it by.
-                    if changed:
-                        replace_chunks(session, business_id, page.id, chunk_markdown(markdown))
+                    page, changed = upsert_page(
+                        session, business_id, url, title, cleaned.main_markdown, hash_,
+                        chrome_markdown=cleaned.chrome_markdown, language=cleaned.language,
+                    )
 
                 if changed:
                     pages_changed += 1
-                all_markdown.append(markdown)
+                all_markdown.append(cleaned.main_markdown)
                 pages_crawled += 1
             except Exception as exc:
                 print(f"skipping {url}: {exc}")
 
+        # Brand name (A3): a site-wide signal (og:site_name), always kept in sync with
+        # it on every crawl -- unlike BusinessProfile fields, businesses.name has no
+        # owner-confirmation flag to protect, and this is specifically what lets a
+        # re-crawl fix a name set by the old pipeline (e.g. "Bathhouse Williamsburg",
+        # which conflated the brand with its default location) through the normal code
+        # path instead of a hand-run SQL UPDATE.
+        if brand_name:
+            with tenant_session(business_id) as session:
+                business = session.get(Business, business_id)
+                if business is not None and business.name != brand_name:
+                    business.name = brand_name
+
+        # Organize (A1/A4, DEC-37/DEC-40): detect locations from site content (never from
+        # start_url's path), assign page_type/location/retrievable per page. Must run
+        # after every page this crawl touched is stored, and before chunking, since
+        # chunking needs to know each page's resolved location.
+        organize_result = organize_business(business_id, start_url, root, frozenset(noindex_urls))
+
+        with tenant_session(business_id) as session:
+            business = session.get(Business, business_id)
+            business_name = business.name if business and business.name != PENDING_NAME else "the business"
+            for page_id in organize_result.organized_page_ids:
+                page = session.get(Page, page_id)
+                if page is not None:
+                    _rechunk_page(session, business_id, page, business_name)
+
         # keep_urls = everything we *attempted*, not just successes — a page we merely failed
         # to fetch this run hasn't disappeared from the site; only drop pages no longer linked.
+        # The site-chrome pseudo-page's synthetic url is never in urls_to_crawl (it was
+        # never a page to fetch), so it's added explicitly -- without this it was created
+        # by organize_business above and then deleted right back out here on every run.
         with tenant_session(business_id) as session:
-            deleted_pages = delete_pages_not_in(session, business_id, keep_urls=urls_to_crawl)
+            deleted_pages = delete_pages_not_in(
+                session, business_id, keep_urls=[*urls_to_crawl, chrome_pseudo_url(root)]
+            )
 
         profile_extracted = False
         with tenant_session(business_id) as session:
@@ -147,6 +269,14 @@ def crawl_business(
                     for field in _PROFILE_FIELDS:
                         setattr(profile, field, merged.get(field))
                     profile.updated_at = datetime.now(UTC)
+                    # businesses.name starts as a placeholder (main()); replace it with the
+                    # extracted name, else the start page's title -- never overwrite a real name
+                    business = session.get(Business, business_id)
+                    if business is not None and business.name == PENDING_NAME:
+                        title = session.scalar(
+                            select(Page.title).where(Page.business_id == business_id, Page.url == start_url)
+                        )
+                        business.name = merged.get("name") or name_from_title(title) or PENDING_NAME
                 profile_extracted = True
             except Exception as exc:
                 print(f"profile extraction failed: {exc}")
@@ -155,6 +285,8 @@ def crawl_business(
             "pages_crawled": pages_crawled,
             "pages_changed": pages_changed,
             "deleted_pages": deleted_pages,
+            "pages_organized": len(organize_result.organized_page_ids),
+            "locations_found": organize_result.locations_found,
             "profile_extracted": profile_extracted,
         }
     finally:
@@ -169,14 +301,7 @@ def main() -> None:
     parser.add_argument("--no-profile", action="store_true")
     args = parser.parse_args()
 
-    business_id = args.business_id
-    if business_id is None:
-        business_id = uuid.uuid4()
-        print(f"business_id: {business_id}")
-
-    with tenant_session(business_id) as session:
-        if session.execute(select(Business).where(Business.id == business_id)).first() is None:
-            session.add(Business(id=business_id, name="(pending)", website=args.url))
+    business_id = resolve_business(args.url, args.business_id)
 
     summary = crawl_business(
         business_id, args.url, max_pages=args.max_pages, extract_profile=not args.no_profile

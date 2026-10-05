@@ -22,17 +22,31 @@ def upsert_page(
     title: str | None,
     markdown: str,
     content_hash: str,
+    chrome_markdown: str | None = None,
+    language: str | None = None,
 ) -> tuple[Page, bool]:
-    """Insert or update the page by (business_id, url). Returns (page, changed)."""
+    """Insert or update the page by (business_id, url). Returns (page, changed).
+
+    `changed` only reflects `markdown`/`content_hash` (step 7's re-chunk trigger) --
+    `chrome_markdown`/`language` are always written to the latest fetch regardless, since
+    they're organize-step inputs, not the content identity a re-crawl guards against
+    re-processing (plan/07-knowledge-quality.md §4, K2).
+    """
     existing = session.scalars(select(Page).where(Page.business_id == business_id, Page.url == url)).first()
 
     if existing is None:
-        page = Page(business_id=business_id, url=url, title=title, markdown=markdown, content_hash=content_hash)
+        page = Page(
+            business_id=business_id, url=url, title=title, markdown=markdown, content_hash=content_hash,
+            chrome_markdown=chrome_markdown, language=language,
+        )
         session.add(page)
         session.flush()
         return page, True
 
+    existing.chrome_markdown = chrome_markdown
+    existing.language = language
     if existing.content_hash == content_hash:
+        session.flush()
         return existing, False
 
     existing.title = title
@@ -43,8 +57,17 @@ def upsert_page(
     return existing, True
 
 
-def replace_chunks(session: Session, business_id: uuid.UUID, page_id: uuid.UUID, drafts: list[ChunkDraft]) -> None:
-    """Full replace of this page's scraped chunks — simplest correct approach for step 2."""
+def replace_chunks(
+    session: Session,
+    business_id: uuid.UUID,
+    page_id: uuid.UUID,
+    drafts: list[ChunkDraft],
+    location_id: uuid.UUID | None = None,
+) -> None:
+    """Full replace of this page's scraped chunks — simplest correct approach for step 2.
+    `location_id` (A2, plan/07-knowledge-quality.md §4) tags every chunk from this page;
+    the location name itself is expected to already be in `draft.text` (the caller
+    prefixes it), not added here — storage stays dumb about content."""
     session.execute(
         delete(Chunk).where(Chunk.business_id == business_id, Chunk.page_id == page_id, Chunk.kind == "scraped")
     )
@@ -60,6 +83,7 @@ def replace_chunks(session: Session, business_id: uuid.UUID, page_id: uuid.UUID,
                 embedding=None,
                 embed_model=None,
                 content_hash=sha256_hash(draft.text),
+                location_id=location_id,
             )
         )
     session.flush()

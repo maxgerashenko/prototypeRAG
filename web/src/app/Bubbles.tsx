@@ -6,6 +6,17 @@ export interface BubbleMessage {
   role: "bot" | "user" | "system";
   text: string;
   at: number; // seconds since the call started
+  latency?: string; // bot: "1.4" -> "· 1.4 s"
+  latencyTitle?: string; // bot: all turn timings, shown on hover
+  interrupted?: boolean; // bot: cut off by the caller
+}
+
+/** "Assistant · 0:12 · 1.4 s · interrupted", like main's page. */
+export function botMeta(m: Pick<BubbleMessage, "at" | "latency" | "interrupted">): string {
+  let t = `Assistant · ${fmtClock(m.at)}`;
+  if (m.latency != null) t += ` · ${m.latency} s`;
+  if (m.interrupted) t += " · interrupted";
+  return t;
 }
 
 export function BotAvatar() {
@@ -29,7 +40,7 @@ export function Bubble({ m }: { m: BubbleMessage }) {
           <BotAvatar />
           <div className="msg-col">
             <div className="bubble-bot">{m.text}</div>
-            <div className="msg-meta">Assistant · {fmtClock(m.at)}</div>
+            <div className="msg-meta" title={m.latencyTitle}>{botMeta(m)}</div>
           </div>
         </div>
       </div>

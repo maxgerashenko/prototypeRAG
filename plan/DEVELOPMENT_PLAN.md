@@ -71,6 +71,10 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 2. ✅ Crawler → one real business in Postgres — [01-crawler.md](01-crawler.md).
 3. ✅ Index, retrieval, `/chat`, eval questions, debug views — [02-local-rag.md](02-local-rag.md).
 4. Voice: mic test mode, then Twilio Voice SDK browser calls + ngrok — [03-voice-channel.md](03-voice-channel.md).
+   - **Knowledge quality** (unnumbered block, before step 5; may overlap step 4's Twilio
+     part): business = domain with locations, organize step, facts library, business
+     summary (DEC-37–DEC-40) — [07-knowledge-quality.md](07-knowledge-quality.md).
+     Before step 5 because bookings need services/durations/prices per location.
 5. Actions: tool calling, internal bookings, summaries, minimal dashboard (no login) —
    [04-actions.md](04-actions.md).
 6. Gemini comparison: switch `LLM_*` / `EMBED_*` env vars, re-run eval + booking tests.
@@ -82,7 +86,8 @@ one block so stage 2 starts from a tuned pipeline:
 - Voice T1–T4b ([03-voice-channel.md](03-voice-channel.md) → "Stage 1 tuning"): "working"
   sound during searches, shorter tool results, LLM warm-up during the greeting,
   pre-generated greeting, sentence splitter abbreviations.
-- Crawler T3 ([01-crawler.md](01-crawler.md)): business name and timezone in the profile.
+- Crawler T3 ([01-crawler.md](01-crawler.md)): business name (done) and timezone — the
+  timezone moved to the knowledge-quality block (per location, DEC-37).
 - Voice bugs B1–B6 from the code review of the call loop ([03-voice-channel.md](03-voice-channel.md)
   → "Stage 1 tuning"): hang-up cleanup, heard vs sent text, barge-in during STT, chunk
   clipping, repeated tool-round text, timezone error.
@@ -178,6 +183,7 @@ VOICE_LANGUAGE=en-US                         # Google Speech; auth = ADC
 STT_MODEL=latest_short                       # `phone_call` for 8 kHz Twilio audio — compare
 TTS_VOICE=en-US-Neural2-F                    # voice names change — re-check the catalog
 VOICE_REASONING_EFFORT=none                  # thinking off for voice (DEC-29)
+DEV_RELOAD=true                              # live reload of web/ pages; never set in cloud
 # in Docker Compose (end of stage 1): use host.docker.internal / service names instead of localhost
 
 # Stage 2 — Cloud Run env (secrets from Secret Manager)
@@ -211,20 +217,20 @@ pages/chunks, VMs, Kubernetes. Reasons in [DECISIONS.md](DECISIONS.md).
 ```
 app/
   main.py           FastAPI app (`/` → voice app at /web/)
-  api/              chat, custom replies, businesses/conversations read API (DEC-38)
+  api/              chat, custom replies, businesses + conversations read API (DEC-42)
   config.py         settings from env (pydantic-settings)
   db/               SQLAlchemy models, Alembic migrations, tenant_session helper
   llm.py            OpenAI-compatible client: chat, embed
-  ingest/           crawler, cleaner, chunker, Places client
+  ingest/           crawler, cleaner, organize, facts + merge, summary, chunker, Places client
   rag/              index, retrieve (SQL), prompt, answer
   voice/            Twilio routes, WebSocket session, Google STT/TTS
   actions/          tools: booking, appointment, summary, message, transfer
   dashboard/        owner UI JSON API routes
-web/                React + TypeScript pages (Vite, DEC-37): voice app at /web/ (DEC-38), chat and
-                    mic test debug pages, later the dashboard; `npm run build` → web/dist,
+web/                React + TypeScript pages (Vite, DEC-41): voice app at /web/ (DEC-42), chat and
+                    voice-debug pages, later the dashboard; `npm run build` → web/dist,
                     served by FastAPI under /web; tests: `npm test` (Vitest), `npm run e2e` (Playwright)
 docker-compose.yml  stage 1: postgres only · stage-1 exit: + api + crawler
-Dockerfile          API image (Node build stage for web/dist, DEC-37)
+Dockerfile          API image (Node build stage for web/dist, DEC-41)
 Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8) — once needed (DEC-36)
 .env.example
 ```

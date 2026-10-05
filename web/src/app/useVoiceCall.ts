@@ -4,23 +4,28 @@ import { NO_SPEECH_MS, callReducer, initialCallState, type CallState } from "./c
 
 export interface VoiceCallApi {
   state: CallState;
-  /** Starts a call; resolves once mic + socket are up, rejects if they fail. */
-  start: (businessId: string) => Promise<void>;
+  /** Starts a call (optionally continuing an earlier conversation); resolves once mic +
+   * socket are up, rejects if they fail. */
+  start: (businessId: string, continueFrom?: string) => Promise<void>;
   hangUp: () => void;
   pttDown: () => void;
   pttUp: () => void;
 }
 
-/** One live call at a time, hold-to-talk (DEC-38). */
+/** One live call at a time, server push-to-talk (DEC-42). */
 export function useVoiceCall(): VoiceCallApi {
   const [state, dispatch] = useReducer(callReducer, initialCallState);
   const call = useRef<VoiceCall | null>(null);
   const noSpeechTimer = useRef<number | undefined>(undefined);
   const talking = useRef(false);
+  const live = useRef(false); // push-to-talk only once the server confirmed the call
+  useEffect(() => {
+    live.current = state.phase === "live";
+  }, [state.phase]);
 
   const clearNoSpeech = () => window.clearTimeout(noSpeechTimer.current);
 
-  const start = useCallback(async (businessId: string) => {
+  const start = useCallback(async (businessId: string, continueFrom?: string) => {
     call.current?.stop();
     clearNoSpeech();
     talking.current = false;
@@ -29,7 +34,7 @@ export function useVoiceCall(): VoiceCallApi {
       {
         onEvent: (ev) => {
           if (call.current !== c) return;
-          if (ev.type === "transcript") clearNoSpeech();
+          if (ev.type === "transcript" || ev.type === "no_speech") clearNoSpeech();
           dispatch({ type: "event", ev, now: Date.now() });
         },
         onPlayback: (active) => {
@@ -45,7 +50,7 @@ export function useVoiceCall(): VoiceCallApi {
           dispatch({ type: "hangup", now: Date.now() });
         },
       },
-      { transmitting: false },
+      { mode: "ptt", continueFrom },
     );
     call.current = c;
     try {
@@ -64,7 +69,7 @@ export function useVoiceCall(): VoiceCallApi {
   }, []);
 
   const pttDown = useCallback(() => {
-    if (!call.current || talking.current) return;
+    if (!call.current || !live.current || talking.current) return;
     talking.current = true;
     clearNoSpeech();
     call.current.setTalking(true);

@@ -3,6 +3,7 @@ import type { VoiceEvent } from "../api";
 import {
   NO_SPEECH_HINT,
   callReducer,
+  callerSpoke,
   callStatus,
   elapsed,
   initialCallState,
@@ -123,6 +124,49 @@ describe("no speech heard", () => {
   });
 });
 
+describe("server push-to-talk events (DEC-42)", () => {
+  it("no_speech from the server leaves 'thinking' with main's hint", () => {
+    const s = run([{ type: "pttDown" }, { type: "pttUp" }, ev({ type: "no_speech" })], live());
+    expect(s.botState).toBe(null);
+    expect(s.pendingTurn).toBe(false);
+    expect(callStatus(s).text).toBe("Didn't catch that — hold and try again");
+    expect(NO_SPEECH_HINT).toBe("Didn't catch that — hold and try again");
+  });
+  it("no_speech while the caller holds again doesn't interrupt the new turn", () => {
+    const s = run([{ type: "pttDown" }, { type: "pttUp" }, { type: "pttDown" }, ev({ type: "no_speech" })], live());
+    expect(callStatus(s).text).toBe("Listening to you…");
+  });
+  it("latency puts the time to first audio on the answer, all timings in its title", () => {
+    const s = run([ev({ type: "transcript", text: "q" }), ev({ type: "reply", text: "a" }),
+      ev({ type: "latency", stt_ms: 80, tts_first_audio_ms: 1400, total_ms: 1600 })], live());
+    expect(s.messages.at(-1)).toMatchObject({ role: "bot", latency: "1.4", latencyTitle: "stt_ms: 80\ntts_first_audio_ms: 1400\ntotal_ms: 1600" });
+  });
+  it("latency without a first-audio time only sets the title; no answer -> nothing to mark", () => {
+    const s = run([ev({ type: "reply", text: "a" }), ev({ type: "latency", stt_ms: 80 })], live());
+    expect(s.messages[0].latency).toBeUndefined();
+    expect(s.messages[0].latencyTitle).toBe("stt_ms: 80");
+    expect(run([ev({ type: "latency", stt_ms: 80 })], live()).messages).toEqual([]);
+  });
+  it("clear marks the answer being spoken as interrupted; the next sentence starts a new bubble", () => {
+    let s = run([ev({ type: "reply", text: "Starting response" }), ev({ type: "clear" })], live());
+    expect(s.messages.at(-1)).toMatchObject({ text: "Starting response", interrupted: true });
+    s = callReducer(s, ev({ type: "reply", text: "Next" }));
+    expect(s.messages.map((m) => m.text)).toEqual(["Starting response", "Next"]);
+    // clear with no answer in progress changes nothing
+    const idle = run([ev({ type: "transcript", text: "q" })], live());
+    expect(callReducer(idle, ev({ type: "clear" }))).toBe(idle);
+  });
+  it("callerSpoke: only calls with a user message can be read later", () => {
+    expect(callerSpoke(run([ev({ type: "reply", text: "Hi" })], live()))).toBe(false);
+    expect(callerSpoke(run([ev({ type: "transcript", text: "q" })], live()))).toBe(true);
+  });
+  it("a server close records its code (4404 = unknown business)", () => {
+    const s = callReducer(live(), { type: "closed", code: 4404, reason: "unknown business", byServer: true, now: T0 });
+    expect(s.endCode).toBe(4404);
+    expect(callReducer(live(), { type: "closed", code: 1005, reason: "", byServer: false, now: T0 }).endCode).toBe(null);
+  });
+});
+
 describe("errors and endings", () => {
   it("shows server errors as a notice and leaves 'thinking'", () => {
     const s = run([{ type: "pttDown" }, { type: "pttUp" }, ev({ type: "error", message: "TTS down" })], live());
@@ -130,9 +174,8 @@ describe("errors and endings", () => {
     expect(s.botState).toBe(null);
     expect(spokenCount(s)).toBe(0);
   });
-  it("ignores clear and unknown events", () => {
+  it("ignores unknown events", () => {
     const s = live();
-    expect(callReducer(s, ev({ type: "clear" }))).toBe(s);
     expect(callReducer(s, ev({ type: "something_new" } as unknown as VoiceEvent))).toBe(s);
   });
   it("hang-up freezes the clock", () => {

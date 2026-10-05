@@ -42,9 +42,35 @@ def extract_profile_from_text(pages_markdown: list[str], business_name_hint: str
         {"role": "user", "content": user_message},
     ]
     result = chat_json(messages, PROFILE_SCHEMA, "business_profile")
-    # some models write the literal string "null" instead of JSON null for an unstated
-    # field (seen with qwen3.6-35b-a3b) -- treat it the same as real null.
-    return {k: (None if isinstance(v, str) and v.strip().lower() == "null" else v) for k, v in result.items()}
+    return {k: _none_if_placeholder(k, v) for k, v in result.items()}
+
+
+_PLACEHOLDERS = {"null", "none", "n/a", "unknown"}
+
+
+def _none_if_placeholder(key: str, value):
+    """Models sometimes fill an unstated field with a placeholder instead of JSON null:
+    the string "null" (seen with qwen3.6-35b-a3b) or the field's own name ("business_name"
+    for `name`, seen on the pilot -- the voice greeting then said "you've reached
+    business_name"). Treat those like null."""
+    if not isinstance(value, str):
+        return value
+    v = value.strip().lower()
+    return None if v in _PLACEHOLDERS or v in (key, f"business_{key}") else value
+
+
+_TITLE_SEPARATORS = (" | ", " — ", " – ", " - ", " · ", " :: ")
+
+
+def name_from_title(title: str | None) -> str | None:
+    """Fallback business name from a page <title>: the part before the first separator
+    ("Bathhouse Williamsburg | Sauna, Steam & Cold Plunge Brooklyn" -> "Bathhouse Williamsburg")."""
+    if not title:
+        return None
+    head = title
+    for sep in _TITLE_SEPARATORS:
+        head = head.split(sep, 1)[0]
+    return head.strip() or None
 
 
 def merge_profile(extracted: dict, place_id: str | None) -> dict:

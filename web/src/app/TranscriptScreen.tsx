@@ -2,7 +2,7 @@ import type { ConversationDetail } from "../api";
 import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
 import { ChevronLeft, PhoneIcon } from "./icons";
-import { durationSeconds, fmtClock, fmtWhen, offsetSeconds, plural } from "./format";
+import { fmtClock, fmtWhen, plural } from "./format";
 
 interface Props {
   bizName: string;
@@ -13,8 +13,7 @@ interface Props {
 
 export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) {
   const c = convo.data;
-  const last = c?.messages[c.messages.length - 1];
-  const dur = c ? fmtClock(durationSeconds(c, last?.created_at)) : "";
+  const dur = c ? fmtClock(c.duration_s) : "";
   const when = c ? fmtWhen(c.started_at) : "";
   const kind = c?.channel === "chat" ? "Chat" : "Call";
   return (
@@ -44,9 +43,8 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
           {c && (
             <>
               <div className="pill">{kind} started · {when}</div>
-              {c.messages.map((m) => (
-                <Bubble key={m.id} m={{ id: m.id, role: m.role === "user" ? "user" : "bot", text: m.content,
-                  at: offsetSeconds(c.started_at, m.created_at) }} />
+              {c.messages.map((m, i) => (
+                <Bubble key={i} m={{ id: i, role: m.role === "user" ? "user" : "bot", text: m.content, at: m.at_s }} />
               ))}
               {c.messages.length === 0 && <div className="pill">No messages were recorded</div>}
               <div className="pill">{kind} ended · {dur}</div>

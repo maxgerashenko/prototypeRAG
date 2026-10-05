@@ -2,7 +2,7 @@ import { useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
 import { ChatIcon, CheckIcon, ChevronRight, MicIcon, PhoneIcon, SearchIcon } from "./icons";
-import { chatsLabel, durationSeconds, fmtClock, fmtWhen, matchesQuery, monogram, plural } from "./format";
+import { chatsLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
 
 const RECENT = 3;
 
@@ -98,7 +98,7 @@ export function SelectScreen(p: Props) {
                 <div className="biz-mono">{monogram(b.name)}</div>
                 <div className="biz-text">
                   <div className="biz-name ellipsis">{b.name}</div>
-                  <div className="biz-sub">{b.category} · {countLabel}</div>
+                  <div className="biz-sub">{hostOf(b)} · {countLabel}</div>
                 </div>
                 <div className="radio">{on && <CheckIcon />}</div>
               </button>
@@ -122,7 +122,7 @@ export function SelectScreen(p: Props) {
                           {p.newIds.has(c.id) && <span className="badge-new small">NEW</span>}
                         </div>
                         <div className="recent-meta">
-                          {fmtWhen(c.started_at)} · {fmtClock(durationSeconds(c))} · {plural(c.message_count, "msg", "msgs")}
+                          {fmtWhen(c.started_at)} · {fmtClock(c.duration_s)} · {plural(c.message_count, "msg", "msgs")}
                         </div>
                       </div>
                       <ChevronRight />
