@@ -1,5 +1,7 @@
 """FastAPI app. Twilio voice routes and the dashboard are added in later steps."""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,9 +13,17 @@ from app.api.conversations import router as conversations_router
 from app.api.custom_replies import router as custom_replies_router
 from app.config import get_settings
 from app.db import engine
+from app.voice import google_auth
 from app.voice.browser_ws import router as voice_browser_router
 
-app = FastAPI(title="prototypeRAG")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    google_auth.warm_up()  # missing Google credentials show at startup, not mid-call (V7)
+    yield
+
+
+app = FastAPI(title="prototypeRAG", lifespan=lifespan)
 app.include_router(chat_router)
 app.include_router(custom_replies_router)
 app.include_router(voice_browser_router)

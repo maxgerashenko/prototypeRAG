@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # thinking off for voice (DEC-29): gemma-4-12b thinks by default, ~8 s before the first
     # word; "none" -> ~0.3 s. Verified on LM Studio; Gemini's value is checked in step 6.
     voice_reasoning_effort: str = "none"
+    # same for /chat (V24): a chat user waits for the first word just like a caller
+    chat_reasoning_effort: str = "none"
 
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 
