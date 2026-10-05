@@ -5,8 +5,8 @@ Pipeline (plan 07 §2): discover (priority order) -> fetch -> clean (main text +
 chrome kept apart) -> store every page -> ORGANIZE (dedupe chrome into one pseudo-page,
 detect locations from site content, assign page_type/location/retrievable per page,
 idempotent on re-crawl) -> CHUNK only the pages organize says changed, tagged with
-their location -> delete pages no longer linked -> profile extraction. Indexing
-(embedding) is a separate step: `python -m app.rag.index`.
+their location -> delete pages no longer linked -> profile extraction -> timezone per
+location (V22). Indexing (embedding) is a separate step: `python -m app.rag.index`.
 """
 
 import argparse
@@ -35,6 +35,7 @@ from app.ingest.organize import (
 )
 from app.ingest.profile import extract_profile_from_text, merge_profile, name_from_title
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
+from app.ingest.timezone import assign_timezones
 
 PENDING_NAME = "(pending)"  # businesses.name until the first profile extraction
 
@@ -158,7 +159,7 @@ def crawl_business(
 ) -> dict:
     """One full crawl: discover -> fetch -> clean -> store every page -> organize
     (locations, page type, retrievable) -> chunk the pages organize touched -> delete
-    pages no longer linked -> profile extraction (plan 07 §2)."""
+    pages no longer linked -> profile extraction (plan 07 §2) -> timezone per location (V22)."""
     client = make_client(delay_seconds)
     try:
         origin = urlparse(start_url)
@@ -281,6 +282,15 @@ def crawl_business(
             except Exception as exc:
                 print(f"profile extraction failed: {exc}")
 
+        # V22: after profile extraction -- a default location without an address of its
+        # own falls back to the profile's. Runs even when the profile is owner-confirmed.
+        timezones_set = 0
+        if extract_profile:
+            try:
+                timezones_set = assign_timezones(business_id)
+            except Exception as exc:
+                print(f"timezone lookup failed: {exc}")
+
         return {
             "pages_crawled": pages_crawled,
             "pages_changed": pages_changed,
@@ -288,6 +298,7 @@ def crawl_business(
             "pages_organized": len(organize_result.organized_page_ids),
             "locations_found": organize_result.locations_found,
             "profile_extracted": profile_extracted,
+            "timezones_set": timezones_set,
         }
     finally:
         client.close()

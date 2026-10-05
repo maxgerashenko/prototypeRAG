@@ -239,7 +239,7 @@ Findings:
 | # | Problem | Kind | Where it's tracked |
 |---|---|---|---|
 | V21 | Greeting says "you've reached business_name" — profile `name` holds the placeholder; `businesses.name` is "(pending)" | Real | [01-crawler.md](01-crawler.md) tasks |
-| V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Real | [01-crawler.md](01-crawler.md) tasks |
+| V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Fixed in code (2026-10-05): crawler sets it per location from the address; re-crawl the pilot to apply | [01-crawler.md](01-crawler.md) tasks |
 | V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real (cause unknown) | `/debug/retrieve`, eval set |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had | Potential | [02-local-rag.md](02-local-rag.md) tasks |
 | V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Real | Delete when convenient |

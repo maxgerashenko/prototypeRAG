@@ -11,8 +11,8 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.db import tenant_session
-from app.db.models import Business, Chunk, Location, Page
-from app.ingest import organize, run
+from app.db.models import Business, BusinessProfile, Chunk, Location, Page
+from app.ingest import organize, run, timezone
 from app.ingest.chunk import ChunkDraft, chunk_markdown, chunk_text, split_by_headers
 from app.ingest.clean import clean_page, content_hash, extract_html_lang, extract_og_site_name, extract_title, html_to_markdown
 from app.ingest.discover import (
@@ -564,5 +564,67 @@ def test_organize_business_detects_locations_from_chrome_not_start_path():
         # idempotent: re-running organize on the same, unchanged pages touches nothing
         result2 = organize.organize_business(bid, f"{root}williamsburg", root)
         assert result2.organized_page_ids == []
+    finally:
+        _cleanup_business(bid)
+
+
+# --- timezone.py: timezone per location from its address (V22) ----------------------
+
+
+def test_valid_timezone_accepts_only_geographic_iana_names():
+    assert timezone.valid_timezone("America/New_York") == "America/New_York"
+    assert timezone.valid_timezone(" Europe/Riga ") == "Europe/Riga"
+    for bad in (None, "", "UTC", "EST", "Etc/GMT+5", "America/Atlantis", "New York"):
+        assert timezone.valid_timezone(bad) is None
+
+
+def test_assign_timezones_fills_empty_locations_and_follows_the_default(monkeypatch):
+    """Each location gets the LLM's zone for its address; a location that already has one
+    (owner-corrected) is never re-asked; an invalid answer is dropped; businesses.timezone
+    becomes the default location's."""
+    answers = {
+        "103 North 10th Street, Brooklyn, NY 11249": "America/New_York",
+        "1 Main St, Philadelphia, PA": "Not/AZone",
+    }
+    asked: list[str] = []
+
+    def fake_chat_json(messages, schema, schema_name="result"):
+        asked.append(messages[-1]["content"])
+        return {"timezone": answers[messages[-1]["content"]]}
+
+    monkeypatch.setattr(timezone, "chat_json", fake_chat_json)
+    bid = run.resolve_business("https://tztest.example.com/", None)
+    try:
+        with tenant_session(bid) as s:
+            s.add(Location(business_id=bid, name="Williamsburg", is_default=True,
+                           address="103 North 10th Street, Brooklyn, NY 11249"))
+            s.add(Location(business_id=bid, name="Philadelphia", address="1 Main St, Philadelphia, PA"))
+            s.add(Location(business_id=bid, name="Riga", address="Brivibas 1, Riga", timezone="Europe/Riga"))
+            s.add(Location(business_id=bid, name="No address"))
+
+        assert timezone.assign_timezones(bid) == 1
+
+        with tenant_session(bid) as s:
+            tz = {l.name: l.timezone for l in s.scalars(select(Location).where(Location.business_id == bid))}
+            business_tz = s.get(Business, bid).timezone
+        assert tz == {"Williamsburg": "America/New_York", "Philadelphia": None,
+                      "Riga": "Europe/Riga", "No address": None}
+        assert business_tz == "America/New_York"
+        assert sorted(asked) == sorted(answers)  # Riga (already set) and "No address" never asked
+    finally:
+        _cleanup_business(bid)
+
+
+def test_assign_timezones_uses_profile_address_for_a_default_location_without_one(monkeypatch):
+    monkeypatch.setattr(timezone, "chat_json", lambda messages, schema, schema_name="result": {"timezone": "Europe/Riga"})
+    bid = run.resolve_business("https://tzprofile.example.com/", None)
+    try:
+        with tenant_session(bid) as s:
+            s.add(Location(business_id=bid, name="Main", is_default=True))
+            s.add(BusinessProfile(business_id=bid, address="Brivibas 1, Riga"))
+
+        assert timezone.assign_timezones(bid) == 1
+        with tenant_session(bid) as s:
+            assert s.get(Business, bid).timezone == "Europe/Riga"
     finally:
         _cleanup_business(bid)
