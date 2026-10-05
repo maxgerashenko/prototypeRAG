@@ -143,15 +143,14 @@ class CallSession:
             if self._turn is not None:
                 self._turn.push(pcm)
             return
-        was_in_speech = self._vad.in_speech
-        events = self._vad.feed(pcm)
-        # speech_start's event carries the pre-roll + triggering frames; after that,
-        # every chunk received while in speech streams to STT
-        if was_in_speech and self._turn is not None:
-            self._turn.push(pcm)
-        for event in events:
+        # speech_start carries the pre-roll + triggering frames, speech the frames after
+        # them, split per frame so audio after the trigger in the same chunk isn't lost
+        for event in self._vad.feed(pcm):
             if event.kind == "speech_start":
                 await self._on_speech_start(event.audio)
+            elif event.kind == "speech":
+                if self._turn is not None:
+                    self._turn.push(event.audio)
             else:
                 self._on_speech_end()
 

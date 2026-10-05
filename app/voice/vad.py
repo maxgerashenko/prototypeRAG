@@ -12,8 +12,10 @@ import webrtcvad
 
 @dataclass(frozen=True)
 class VadEvent:
-    kind: Literal["speech_start", "speech_end"]
-    audio: bytes  # speech_start: pre-roll + triggering frames (PCM16); speech_end: b""
+    kind: Literal["speech_start", "speech", "speech_end"]
+    # speech_start: pre-roll + triggering frames; speech: the frames after it while in
+    # speech, up to and including the frame that ends it (PCM16); speech_end: b""
+    audio: bytes
 
 
 class TurnDetector:
@@ -49,8 +51,18 @@ class TurnDetector:
         self._silence_frames: int = 0
 
     def feed(self, pcm16: bytes) -> list[VadEvent]:
-        """Process any number of PCM16 bytes; partial frames stay buffered for the next call."""
+        """Process any number of PCM16 bytes; partial frames stay buffered for the next call.
+
+        In-speech frames come back as at most one `speech` event per call between the
+        turn events, so a chunk holding several frames splits exactly at the trigger frame."""
         events: list[VadEvent] = []
+        speech = bytearray()
+
+        def flush_speech() -> None:
+            if speech:
+                events.append(VadEvent(kind="speech", audio=bytes(speech)))
+                speech.clear()
+
         self._buffer.extend(pcm16)
 
         while len(self._buffer) >= self._frame_bytes:
@@ -74,6 +86,7 @@ class TurnDetector:
                     self._ring.clear()
                     self._speech_frames = 0
             else:
+                speech.extend(frame)
                 if not is_speech:
                     self._silence_frames += 1
                 else:
@@ -81,9 +94,11 @@ class TurnDetector:
 
                 if self._silence_frames >= self._end_frames:
                     self._in_speech = False
+                    flush_speech()
                     events.append(VadEvent(kind="speech_end", audio=b""))
                     self._silence_frames = 0
 
+        flush_speech()
         return events
 
     def reset(self) -> None:
