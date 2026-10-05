@@ -256,17 +256,29 @@ class CallSession:
         await self._send_event({"type": "transcript", "text": text})
 
         spoken: list[str] = []
+        play_ends: list[float] = []  # monotonic time each spoken sentence finishes playing
+        heard_by = float("inf")
         try:
-            await self._reply(text, spoken, speech_end, timings)
-        finally:
-            # also on barge-in (cancel): keep what the caller actually heard as context
-            reply = " ".join(spoken)
-            self._history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
-            await asyncio.shield(asyncio.to_thread(self._save_turn, text, reply))
+            await self._reply(text, spoken, play_ends, speech_end, timings)
             timings["total_ms"] = _ms(speech_end)
             log.info("voice turn %s: %s", self.conversation_id, timings)
-            # may run after hang-up (cancelled by close()), when the socket is closed
-            await self._try_send_event({"type": "latency", **timings})
+            await self._send_event({"type": "latency", **timings})
+            # audio goes out faster than real time: the reply stays in progress until the
+            # caller has heard it, so a barge-in still cuts what was sent but not played (B2)
+            await asyncio.sleep(max(0.0, self._playing_until - time.monotonic()))
+        except asyncio.CancelledError:
+            heard_by = time.monotonic()  # barge-in or hang-up
+            raise
+        finally:
+            # keep only what the caller actually heard as context
+            reply = " ".join(sentence for sentence, end in zip(spoken, play_ends) if end <= heard_by)
+            self._history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
+            await asyncio.shield(asyncio.to_thread(self._save_turn, text, reply))
+            if "total_ms" not in timings:
+                timings["total_ms"] = _ms(speech_end)
+                log.info("voice turn %s: %s", self.conversation_id, timings)
+                # may run after hang-up (cancelled by close()), when the socket is closed
+                await self._try_send_event({"type": "latency", **timings})
 
     async def _transcribe(self, turn: TurnTranscriber, earlier: asyncio.Task | None) -> str:
         """Final transcript of `turn`, after the words of an earlier unanswered turn."""
@@ -279,7 +291,9 @@ class CallSession:
         texts.append(await asyncio.to_thread(turn.finish))
         return " ".join(t for t in texts if t)
 
-    async def _reply(self, text: str, spoken: list[str], speech_end: float, timings: dict) -> None:
+    async def _reply(
+        self, text: str, spoken: list[str], play_ends: list[float], speech_end: float, timings: dict
+    ) -> None:
         messages = [
             {"role": "system", "content": self._system_prompt},
             *self._history,
@@ -311,9 +325,9 @@ class CallSession:
                     buffer += delta.content
                     sentences, buffer = split_sentences(buffer)
                     for sentence in sentences:
-                        await self._say(sentence, spoken, speech_end, timings)
+                        await self._say(sentence, spoken, play_ends, speech_end, timings)
             if buffer.strip():
-                await self._say(buffer.strip(), spoken, speech_end, timings)
+                await self._say(buffer.strip(), spoken, play_ends, speech_end, timings)
             if not calls:
                 return
 
@@ -331,9 +345,11 @@ class CallSession:
                 result = await asyncio.to_thread(run_tool, self.business_id, c["name"], c["arguments"])
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
             timings.setdefault("tool_end_ms", _ms(speech_end))
-        await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, speech_end, timings)
+        await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, play_ends, speech_end, timings)
 
-    async def _say(self, sentence: str, spoken: list[str], speech_end: float, timings: dict) -> None:
+    async def _say(
+        self, sentence: str, spoken: list[str], play_ends: list[float], speech_end: float, timings: dict
+    ) -> None:
         sentence = speakable(sentence)
         if not sentence:
             return
@@ -343,6 +359,7 @@ class CallSession:
         timings.setdefault("tts_first_audio_ms", _ms(speech_end))
         await self._play(audio)
         spoken.append(sentence)
+        play_ends.append(self._playing_until)
 
     async def _speak_greeting(self, greeting: str) -> None:
         await self._send_event({"type": "reply", "text": greeting})

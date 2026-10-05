@@ -56,6 +56,10 @@ def fake_synthesize(text: str, sample_rate: int) -> bytes:
     return b"\0\0" * sample_rate * 3  # 3 s of "speech" per sentence
 
 
+def short_synthesize(text: str, sample_rate: int) -> bytes:
+    return b"\0\0" * (sample_rate // 20)  # 50 ms: a turn waits for its audio to play out
+
+
 def _chunk(content=None, tool_calls=None):
     return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=content, tool_calls=tool_calls))])
 
@@ -230,6 +234,7 @@ def test_missing_google_credentials_are_checked_once(monkeypatch):
 def test_full_turn_with_tool_call(business, monkeypatch):
     llm = FakeLLM()
     s, audio_out, events = _make_session(business, llm, monkeypatch)
+    s._synthesize = short_synthesize
 
     async def run():
         await s.start()
@@ -447,7 +452,8 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
     def slow_synthesize(text, rate):
         if text.startswith("Anything"):
             _time.sleep(0.3)  # caller interrupts while this sentence is being synthesized
-        return b"\0\0" * rate * 3
+            return b"\0\0" * rate * 3
+        return short_synthesize(text, rate)  # first sentence has played by the barge-in
 
     s, _, events = _make_session(business, FakeLLM(), monkeypatch)
     s._synthesize = slow_synthesize
@@ -459,6 +465,7 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
         await _feed(s, _speech() + SILENCE_1S)
         while not any(e.get("text") == "Anything else?" for e in events):
             await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)  # first sentence (50 ms) has played
         await _feed(s, _speech()[:8000])  # barge in
         await s.close()
 
@@ -469,6 +476,37 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
         assert [(m.role, m.content) for m in rows][1:] == [
             ("user", "What time do you close on Saturday?"),
             ("assistant", "We close at 5 pm on Saturday."),  # the unspoken sentence isn't stored
+        ]
+    assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
+
+
+def test_barge_in_after_reply_sent_keeps_only_what_was_heard(business, monkeypatch):
+    # B2: TTS is faster than playback, so the whole reply is sent while the caller has
+    # heard only part of it; a barge-in then must not store the unheard rest
+    def synthesize(text, rate):
+        return fake_synthesize(text, rate) if text.startswith("Anything") else short_synthesize(text, rate)
+
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    s._synthesize = synthesize
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        while not any(e["type"] == "latency" for e in events):  # all audio sent
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.2)  # first sentence (50 ms) played, second (3 s) still playing
+        await _feed(s, _speech()[:8000])  # barge in
+        await s.close()
+
+    run_async(run())
+    assert {"type": "clear"} in events
+    with tenant_session(business) as db:
+        rows = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at))
+        assert [(m.role, m.content) for m in rows][1:] == [
+            ("user", "What time do you close on Saturday?"),
+            ("assistant", "We close at 5 pm on Saturday."),
         ]
     assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
 
@@ -558,6 +596,7 @@ def test_barge_in_during_stt_finish_keeps_callers_words(business, monkeypatch):
 def test_manual_turns_ignore_vad_and_answer_on_release(business, monkeypatch):
     s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
     s.turn_detection = "manual"
+    s._synthesize = short_synthesize
 
     async def run():
         await s.start()
