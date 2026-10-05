@@ -170,6 +170,11 @@ class Page(Base):
     organized_hash: Mapped[str | None] = mapped_column(Text)
     extracted_hash: Mapped[str | None] = mapped_column(Text)
     extractor_version: Mapped[str | None] = mapped_column(Text)
+    # Testimonial blocks `organize.cut_testimonials` cut out of `markdown` before
+    # chunking (K6), kept for `summary.py`'s guest themes (§6) instead of being thrown
+    # away. Rewritten with the chunks whenever the page is re-organized; NULL = not
+    # organized since this column was added, [] = page has none.
+    testimonials: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
 
 
 class CustomReply(Base):
