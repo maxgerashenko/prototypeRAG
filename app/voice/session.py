@@ -31,7 +31,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Literal
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import get_settings
 from app.db import tenant_session
@@ -335,7 +335,14 @@ class CallSession:
             session.add(conversation)
             session.flush()
             self.conversation_id = conversation.id
-            now = datetime.now(ZoneInfo(business.timezone)).strftime("%A %Y-%m-%d %H:%M")
+            # B6: ZoneInfoNotFoundError is a LookupError, which browser_ws reports as
+            # 4404 "unknown business" -- a bad timezone must not end the call.
+            try:
+                tz = ZoneInfo(business.timezone)
+            except (ZoneInfoNotFoundError, ValueError):
+                log.warning("business %s: bad timezone %r, using UTC", self.business_id, business.timezone)
+                tz = ZoneInfo("UTC")
+            now = datetime.now(tz).strftime("%A %Y-%m-%d %H:%M")
             self._system_prompt = (
                 f"{VOICE_SYSTEM_PROMPT}\n\nCurrent local time at the business: {now}\n\n{format_profile(profile)}"
             )
