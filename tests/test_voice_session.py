@@ -841,3 +841,178 @@ def test_barge_in_stops_working_sound(business, monkeypatch):
         await s.close()
 
     run_async(run())
+
+
+# --- V17: silence re-prompt and hang-up ----------------------------------------------
+
+
+class AnswerLLM:
+    """One round, no tool call: always the same answer."""
+
+    def __init__(self, answer: str = "We close at 5 pm.") -> None:
+        self.answer = answer
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs):
+        async def gen():
+            if kwargs.get("max_tokens") != 1:  # not the warm-up
+                yield _chunk(self.answer)
+
+        return gen()
+
+
+@pytest.mark.parametrize("text", [
+    "Thank you. Bye.", "Okay, thanks, bye-bye!", "Goodbye", "good bye", "Bye bye", "OK see you then.",
+    "Thanks, have a nice day.", "That's all, thank you. Talk to you later.", "Thanks, that's all.",
+    "That's all for now, thanks!", "OK that's it, thank you", "Have a good one!", "Bye, thanks.",
+    "Goodbye, thank you so much.",
+])
+def test_farewell_detected(text):
+    assert session_mod.is_farewell(text)
+
+
+@pytest.mark.parametrize("text", [
+    "", "...", "Can I stop by?", "Can I stop by tomorrow", "Bye, and what about Sunday?", "Bye, wait, one more thing.",
+    "I'll see you tomorrow at 5.", "What time do you close on Saturday?", "Bye?", "Is that all?",
+    "That's all I need to know about the day pass, can I book it",
+    "My friend said goodbye to the old spa and I want to book a day pass, see you",
+])
+def test_not_a_farewell(text):
+    assert not session_mod.is_farewell(text)
+
+
+def _fast_silence(monkeypatch):
+    monkeypatch.setattr(session_mod, "SILENCE_REPROMPT_S", 0.3)
+    monkeypatch.setattr(session_mod, "SILENCE_POLL_S", 0.02)
+    monkeypatch.setattr(session_mod, "HANG_UP_GRACE_S", 0.0)
+
+
+def _with_hang_up(s: CallSession) -> list[str]:
+    calls: list[str] = []
+
+    async def hang_up():
+        calls.append("hang_up")
+
+    s._hang_up = hang_up
+    return calls
+
+
+def _replies(events):
+    return [e["text"] for e in events if e["type"] == "reply"]
+
+
+def test_silence_reprompts_then_hangs_up(business, monkeypatch):
+    _fast_silence(monkeypatch)
+    s, _, events = _make_session(business, AnswerLLM(), monkeypatch)
+    s._synthesize = short_synthesize
+    hung_up = _with_hang_up(s)
+
+    async def run():
+        await s.start()
+        for _ in range(200):
+            if hung_up:
+                break
+            await asyncio.sleep(0.02)
+        await s.close()
+
+    run_async(run())
+    assert hung_up == ["hang_up"]
+    assert _replies(events)[1:] == [session_mod.REPROMPT_TEXT, session_mod.SILENCE_GOODBYE_TEXT]
+    assert events[-1] == {"type": "hangup", "reason": "silence"}
+    # in the transcript, but not in the LLM history (two assistant turns in a row)
+    assert all(m["content"] != session_mod.REPROMPT_TEXT for m in s._history)
+    with tenant_session(business) as db:
+        saved = db.scalars(select(Message.content).where(Message.conversation_id == s.conversation_id)
+                           .order_by(Message.created_at)).all()
+        assert saved[1:] == [session_mod.REPROMPT_TEXT, session_mod.SILENCE_GOODBYE_TEXT]
+        assert db.get(Conversation, s.conversation_id).ended_at is not None
+
+
+def test_caller_speech_resets_the_silence_count(business, monkeypatch):
+    _fast_silence(monkeypatch)
+    s, _, events = _make_session(business, AnswerLLM(), monkeypatch)
+    s._synthesize = short_synthesize
+    hung_up = _with_hang_up(s)
+
+    async def run():
+        await s.start()
+        while session_mod.REPROMPT_TEXT not in _replies(events):
+            await asyncio.sleep(0.02)
+        await s._reply_task
+        await _feed(s, _speech() + SILENCE_1S)  # the caller answers the re-prompt
+        while "We close at 5 pm." not in _replies(events):
+            await asyncio.sleep(0.02)
+        while not hung_up:
+            await asyncio.sleep(0.02)
+        await s.close()
+
+    run_async(run())
+    # answered, then silence again: a fresh re-prompt before the goodbye, not the goodbye at once
+    assert _replies(events)[1:] == [session_mod.REPROMPT_TEXT, "We close at 5 pm.",
+                                    session_mod.REPROMPT_TEXT, session_mod.SILENCE_GOODBYE_TEXT]
+
+
+def test_no_silence_handling_in_push_to_talk(business, monkeypatch):
+    _fast_silence(monkeypatch)
+    s, _, events = _make_session(business, AnswerLLM(), monkeypatch)
+    s._synthesize = short_synthesize
+    s.turn_detection = "manual"
+    hung_up = _with_hang_up(s)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await asyncio.sleep(1.0)  # > 3x SILENCE_REPROMPT_S
+        await s.close()
+
+    run_async(run())
+    assert len(_replies(events)) == 1 and not hung_up
+
+
+@pytest.mark.parametrize("said, hangs_up", [("Thank you. Bye.", True), ("What time do you close?", False)])
+def test_goodbye_turn_is_answered_then_hung_up(business, monkeypatch, said, hangs_up):
+    s, _, events = _make_session(business, AnswerLLM("Goodbye, have a nice day!"), monkeypatch)
+    s._synthesize = short_synthesize
+    s.turn_detection = "manual"
+    monkeypatch.setattr(FakeTranscriber, "finish", lambda self, timeout=5.0: said)
+    monkeypatch.setattr(session_mod, "HANG_UP_GRACE_S", 0.0)
+    hung_up = _with_hang_up(s)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.start_turn()
+        s.end_turn()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert _replies(events)[-1] == "Goodbye, have a nice day!"
+    assert bool(hung_up) == hangs_up
+    assert ({"type": "hangup", "reason": "goodbye"} in events) == hangs_up
+    with tenant_session(business) as db:  # the farewell turn is saved before the hang-up
+        saved = db.scalars(select(Message.content).where(Message.conversation_id == s.conversation_id)).all()
+        assert said in saved
+
+
+def test_barge_in_on_the_goodbye_keeps_the_call(business, monkeypatch):
+    _fast_silence(monkeypatch)
+    s, _, events = _make_session(business, AnswerLLM(), monkeypatch)
+    hung_up = _with_hang_up(s)
+    s._synthesize = short_synthesize
+
+    async def run():
+        await s.start()
+        while session_mod.REPROMPT_TEXT not in _replies(events):
+            await asyncio.sleep(0.02)
+        s._synthesize = fake_synthesize  # 3 s goodbye, long enough to talk over
+        while session_mod.SILENCE_GOODBYE_TEXT not in _replies(events):
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.1)
+        await _feed(s, _speech())
+        await asyncio.sleep(0.3)
+        await s.close()
+
+    run_async(run())
+    assert {"type": "clear"} in events
+    assert not hung_up

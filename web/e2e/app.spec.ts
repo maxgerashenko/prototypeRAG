@@ -295,6 +295,52 @@ test.describe("2 · a business's previous conversations", () => {
     expect(voice.url()).not.toContain("continue_from");
     await expect(page.locator(".biz-chip")).toContainText("Bloom & Stem");
   });
+
+  test("'Start new call' button calls this business", async ({ page }) => {
+    await openApp(page);
+    await pick(page, "Bloom & Stem");
+    await page.getByRole("button", { name: /See all/ }).click();
+    await page.getByRole("button", { name: "Start new call" }).click();
+    await expect(page.locator("[data-screen=call]")).toBeVisible();
+    expect(Object.fromEntries(new URL(voice.url()).searchParams)).toEqual({ business_id: "b3", mode: "ptt" });
+  });
+
+  test("card meta: when, duration and message count", async ({ page }) => {
+    await page.clock.setFixedTime(FIXED);
+    await openApp(page, data(FIXED));
+    await startCall(page, "Corner Bakery"); // nobody speaks: no NEW card afterwards
+    await page.getByRole("button", { name: "End call" }).click();
+    await page.getByRole("button", { name: "Back to conversations" }).click();
+    const cards = page.locator("[data-screen=convos] .convo-card");
+    await expect(cards).toHaveCount(3);
+    await expect(cards.nth(0).locator(".convo-meta")).toHaveText("Today · 2:58 PM4:125 messages");
+    await expect(cards.nth(1).locator(".convo-meta")).toHaveText("Yesterday · 1:00 PM1:353 messages");
+    await expect(cards.nth(2).locator(".convo-meta")).toHaveText("Aug 25 · 3:00 PM1:352 messages");
+    await expect(cards.nth(2).locator(".convo-preview")).toHaveText("You: How much is a gift card?");
+    await expect(page.locator(".badge-new")).toHaveCount(0);
+  });
+
+  test("a business without conversations shows the empty state", async ({ page }) => {
+    await openApp(page);
+    await startCall(page, "Happy Paws Grooming");
+    await page.getByRole("button", { name: "End call" }).click();
+    await page.getByRole("button", { name: "Back to conversations" }).click();
+    const screen = page.locator("[data-screen=convos]");
+    await expect(screen.locator("h1")).toHaveText("Happy Paws Grooming");
+    await expect(screen.locator(".biz-head")).toContainText("No website");
+    await expect(screen.locator(".section-head")).toHaveText("Previous conversations0");
+    await expect(screen.locator(".convo-card")).toHaveCount(0);
+    await expect(screen.locator(".empty")).toContainText("No conversations yet");
+    await expect(screen.locator(".empty")).toContainText("Start a call and it will show up here when you hang up.");
+  });
+
+  test("conversations that fail to load show an error on the list", async ({ page }) => {
+    await openApp(page, { ...data(), fail: new Set(["conversations"]) });
+    await startCall(page, "Corner Bakery");
+    await page.getByRole("button", { name: "End call" }).click();
+    await page.getByRole("button", { name: "Back to conversations" }).click();
+    await expect(page.locator("[data-screen=convos]").getByRole("alert")).toContainText("Couldn’t load conversations (HTTP 500");
+  });
 });
 
 test.describe("3 · read a past conversation", () => {
@@ -551,6 +597,86 @@ test.describe("5 · live call with push-to-talk", () => {
       return e.defaultPrevented;
     });
     expect(prevented).toBe(true);
+  });
+
+  test("orb and status line follow the turn: idle, listening, thinking, speaking", async ({ page }) => {
+    await openApp(page);
+    await startCall(page, "Corner Bakery", { greeting: null });
+    const orb = page.getByTestId("orb");
+    const rings = orb.locator(".orb-ring");
+    const bars = (play: string, speed: string) =>
+      expect(orb).toHaveAttribute("style", new RegExp(`--bar-speed: ${speed.replace(".", "\\.")}; --bar-play: ${play}`));
+
+    // idle: no rings, bars still, muted status
+    await expect(status(page)).toHaveText("Hold the button to talk");
+    await expect(status(page)).toHaveClass(/\bidle\b/);
+    await expect(rings).toHaveCount(0);
+    await bars("paused", "1s");
+    await expect(orb).not.toHaveClass(/\bcall\b/);
+
+    // listening: call-coloured orb with rings, fast bars
+    await ptt(page).hover();
+    await page.mouse.down();
+    await expect(status(page)).toHaveClass(/\bcall\b/);
+    await expect(orb).toHaveClass(/\bcall\b/);
+    await expect(rings).toHaveCount(2);
+    await bars("running", ".7s");
+
+    // thinking: assistant colour, no rings, slow bars
+    await page.mouse.up();
+    await expect(status(page)).toHaveText("Thinking…");
+    await expect(status(page)).toHaveClass(/\bbot\b/);
+    await expect(orb).not.toHaveClass(/\bcall\b/);
+    await expect(rings).toHaveCount(0);
+    await bars("running", "1.8s");
+
+    // speaking: rings again
+    voice.send({ type: "transcript", text: "Hi" });
+    voice.send({ type: "reply", text: "Hello there." });
+    voice.sendAudio(32000); // 2 s
+    await expect(status(page)).toHaveText("Assistant is speaking");
+    await expect(rings).toHaveCount(2);
+    await bars("running", ".85s");
+  });
+
+  test("keyboard on the focused talk button: Enter holds to talk", async ({ page }) => {
+    await openApp(page);
+    await startCall(page, "Corner Bakery", { greeting: null });
+    await ptt(page).focus();
+    await page.keyboard.down("Enter");
+    await expect.poll(sent("ptt_start")).toBe(1);
+    await expect(status(page)).toHaveText("Listening to you…");
+    await expect(ptt(page)).toContainText("Release to send");
+    await page.keyboard.down("Enter"); // auto-repeat
+    await page.keyboard.up("Enter");
+    await expect.poll(sent("ptt_end")).toBe(1);
+    expect(sent("ptt_start")()).toBe(1);
+    await expect(ptt(page)).toContainText("Hold to talk");
+  });
+
+  test("a cancelled pointer (e.g. a scroll gesture) releases the talk button", async ({ page }) => {
+    await openApp(page);
+    await startCall(page, "Corner Bakery", { greeting: null });
+    await ptt(page).hover();
+    await page.mouse.down();
+    await expect.poll(sent("ptt_start")).toBe(1);
+    await ptt(page).dispatchEvent("pointercancel");
+    await expect.poll(sent("ptt_end")).toBe(1);
+    await expect(status(page)).toHaveText("Thinking…");
+    await page.mouse.up();
+  });
+
+  test("the newest message stays in view as the call log grows", async ({ page }) => {
+    await openApp(page);
+    await startCall(page, "Corner Bakery", { greeting: null });
+    for (let i = 1; i <= 12; i++) {
+      voice.send({ type: "transcript", text: `Question ${i}?` });
+      voice.send({ type: "reply", text: `Answer ${i}, with enough words to wrap onto a second line.` });
+    }
+    await expect(page.locator(".msg")).toHaveCount(24);
+    await expect(page.locator(".msg").first()).not.toBeInViewport();
+    await expect(page.locator(".msg").last()).toBeInViewport();
+    await expect(page.locator(".msg").last()).toContainText("Answer 12");
   });
 
   test("Esc and Backspace end the call", async ({ page }) => {

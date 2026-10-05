@@ -19,6 +19,13 @@ Barge-in: caller speech while the bot is replying or its audio is still playing 
 the reply task and sends `clear`. Playback time is estimated from audio duration sent,
 because audio goes out faster than real time and the transport plays it from a buffer.
 
+Silence (V17, VAD mode only -- the phone case; push-to-talk callers aren't expected to
+talk at any moment): ~6 s with nothing from the caller after the bot finished speaking
+plays one re-prompt, the next ~6 s a goodbye, then the session hangs up. A caller whose
+last sentence is a farewell ("Thank you. Bye.") is answered and then hung up on too.
+Hanging up = a `hangup` event, then the adapter's `hang_up` callback (closes the socket);
+`close()` still runs as for any hang-up.
+
 Pass `continue_from` to load an earlier conversation of the same business as LLM history
 (a new conversation row is still created). Twilio calls pass `call_sid`, stored on the
 conversation for the status callback.
@@ -55,6 +62,15 @@ SendEvent = Callable[[dict], Awaitable[None]]
 MAX_TOOL_ROUNDS = 3  # LLM → tool → LLM ... before giving up on a turn
 WORKING_SOUND_CHUNK_S = 0.2  # T1: sent in real time, so stopping it is never more than ~this late
 
+# V17: silence handling (VAD mode). Quiet is counted from the later of the caller's last
+# speech and the end of the bot's audio, so a long answer doesn't count as silence.
+SILENCE_REPROMPT_S = 6.0
+SILENCE_MAX_REPROMPTS = 1  # re-prompts before the goodbye
+SILENCE_POLL_S = 0.25
+HANG_UP_GRACE_S = 0.5  # after the last audio's estimated end, so the transport plays it out
+REPROMPT_TEXT = "Are you still there?"
+SILENCE_GOODBYE_TEXT = "I haven't heard anything, so I'll end the call now. Thanks for calling, goodbye."
+
 # T4: the standard greeting's audio per (text, sample rate, voice, language), so a call
 # starts playing at once instead of after a TTS round trip. In-process only (lost on
 # restart); DEC-17 stores it at onboarding later. "Welcome back" greetings aren't cached:
@@ -68,7 +84,9 @@ VOICE_SYSTEM_PROMPT = (
     "Call search_business_info for any question the profile doesn't answer.\n"
     "If the answer isn't found, say so plainly and offer to take a message.\n"
     "Your words are spoken aloud: one to three short sentences, no lists, no markdown, "
-    "no URLs. Answer in the language the caller uses."
+    "no URLs. Answer in the language the caller uses.\n"
+    "If the caller says goodbye, thank them for calling and say a short, warm goodbye; "
+    "the call then ends."
 )
 
 # sentence end = . ! ? followed by whitespace; the rest stays buffered until more text comes
@@ -101,6 +119,31 @@ _LIST_MARK = re.compile(r"(?:^|\n)\s*(?:[-*•]|\d+[.)])(?:\s+|$)")  # line-star
 _MD_MARKS = re.compile(r"`+|#+|\*+(?=\S)|(?<=\S)\*+|(?<!\w)_+|_+(?!\w)")
 
 
+# V17: the caller's last sentence ends in a farewell. English only (the regex); a question
+# ("Bye, and Sunday?") or a longer last sentence keeps the call open: a wrong hang-up is
+# worse for the caller than a missed one, which the silence timeout ends anyway.
+_FAREWELL = re.compile(
+    r"\b(?:good\s?-?bye|bye(?:[\s-]?bye)?|see you(?: later| soon)?|talk to you later"
+    r"|have a (?:good|nice|great|lovely) (?:day|evening|night|one|weekend)"
+    r"|(?:that's|that is|that'll be) (?:all|it))"
+    r"(?: now| then| for now| for today)?(?:,? (?:thanks|thank you)(?: so much| very much)?)?$",
+    re.IGNORECASE,
+)
+_FAREWELL_MAX_WORDS = 8
+
+
+def is_farewell(text: str) -> bool:
+    """The caller is saying goodbye: "Thank you. Bye." yes, "Bye, and on Sunday?" no."""
+    text = text.strip()
+    if not text or text.endswith("?"):
+        return False
+    parts = [p for p in re.split(r"[.!?]+", text) if p.strip()]
+    if not parts:  # only punctuation
+        return False
+    last = parts[-1].strip(" ,;:")
+    return len(last.split()) <= _FAREWELL_MAX_WORDS and _FAREWELL.search(last) is not None
+
+
 def speakable(text: str) -> str:
     """`text` without markdown, list markers and full URLs, as one line for TTS."""
     text = _MD_LINK.sub(r"\1", text)
@@ -124,6 +167,7 @@ class CallSession:
         synthesize: Callable[[str, int], bytes] = tts.synthesize,
         continue_from: uuid.UUID | None = None,
         call_sid: str | None = None,
+        hang_up: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if turn_detection not in ("vad", "manual"):
             raise ValueError(f"turn_detection must be 'vad' or 'manual', got {turn_detection!r}")
@@ -137,6 +181,7 @@ class CallSession:
         self._synthesize = synthesize
         self._continue_from = continue_from
         self._call_sid = call_sid
+        self._hang_up = hang_up
         self._topic: str | None = None
 
         self._vad = TurnDetector(sample_rate=sample_rate)
@@ -147,6 +192,10 @@ class CallSession:
         # STT of a turn a barge-in cut off before it was answered; its words lead the next turn
         self._unanswered_stt: asyncio.Task | None = None
         self._playing_until = 0.0  # monotonic time the caller's buffer runs out of bot audio
+        self._silence_task: asyncio.Task | None = None
+        self._heard_at = 0.0  # monotonic time of the caller's last speech start/end (V17)
+        self._reprompts = 0  # since the caller last spoke
+        self._hung_up = False
         self._history: list[dict] = []
         self._system_prompt = ""
         self.conversation_id: uuid.UUID | None = None
@@ -162,13 +211,18 @@ class CallSession:
             greeting = f"Welcome back to {name}. I'm an AI assistant. Let's pick up where we left off: {self._topic}."
         else:
             greeting = f"Hi, you've reached {name}. I'm an AI assistant. How can I help?"
-        self._reply_task = self._spawn(self._speak_greeting(greeting, cache=self._topic is None))
+        self._reply_task = self._spawn(self._speak_fixed(greeting, cache=self._topic is None))
         if get_settings().voice_llm_warmup:
             self._warmup_task = asyncio.create_task(self._warm_up_llm())
+        if self.turn_detection == "vad":
+            self._heard_at = time.monotonic()
+            self._silence_task = asyncio.create_task(self._watch_silence())
 
     async def close(self) -> None:
         if self._warmup_task is not None:
             self._warmup_task.cancel()
+        if self._silence_task is not None:
+            self._silence_task.cancel()
         # on hang-up the transport is already gone; a failing reply task must not skip the
         # rest of the cleanup (STT thread blocked on Google, conversation left open)
         try:
@@ -213,6 +267,8 @@ class CallSession:
         self._on_speech_end()
 
     async def _on_speech_start(self, preroll: bytes) -> None:
+        self._heard_at = time.monotonic()
+        self._reprompts = 0
         if self._bot_active():
             await self._cancel_reply()
             self._playing_until = 0.0
@@ -221,6 +277,7 @@ class CallSession:
         self._turn.push(preroll)
 
     def _on_speech_end(self) -> None:
+        self._heard_at = time.monotonic()
         turn, self._turn = self._turn, None
         if turn is not None:
             self._reply_task = self._spawn(self._handle_turn(turn, time.monotonic()))
@@ -307,6 +364,9 @@ class CallSession:
                 log.info("voice turn %s: %s", self.conversation_id, timings)
                 # may run after hang-up (cancelled by close()), when the socket is closed
                 await self._try_send_event({"type": "latency", **timings})
+        # only reached when the answer was played out, not cut by a barge-in
+        if is_farewell(text):
+            await self._hang_up_after_playback("goodbye")
 
     async def _transcribe(self, turn: TurnTranscriber, earlier: asyncio.Task | None) -> str:
         """Final transcript of `turn`, after the words of an earlier unanswered turn."""
@@ -400,18 +460,50 @@ class CallSession:
         spoken.append(sentence)
         play_ends.append(self._playing_until)
 
-    async def _speak_greeting(self, greeting: str, cache: bool) -> None:
-        await self._send_event({"type": "reply", "text": greeting})
+    async def _speak_fixed(self, text: str, cache: bool = True, history: bool = True) -> None:
+        """A line not written by the LLM: the greeting, or a silence re-prompt/goodbye
+        (`history=False`: saved to the transcript, kept out of the LLM history)."""
+        await self._send_event({"type": "reply", "text": text})
         settings = get_settings()
-        key = (greeting, self.sample_rate, settings.tts_voice, settings.voice_language)
+        key = (text, self.sample_rate, settings.tts_voice, settings.voice_language)
         audio = _greeting_audio.get(key) if cache else None
         if audio is None:
-            audio = await asyncio.to_thread(self._synthesize, greeting, self.sample_rate)
+            audio = await asyncio.to_thread(self._synthesize, text, self.sample_rate)
             if cache:
                 _greeting_audio[key] = audio
         await self._play(audio)
-        self._history.append({"role": "assistant", "content": greeting})
-        await asyncio.to_thread(self._save_message, "assistant", greeting)
+        if history:
+            self._history.append({"role": "assistant", "content": text})
+        await asyncio.to_thread(self._save_message, "assistant", text)
+
+    # --- silence and hang-up (V17) ----------------------------------------------------
+
+    async def _watch_silence(self) -> None:
+        """Runs for the whole call in VAD mode. The re-prompt and goodbye are reply tasks,
+        so caller speech barges in on them like on any answer and resets the count."""
+        while not self._hung_up:
+            await asyncio.sleep(SILENCE_POLL_S)
+            if self._turn is not None or self._bot_active():
+                continue
+            if time.monotonic() - max(self._heard_at, self._playing_until) < SILENCE_REPROMPT_S:
+                continue
+            if self._reprompts < SILENCE_MAX_REPROMPTS:
+                self._reprompts += 1
+                self._reply_task = self._spawn(self._speak_fixed(REPROMPT_TEXT, history=False))
+            else:
+                self._reply_task = self._spawn(self._silence_goodbye())
+
+    async def _silence_goodbye(self) -> None:
+        await self._speak_fixed(SILENCE_GOODBYE_TEXT, history=False)
+        await self._hang_up_after_playback("silence")
+
+    async def _hang_up_after_playback(self, reason: str) -> None:
+        await asyncio.sleep(max(0.0, self._playing_until - time.monotonic()) + HANG_UP_GRACE_S)
+        self._hung_up = True
+        log.info("voice call %s: hanging up (%s)", self.conversation_id, reason)
+        await self._try_send_event({"type": "hangup", "reason": reason})
+        if self._hang_up is not None:
+            await self._hang_up()
 
     async def _warm_up_llm(self) -> None:
         """T2: while the greeting plays, send the prompt prefix every turn starts with

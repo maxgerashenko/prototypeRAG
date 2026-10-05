@@ -98,6 +98,7 @@ short, short spoken-style answers, play a filler ("one moment…") when a tool c
   (off by default, DEC-22, R15).
 - Barge-in: caller speaking stops bot audio immediately.
 - Silence handling: re-prompt after ~6 s, hang up politely after repeated silence.
+- Caller says goodbye ("Thank you. Bye.") → the bot answers, then ends the call.
 - Fallback: transfer to the business's human number (Twilio `<Dial>`) or take a message.
 - End of call → transcript saved to `conversations` → Part 4 summary.
 
@@ -207,7 +208,8 @@ Findings:
   9 pm" — the 500 ms end-silence ended the turn, the reply was cancelled by barge-in when
   the caller continued (works as designed; history keeps both parts). Watch whether
   this happens often → longer `end_silence_ms` costs latency on every turn.
-- **"Thank you. Bye." doesn't end the call** — needs an end-call path (silence/hang-up task).
+- **"Thank you. Bye." doesn't end the call** — needs an end-call path (silence/hang-up task;
+  built 2026-10-05, see V17).
 - **V21 confirmed** in the greeting ("business_name").
 - Barge-in fired 3× with headphones, each when the caller started speaking — no false
   trigger seen; V9 (echo without headphones) still untested.
@@ -248,7 +250,7 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
 | # | Problem | Kind | How to test | Fix idea if it fails |
 |---|---|---|---|---|
 | V16 | Turns with `search_business_info` take ≈ 5 s to the first sentence (1.8 s to emit the tool call, 3.2 s over 5 chunks) — budget is 1.5 s | Real | `latency` events | Filler phrase while the tool runs; fewer/shorter chunks; LM Studio prompt caching; faster model; compare Gemini (step 6) |
-| V17 | Silence re-prompt / hang-up not built yet (task above) | Real | — | — |
+| V17 | Silence re-prompt / hang-up — **fixed in code 2026-10-05**: VAD mode only (phone, `voice-debug.html`), not push-to-talk; 6 s quiet after the bot's audio ends → "Are you still there?", 6 s more → goodbye line, `hangup` event, socket closed (1000). A caller whose last sentence is a farewell (`is_farewell()`, English regex, never on a question) is answered, then hung up on. Re-prompt/goodbye go to the transcript, not the LLM history | Fixed in code | "Test on Mac" below | Farewell by LLM tool (`end_call`) if the regex misses too often or for other languages |
 
 ### Needs Twilio / later stages
 
@@ -284,7 +286,8 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
 - [ ] Twilio live: a Voice SDK browser call through ngrok (mode B), then the trial number (mode A); record latency over Twilio
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
-- [ ] Silence re-prompt (~6 s) and polite hang-up; filler while a tool runs, if latency needs it
+- [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
+- [ ] Filler while a tool runs, if latency needs it
 - [x] Called number / TwiML App → business_id mapping from Postgres (`To` in `businesses.phone_numbers`; Voice SDK `business_id` parameter)
 - [ ] Call transfer + take-a-message fallback
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
@@ -300,7 +303,14 @@ Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers).
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
 - [ ] **Real call through the React app** (`/web/`, push-to-talk): STT/TTS + LM Studio end
-  to end — the open task above
+  to end — the open task above. Steps:
+  - [ ] `gcloud auth application-default login` (Speech-to-Text and Text-to-Speech
+    enabled on the project)
+  - [ ] `lms ps` shows `google/gemma-4-12b` and the nomic embedding model loaded
+  - [ ] `docker compose up -d postgres`, then `uv run alembic upgrade head`; use a
+    business that's been crawled and indexed
+  - [ ] `npm run build` in `web/`, then `uv run uvicorn app.main:app`
+  - [ ] Open `/web/` and hold to talk: the reply is heard and the latency line looks sane
 - [ ] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
@@ -318,6 +328,16 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **Call source icons**: `uv run pytest tests/test_conversations.py` (needs Postgres;
   not run in the cloud session), then make one Twilio call and one `/web/` call: the
   history shows a green phone for the Twilio one and a blue globe for the web one
+- [ ] **V17 silence** (`voice-debug.html`, VAD mode): stay quiet after the greeting →
+  "Are you still there?" after ~6 s, then the goodbye line, played to the end, then the
+  call closes ("call ended by the assistant: silence"). Speak after the re-prompt → answered,
+  and the next silence re-prompts again instead of hanging up. Push-to-talk app: no re-prompt
+- [ ] **V17 goodbye** (`/web/`, push-to-talk): say "Thank you. Bye." → the bot's goodbye
+  plays to the end (not cut by the socket close), then the "Call ended" screen without a
+  "closed by the server" notice; "Bye, and what about Sunday?" keeps the call open.
+  Over Twilio (`ws.py` closes the Media Stream, which ends the call): check the goodbye
+  isn't cut — Twilio may drop buffered audio on close; if so, wait for a `mark` event
+  instead of the estimated playback end
 - [ ] **Voice session tests that need LM Studio** (embeddings for `run_tool`):
   `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
   In cloud sessions the first two fail with `APIConnectionError` and

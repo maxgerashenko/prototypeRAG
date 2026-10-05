@@ -40,7 +40,8 @@ export type VoiceEvent =
   | { type: "latency"; [metric: string]: string | number }
   | { type: "error"; message: string }
   | { type: "conversation_id"; id: string }
-  | { type: "no_speech" }; // push-to-talk turn with nothing said (or noise the VAD took for speech)
+  | { type: "no_speech" } // push-to-talk turn with nothing said (or noise the VAD took for speech)
+  | { type: "hangup"; reason: "goodbye" | "silence" }; // the server ends the call (V17); the socket closes next
 
 // --- voice app (app/api/businesses.py, app/api/conversations.py) ---
 
