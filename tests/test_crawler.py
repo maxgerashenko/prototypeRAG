@@ -428,6 +428,27 @@ def test_delete_pages_not_in_cascades_to_chunks(business_id):
     assert remaining_chunks == []
 
 
+def test_rechunk_page_keeps_testimonials_for_the_summary(business_id, homepage_html: str):
+    """Review finding on milestone 1: cut testimonials were discarded; now stored on the
+    page (plan 07 §6) -- also for a non-retrievable page -- and never in its chunks."""
+    main_markdown = clean_page(homepage_html).main_markdown
+    with tenant_session(business_id) as s:
+        page, _ = upsert_page(s, business_id, "https://x/home", "Home", main_markdown, "h")
+        run._rechunk_page(s, business_id, page, "Bathhouse")
+        chunk_texts = [c.text for c in s.scalars(select(Chunk).where(Chunk.page_id == page.id)).all()]
+        stored = list(page.testimonials)
+
+        page.retrievable = False
+        run._rechunk_page(s, business_id, page, "Bathhouse")
+        hidden_chunks = s.scalars(select(Chunk).where(Chunk.page_id == page.id)).all()
+
+    assert len(stored) == 1 and "David R." in stored[0]
+    assert chunk_texts and not any("David R." in t for t in chunk_texts)
+    assert hidden_chunks == []
+    with tenant_session(business_id) as s:
+        assert s.get(Page, page.id).testimonials == stored  # persisted, not only in memory
+
+
 def test_profile_placeholders_become_null_and_title_gives_fallback_name():
     from app.ingest.profile import _none_if_placeholder, name_from_title
 
@@ -442,6 +463,14 @@ def test_profile_placeholders_become_null_and_title_gives_fallback_name():
     assert name_from_title("Washed — Born Again — Bathhouse") == "Washed"
     assert name_from_title("Plain Name") == "Plain Name"
     assert name_from_title(None) is None and name_from_title("  ") is None
+
+
+def test_placeholder_business_names():
+    from app.ingest.profile import is_placeholder_name
+
+    for name in (None, "", "  ", "(pending)", "Pending", "business_name", "Name", "null", "N/A", "unknown"):
+        assert is_placeholder_name(name), name
+    assert not is_placeholder_name("Bathhouse")
 
 
 # --- identity.py ----------------------------------------------------------------------

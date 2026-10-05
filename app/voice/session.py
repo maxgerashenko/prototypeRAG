@@ -31,11 +31,12 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Literal
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, Conversation, Message, message_order
+from app.ingest.profile import is_placeholder_name
 from app.llm import get_async_chat_client
 from app.rag.prompt import format_profile
 from app.voice import tts
@@ -101,6 +102,8 @@ class CallSession:
         self._vad = TurnDetector(sample_rate=sample_rate)
         self._turn: TurnTranscriber | None = None
         self._reply_task: asyncio.Task | None = None
+        # STT of a turn a barge-in cut off before it was answered; its words lead the next turn
+        self._unanswered_stt: asyncio.Task | None = None
         self._playing_until = 0.0  # monotonic time the caller's buffer runs out of bot audio
         self._history: list[dict] = []
         self._system_prompt = ""
@@ -120,7 +123,12 @@ class CallSession:
         self._reply_task = self._spawn(self._speak_greeting(greeting))
 
     async def close(self) -> None:
-        await self._cancel_reply()
+        # on hang-up the transport is already gone; a failing reply task must not skip the
+        # rest of the cleanup (STT thread blocked on Google, conversation left open)
+        try:
+            await self._cancel_reply()
+        except Exception:
+            log.exception("voice reply failed during close")
         if self._turn is not None:
             self._turn.cancel()
             self._turn = None
@@ -207,8 +215,15 @@ class CallSession:
     # --- one turn -------------------------------------------------------------------
 
     async def _handle_turn(self, turn: TurnTranscriber, speech_end: float) -> None:
+        earlier, self._unanswered_stt = self._unanswered_stt, None
+        stt = asyncio.ensure_future(self._transcribe(turn, earlier))
         try:
-            text = await asyncio.to_thread(turn.finish)
+            # shielded: a barge-in here ("What if I want to come?" … "Today at 9 pm") must
+            # not lose these words, so they are carried into the next turn
+            text = await asyncio.shield(stt)
+        except asyncio.CancelledError:
+            self._unanswered_stt = stt
+            raise
         except RuntimeError:
             log.exception("STT failed")
             return
@@ -230,7 +245,19 @@ class CallSession:
             await asyncio.shield(asyncio.to_thread(self._save_turn, text, reply))
             timings["total_ms"] = _ms(speech_end)
             log.info("voice turn %s: %s", self.conversation_id, timings)
-            await self._send_event({"type": "latency", **timings})
+            # may run after hang-up (cancelled by close()), when the socket is closed
+            await self._try_send_event({"type": "latency", **timings})
+
+    async def _transcribe(self, turn: TurnTranscriber, earlier: asyncio.Task | None) -> str:
+        """Final transcript of `turn`, after the words of an earlier unanswered turn."""
+        texts = []
+        if earlier is not None:
+            try:
+                texts.append(await earlier)
+            except RuntimeError:
+                log.exception("STT failed")
+        texts.append(await asyncio.to_thread(turn.finish))
+        return " ".join(t for t in texts if t)
 
     async def _reply(self, text: str, spoken: list[str], speech_end: float, timings: dict) -> None:
         messages = [
@@ -335,7 +362,14 @@ class CallSession:
             session.add(conversation)
             session.flush()
             self.conversation_id = conversation.id
-            now = datetime.now(ZoneInfo(business.timezone)).strftime("%A %Y-%m-%d %H:%M")
+            # B6: ZoneInfoNotFoundError is a LookupError, which browser_ws reports as
+            # 4404 "unknown business" -- a bad timezone must not end the call.
+            try:
+                tz = ZoneInfo(business.timezone)
+            except (ZoneInfoNotFoundError, ValueError):
+                log.warning("business %s: bad timezone %r, using UTC", self.business_id, business.timezone)
+                tz = ZoneInfo("UTC")
+            now = datetime.now(tz).strftime("%A %Y-%m-%d %H:%M")
             self._system_prompt = (
                 f"{VOICE_SYSTEM_PROMPT}\n\nCurrent local time at the business: {now}\n\n{format_profile(profile)}"
             )
@@ -344,8 +378,7 @@ class CallSession:
             # (app/ingest/run.py) -- preferred over business_profile.name, which still
             # holds the old LLM-extracted "Bathhouse Williamsburg" (profile table is
             # retired once the facts/location card replaces it, plan 07 §5.5).
-            placeholder = {"business_name", "(pending)", "pending", ""}
-            if business.name and business.name.strip().lower() not in placeholder:
+            if not is_placeholder_name(business.name):
                 return business.name
             return (profile.name if profile and profile.name else None) or business.name
 

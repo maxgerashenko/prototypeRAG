@@ -33,8 +33,9 @@ from app.db import tenant_session
 from app.db.models import Business, Location, Page
 from app.ingest.chunk import ChunkDraft
 from app.ingest.clean import content_hash as sha256_hash
+from app.ingest.profile import is_placeholder_name
 
-ORGANIZER_VERSION = "2"  # bump to force re-organizing every page regardless of content_hash
+ORGANIZER_VERSION = "3"  # bump to force re-organizing every page regardless of content_hash (2: fill pages.testimonials; 3: stricter page-type rules)
 
 # --- site chrome dedupe (K2) ---------------------------------------------------------
 
@@ -283,9 +284,8 @@ _TESTIMONIAL_SECTION_RE = re.compile(
 def cut_testimonials(markdown: str) -> tuple[str, list[str]]:
     """Cut review/testimonial blocks (K6) out of `markdown` before it's chunked, so
     opinions and customer names don't end up in retrievable chunks. Returns (cleaned
-    text, cut blocks) -- the cut text isn't stored anywhere yet (business_summaries /
-    summary.py, which plan 07 §6 says should receive it, is a later milestone); callers
-    that don't need it can discard the second element."""
+    text, cut blocks); run.py stores the cut blocks in `pages.testimonials` for
+    summary.py (plan 07 §6)."""
     cut: list[str] = []
 
     def _replace(m: re.Match) -> str:
@@ -436,7 +436,7 @@ def _upsert_locations(
         # single-location business with no footer address list) -- still must end up
         # with exactly one default location, named after the business itself.
         business = session.get(Business, business_id)
-        name = (business.name if business and business.name not in (None, "", "(pending)") else None) or "Main"
+        name = (business.name if business and not is_placeholder_name(business.name) else None) or "Main"
         fallback = Location(business_id=business_id, name=name, url=start_url, is_default=True)
         session.add(fallback)
         session.flush()

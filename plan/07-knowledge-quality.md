@@ -419,10 +419,14 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
   and assert pages, chrome pseudo-page, locations and chunks. The chrome pseudo-page was
   deleted by `delete_pages_not_in` right after creation — caught only by inspecting the
   DB, no test covered it
-- [ ] **Throwaway-DB procedure:** `CREATE DATABASE … TEMPLATE app` with open connections
+- [x] **Throwaway-DB procedure:** `CREATE DATABASE … TEMPLATE app` with open connections
   to `app` crashed the Postgres container once (it recovered, no data lost). Write down
   the safe way for migration round-trip tests (empty DB + `alembic upgrade head` +
   fixture) in the README / dev notes and never template from the live dev DB
+  - Done: README "Throwaway database". Root cause reproduced: a new connection to `app`
+    (the compose healthcheck's `pg_isready`) blocks behind the template copy's wait,
+    the healthcheck times out, and the postmaster crash-restarts the whole server. The
+    README gives an empty-schema DB (default) and a `pg_dump` copy when real rows are needed
 - [x] **16 pages typed `other` are retrievable** (campaign/test URLs like `/ag1-*`,
   `/ldv-iush`, plus `/restaurant`, `/rewards`, `/micro/membership`, `/home`): add the
   LLM page-type fallback (or stricter rules) so test/landing pages are excluded
@@ -430,12 +434,14 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
     `/home` and campaign/test slugs (`ag1-*`, `ai-search*`, `ldv-*`, `micro/*`) →
     `landing` (not retrievable); `/restaurant`, `/rewards` → `service`; `/creators`,
     `/partnerships` → `about`; slugs with a year (`aufguss-event-2026`) → `event`. No
-    pilot sitemap URL is `other` any more (test). `ORGANIZER_VERSION` bumped so the next
+    pilot sitemap URL is `other` any more (test). `ORGANIZER_VERSION` bumped (to 3) so the next
     run re-types existing pages. The LLM fallback stays the plan for a new business
 - [ ] **Testimonials discarded:** `cut_testimonials()` returns the cut text but nothing
   stores it — persist it for `summary.py` (§6) instead of re-deriving it
-- [ ] **Duplicate placeholder check:** `app/voice/session.py:_load_business` has its own
-  placeholder-name set; reuse `profile._none_if_placeholder` (one rule in one place)
+- [x] **Duplicate placeholder check:** `app/voice/session.py:_load_business` has its own
+  placeholder-name set; reuse `profile._none_if_placeholder` (one rule in one place).
+  Done 2026-10-05: `profile.is_placeholder_name()` is the one rule, used by `session.py`,
+  `api/businesses.py`, `organize.py` and `run.py` (migration 0002 keeps its frozen copy)
 
 ### Stage 2 — cloud, one pilot
 
