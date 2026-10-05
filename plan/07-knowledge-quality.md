@@ -455,8 +455,9 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
     pilot sitemap URL is `other` any more (test). `ORGANIZER_VERSION` bumped (to 3) so the next
     run re-types existing pages. The LLM fallback stays the plan for a new business
 - [x] **Testimonials discarded:** `cut_testimonials()` returns the cut text but nothing
-  stores it — persist it for `summary.py` (§6) instead of re-deriving it
-  - Done: `pages.testimonials` (migration 0004), read by `summary.py`
+  stores it — persist it for `summary.py` (§6) instead of re-deriving it.
+  Done (PR #11): `run.py` keeps them in `pages.testimonials` (migration 0004); read by
+  `summary.py` (PR #28)
 - [x] **Duplicate placeholder check:** `app/voice/session.py:_load_business` has its own
   placeholder-name set; reuse `profile._none_if_placeholder` (one rule in one place).
   Done 2026-10-05: `profile.is_placeholder_name()` is the one rule, used by `session.py`,
