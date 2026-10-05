@@ -43,6 +43,8 @@ uv run python -m app.rag.index --business-id <id>                               
 uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml
 ```
 
+Questions to ask by hand, with expected answers: [TEST_QUESTIONS.md](TEST_QUESTIONS.md).
+
 Then open a page:
 
 | Page | URL (uvicorn, built pages) | Needs |
