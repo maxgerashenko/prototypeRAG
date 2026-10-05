@@ -1,6 +1,33 @@
-# Stage 1: only Postgres + pgvector runs in Docker (DEC-28).
-# App, crawler and LM Studio run natively. At stage-1 exit: + api + crawler services.
+# Stage 1 day to day: only Postgres + pgvector runs in Docker (DEC-28) --
+#   docker compose up -d --wait            -> postgres only
+# Stage-1 exit (step 7): app and crawler from the Docker image, same env vars as in cloud --
+#   docker compose --profile app up -d --build --wait   -> + migrate (one-off) + api on :8000
+#   docker compose run --rm crawler --url <site>        -> crawler, same image
+# LM Studio stays native on the Mac (R7); containers reach it via host.docker.internal.
 name: prototyperag   # Compose project names must be lowercase
+
+x-app: &app
+  build: .
+  image: prototyperag-api
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    # Overrides .env's localhost values: inside a container localhost is the container.
+    # To try Gemini (step 6) in Compose, set these to the Gemini URLs instead.
+    DATABASE_URL: postgresql+psycopg://app:app@postgres:5432/app
+    LLM_BASE_URL: http://host.docker.internal:1234/v1
+    EMBED_BASE_URL: http://host.docker.internal:1234/v1
+    DEV_RELOAD: "false"   # local-only live reload; never in a container
+    # Google STT/TTS: ADC from `gcloud auth application-default login`, mounted below
+    GOOGLE_APPLICATION_CREDENTIALS: /gcloud/application_default_credentials.json
+  volumes:
+    - ${HOME}/.config/gcloud:/gcloud:ro
+  extra_hosts:
+    - "host.docker.internal:host-gateway"   # built in on Docker Desktop; needed on Linux
+  depends_on:
+    postgres:
+      condition: service_healthy
 
 services:
   postgres:
@@ -19,6 +46,34 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+
+  migrate:   # one-off: alembic upgrade head, then exits
+    <<: *app
+    profiles: [app]
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  api:
+    <<: *app
+    profiles: [app]
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  crawler:   # `docker compose run --rm crawler --url https://...` (args go to app.ingest.run)
+    <<: *app
+    profiles: [crawler]
+    entrypoint: ["python", "-m", "app.ingest.run"]
+    command: ["--help"]
 
 volumes:
   pgdata:

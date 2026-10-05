@@ -126,7 +126,7 @@ while the crawler is httpx-only it can run from the API image. Stage 2: Cloud Ru
 - [x] (2026-10-04, done early) Profile `name` stored as the literal "business_name" and `businesses.name` left "(pending)" on the pilot — voice greets with it (found in step 4, [03-voice-channel.md](03-voice-channel.md) V21). Fixed: placeholder echoes (`"business_name"`, the field's own name, "null", "n/a", "unknown") become null in `profile.py`; `run.py` replaces the "(pending)" name with the extracted name, else the start page title's head. Pilot row corrected by hand
 - [x] (Stage 1 tuning T3) Set `businesses.timezone` — stayed `UTC`, so "are you open now" was wrong (V22). Done (2026-10-05) as part of the knowledge-quality block (DEC-37, [07-knowledge-quality.md](07-knowledge-quality.md) §3): `timezone.py` asks the LLM for each location's IANA zone from its address (default location falls back to the profile address), validates it with `zoneinfo`, fills only empty `locations.timezone` (owner corrections stick), and copies the default location's to `businesses.timezone`. Unit-tested with a stubbed LLM; **not yet run against the live local model or the pilot**
 - [ ] Knowledge quality (before step 5): crawl priority + blog cap, keep site chrome (footer) for extraction, organize step, facts, summary — [07-knowledge-quality.md](07-knowledge-quality.md) §9
-- [ ] Stage-1 exit: `Dockerfile.crawler` — only if Crawl4AI was added by then (DEC-36)
+- [x] Stage-1 exit: crawler in Docker — Crawl4AI wasn't added (DEC-36), so no `Dockerfile.crawler`: it runs from the API image as the Compose `crawler` service (`docker compose run --rm crawler --url …`); a separate image only once Crawl4AI is needed
 
 ## Risks / notes
 

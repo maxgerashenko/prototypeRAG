@@ -310,6 +310,12 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
   In cloud sessions the first two fail with `APIConnectionError` and
   `test_barge_in_mid_reply_keeps_only_what_was_spoken` hangs (same on main)
+- [ ] **Step 7, everything in Compose** (README → "Run in Docker"):
+  `docker compose --profile app up -d --build --wait`, then a real push-to-talk call at
+  `http://localhost:8000/` (reaches LM Studio via `host.docker.internal`, ADC mounted from
+  `~/.config/gcloud`), `/web/chat.html`, and one crawl with `docker compose run --rm crawler`.
+  Built and smoke-tested in a cloud session (migrate, `/health`, `/web/`, crawler `--help`),
+  without LM Studio or ADC
 
 ## Notes
 
