@@ -36,6 +36,7 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, Conversation, Message, message_order
+from app.ingest.profile import is_placeholder_name
 from app.llm import get_async_chat_client
 from app.rag.prompt import format_profile
 from app.voice import tts
@@ -344,8 +345,7 @@ class CallSession:
             # (app/ingest/run.py) -- preferred over business_profile.name, which still
             # holds the old LLM-extracted "Bathhouse Williamsburg" (profile table is
             # retired once the facts/location card replaces it, plan 07 §5.5).
-            placeholder = {"business_name", "(pending)", "pending", ""}
-            if business.name and business.name.strip().lower() not in placeholder:
+            if not is_placeholder_name(business.name):
                 return business.name
             return (profile.name if profile and profile.name else None) or business.name
 
