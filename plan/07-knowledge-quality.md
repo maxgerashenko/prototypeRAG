@@ -419,10 +419,14 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
   and assert pages, chrome pseudo-page, locations and chunks. The chrome pseudo-page was
   deleted by `delete_pages_not_in` right after creation — caught only by inspecting the
   DB, no test covered it
-- [ ] **Throwaway-DB procedure:** `CREATE DATABASE … TEMPLATE app` with open connections
+- [x] **Throwaway-DB procedure:** `CREATE DATABASE … TEMPLATE app` with open connections
   to `app` crashed the Postgres container once (it recovered, no data lost). Write down
   the safe way for migration round-trip tests (empty DB + `alembic upgrade head` +
   fixture) in the README / dev notes and never template from the live dev DB
+  - Done: README "Throwaway database". Root cause reproduced: a new connection to `app`
+    (the compose healthcheck's `pg_isready`) blocks behind the template copy's wait,
+    the healthcheck times out, and the postmaster crash-restarts the whole server. The
+    README gives an empty-schema DB (default) and a `pg_dump` copy when real rows are needed
 - [ ] **16 pages typed `other` are retrievable** (campaign/test URLs like `/ag1-*`,
   `/ldv-iush`, plus `/restaurant`, `/rewards`, `/micro/membership`, `/home`): add the
   LLM page-type fallback (or stricter rules) so test/landing pages are excluded
