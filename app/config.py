@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     # Gemini needs or allows it (it costs one extra request per call) is checked in stage 2.
     voice_llm_warmup: bool = True
 
+    # Twilio (modes A/B, plan/03-voice-channel.md). No phone number needed for mode B (DEC-34):
+    # the Voice SDK page calls the TwiML App, whose voice URL is <public_base_url>/twilio/voice.
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""  # checks X-Twilio-Signature and signs the media stream token
+    twilio_api_key_sid: str = ""  # API key + secret sign Voice SDK access tokens (mode B)
+    twilio_api_key_secret: str = ""
+    twilio_twiml_app_sid: str = ""
+    # Public URL Twilio reaches us at (the ngrok URL locally, the Cloud Run URL in stage 2).
+    # Webhook signatures cover this URL, and the media stream URL is built from it. Empty:
+    # derived from the request (Host + X-Forwarded-Proto).
+    public_base_url: str = ""
+    # Never turn off when the API is reachable from the internet (ngrok counts); only for
+    # replaying requests by hand (curl) without a signature.
+    twilio_validate_signature: bool = True
+
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 
 
