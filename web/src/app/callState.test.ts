@@ -195,6 +195,13 @@ describe("errors and endings", () => {
     expect(ours.endReason).toBe(null);
     expect(callReducer(ours, { type: "closed", code: 1, reason: "x", byServer: true, now: T0 })).toBe(ours);
   });
+  it("a server hangup event (goodbye, silence) ends the call normally; the close after it changes nothing", () => {
+    const s = run([ev({ type: "reply", text: "Goodbye!" }), ev({ type: "hangup", reason: "goodbye" }, T0 + 12_000)], live());
+    expect(s.phase).toBe("ended");
+    expect(s.endedAt).toBe(T0 + 12_000);
+    expect(s.botState).toBe(null);
+    expect(callReducer(s, { type: "closed", code: 1000, reason: "call ended", byServer: true, now: T0 + 13_000 })).toBe(s);
+  });
   it("reset starts over", () => {
     expect(callReducer(live(), { type: "reset" })).toBe(initialCallState);
   });

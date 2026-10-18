@@ -115,6 +115,8 @@ Trigger: first business in a regulated market / before go-live.
 ## Tasks
 
 - [ ] RLS migration + `app_user` role + isolation tests
+- [ ] RLS-exempt lookups that run before the tenant is known: dialled number → business and
+      CallSid → conversation in `app/voice/twilio_routes.py` (DEC-43), `/businesses` (DEC-42)
 - [ ] Owner login + onboarding flow
 - [ ] Usage metering per conversation → cost per business report
 - [ ] Load test (incl. cold start during ringing) → concurrency / max-instances

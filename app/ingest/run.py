@@ -6,7 +6,9 @@ chrome kept apart) -> store every page -> ORGANIZE (dedupe chrome into one pseud
 detect locations from site content, assign page_type/location/retrievable per page,
 idempotent on re-crawl) -> CHUNK only the pages organize says changed, tagged with
 their location -> delete pages no longer linked -> profile extraction -> timezone per
-location (V22). Indexing (embedding) is a separate step: `python -m app.rag.index`.
+location (V22) -> business summary (plan 07 §6, only when its source pages changed).
+`--only summary` re-runs just the summary for an already-crawled site. Indexing
+(embedding) is a separate step: `python -m app.rag.index`.
 """
 
 import argparse
@@ -41,6 +43,7 @@ from app.ingest.profile import (
     name_from_title,
 )
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
+from app.ingest.summary import summarize_business
 from app.ingest.timezone import assign_timezones
 
 
@@ -304,6 +307,15 @@ def crawl_business(
             except Exception as exc:
                 print(f"timezone lookup failed: {exc}")
 
+        # plan 07 §6: last, after organize stored the testimonials it reads
+        summary_status = "skipped"
+        if extract_profile:
+            try:
+                summary_status = summarize_business(business_id)
+            except Exception as exc:
+                print(f"summary failed: {exc}")
+                summary_status = "failed"
+
         return {
             "pages_crawled": pages_crawled,
             "pages_changed": pages_changed,
@@ -312,6 +324,7 @@ def crawl_business(
             "locations_found": organize_result.locations_found,
             "profile_extracted": profile_extracted,
             "timezones_set": timezones_set,
+            "summary": summary_status,
         }
     finally:
         client.close()
@@ -323,9 +336,14 @@ def main() -> None:
     parser.add_argument("--business-id", type=uuid.UUID, default=None)
     parser.add_argument("--max-pages", type=int, default=200)
     parser.add_argument("--no-profile", action="store_true")
+    parser.add_argument("--only", choices=["summary"], help="re-run one step on the stored pages, no crawl")
+    parser.add_argument("--force", action="store_true", help="with --only summary: regenerate even if unchanged")
     args = parser.parse_args()
 
     business_id = resolve_business(args.url, args.business_id)
+    if args.only == "summary":
+        print(f"summary: {summarize_business(business_id, force=args.force)}")
+        return
 
     summary = crawl_business(
         business_id, args.url, max_pages=args.max_pages, extract_profile=not args.no_profile
