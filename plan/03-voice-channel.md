@@ -306,6 +306,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
 - [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
   work, does the mic stream?
+- [ ] **LLM call log** (`app.llm` lines in the uvicorn output): a `/chat/stream` question
+  and a voice turn each log `llm chat stream … ttft_ms=… prompt_tokens=… completion_tokens=…`.
+  No token counts means LM Studio ignores `stream_options.include_usage`; an error on
+  every stream means it rejects it — then drop the injection in `app/llm.py`
 - [ ] **Voice session tests that need LM Studio** (embeddings for `run_tool`):
   `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
   In cloud sessions the first two fail with `APIConnectionError` and

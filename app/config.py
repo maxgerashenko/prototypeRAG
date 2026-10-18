@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Gemini needs or allows it (it costs one extra request per call) is checked in stage 2.
     voice_llm_warmup: bool = True
 
+    # level of the `app.*` loggers: INFO logs one line per LLM call (app/llm.py) and the
+    # voice turn timings; DEBUG adds the full LLM prompt and response
+    log_level: str = "INFO"
+
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 
 

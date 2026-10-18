@@ -1,5 +1,6 @@
 """FastAPI app. Twilio voice routes and the dashboard are added in later steps."""
 
+import logging
 import threading
 from contextlib import asynccontextmanager
 
@@ -16,6 +17,16 @@ from app.config import get_settings
 from app.db import engine
 from app.voice import google_auth, tts
 from app.voice.browser_ws import router as voice_browser_router
+
+
+# uvicorn configures only its own loggers; without a handler here every `app.*` INFO
+# line (LLM calls, voice turn timings) is dropped. Not root: httpx/openai stay quiet.
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+_app_log = logging.getLogger("app")
+if not _app_log.handlers:
+    _app_log.addHandler(_log_handler)
+_app_log.setLevel(get_settings().log_level.upper())
 
 
 @asynccontextmanager
