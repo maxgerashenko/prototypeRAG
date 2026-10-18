@@ -57,6 +57,7 @@ export interface Business {
   domain: string | null; // website host without "www." (DEC-37)
   conversation_count: number; // conversations with at least one user message
   default_location: Location | null;
+  phone_numbers: string[]; // dialled numbers that reach this business (businesses.phone_numbers)
 }
 
 /** Calls nobody spoke in are not listed. `preview` already starts with "You: " when the caller spoke last. */
@@ -91,6 +92,19 @@ async function getJson<T>(url: string): Promise<T> {
     throw new Error(`HTTP ${res.status}: ${res.statusText}`);
   }
   return res.json() as Promise<T>;
+}
+
+/** The main Twilio number (app/voice/twilio_routes.py); null when TWILIO_PHONE_NUMBER isn't set. */
+export const getMainNumber = () => getJson<{ number: string | null }>("/twilio/number");
+
+/** Point the main number at this business (it leaves any other business), or take it off. */
+export async function setMainNumber(businessId: string, assign: boolean): Promise<void> {
+  const res = await fetch(`/businesses/${encodeURIComponent(businessId)}/main-number`, {
+    method: assign ? "POST" : "DELETE",
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  }
 }
 
 export const listBusinesses = () => getJson<Business[]>("/businesses");

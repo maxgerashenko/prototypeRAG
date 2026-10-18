@@ -1,8 +1,8 @@
 import { useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
-import { ChatIcon, CheckIcon, ChevronRight, MicIcon, PhoneIcon, SearchIcon } from "./icons";
-import { chatsLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
+import { ChatIcon, CheckIcon, ChevronRight, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
+import { chatsLabel, fmtClock, fmtPhone, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
 
 const RECENT = 3;
 
@@ -18,6 +18,8 @@ interface Props {
   onOpen: (bizId: string, convoId: string) => void;
   onSeeAll: (bizId: string) => void;
   onCall: (bizId: string) => void;
+  /** The main Twilio number (shown as the title); null keeps the plain header. */
+  mainNumber: string | null;
   onRetry: () => void;
   onDismissBanner: () => void;
 }
@@ -28,6 +30,7 @@ export function SelectScreen(p: Props) {
   const all = p.businesses.data ?? [];
   const items = all.filter((b) => b.id === p.selId || matchesQuery(b, p.query));
   const selBiz = all.find((b) => b.id === p.selId) ?? null;
+  const holder = p.mainNumber ? all.find((b) => b.phone_numbers.includes(p.mainNumber!)) ?? null : null;
 
   function scrollToCard(id: string) {
     const list = listRef.current;
@@ -46,14 +49,33 @@ export function SelectScreen(p: Props) {
 
   return (
     <div className="screen rise" data-screen="select">
-      <div className="sel-head">
-        <div className="eyebrow">
-          <MicIcon />
-          Voice assistant
+      {p.mainNumber ? (
+        <div className="sel-head">
+          <div className="eyebrow">
+            <PhoneIcon size={16} />
+            Call by phone
+          </div>
+          <h1>
+            <a className="num-link" href={`tel:${p.mainNumber}`} aria-label={`Call ${p.mainNumber}`}>
+              {fmtPhone(p.mainNumber)}
+            </a>
+          </h1>
+          <p data-testid="num-note">
+            {holder ? <>Calls to this number reach <strong>{holder.name}</strong>. </> : "No business has this number yet. "}
+            Pick a business below to point the number at it. On a phone, tap the number to call; the
+            button at the bottom calls from this browser.
+          </p>
         </div>
-        <h1>Talk about a business, out loud</h1>
-        <p>Pick a business and call the assistant. Every call is saved as a chat you can read later.</p>
-      </div>
+      ) : (
+        <div className="sel-head">
+          <div className="eyebrow">
+            <MicIcon />
+            Voice assistant
+          </div>
+          <h1>Talk about a business, out loud</h1>
+          <p>Pick a business and call the assistant. Every call is saved as a chat you can read later.</p>
+        </div>
+      )}
 
       {p.banner && (
         <div className="banner" role="alert">
@@ -99,6 +121,12 @@ export function SelectScreen(p: Props) {
                 <div className="biz-text">
                   <div className="biz-name ellipsis">{b.name}</div>
                   <div className="biz-sub">{hostOf(b)} · {countLabel}</div>
+                  {b.phone_numbers.length > 0 && (
+                    <div className="biz-num" data-testid="biz-num">
+                      <PhoneIcon size={12} />
+                      <span className="ellipsis">{b.phone_numbers.map(fmtPhone).join(", ")}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="radio">{on && <CheckIcon />}</div>
               </button>
@@ -150,7 +178,7 @@ export function SelectScreen(p: Props) {
         <div className="call-wrap">
           {selBiz && <div className="halo" />}
           <button className="call-btn" disabled={!selBiz} onClick={() => selBiz && p.onCall(selBiz.id)}>
-            <PhoneIcon size={22} />
+            <GlobeIcon size={22} />
             <span className="ellipsis">{selBiz ? `Call about ${selBiz.name}` : "Select a business to call"}</span>
           </button>
         </div>

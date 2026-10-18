@@ -82,6 +82,40 @@ test.describe("1 · pick a business", () => {
     await expect(page.locator(".halo")).toHaveCount(0);
   });
 
+  test("the main Twilio number is the title, tappable to call, and moves to the picked business", async ({ page }) => {
+    const N = "+15550001234";
+    const init = data();
+    init.businesses = init.businesses!.map((b) => (b.id === "b1" ? { ...b, phone_numbers: [N] } : b));
+    const api = await openApp(page, { ...init, mainNumber: N });
+    const link = page.getByRole("link", { name: `Call ${N}` });
+    await expect(link).toHaveText("+1 (555) 000-1234");
+    await expect(link).toHaveAttribute("href", `tel:${N}`);
+    await expect(page.getByTestId("num-note")).toContainText("Calls to this number reach Corner Bakery.");
+    await expect(page.getByTestId("biz-num")).toHaveCount(1);
+    await expect(card(page, "Corner Bakery").getByTestId("biz-num")).toHaveText("+1 (555) 000-1234");
+
+    await pick(page, "Harbor Auto Repair"); // picking assigns the number
+    await expect(page.getByTestId("num-note")).toContainText("Calls to this number reach Harbor Auto Repair.");
+    await expect(card(page, "Harbor Auto Repair").getByTestId("biz-num")).toHaveText("+1 (555) 000-1234");
+    await expect(page.getByTestId("biz-num")).toHaveCount(1);
+    expect(api.requests).toContain("POST /businesses/b2/main-number");
+
+    await pick(page, "Harbor Auto Repair"); // unselecting keeps the number where it is
+    await pick(page, "Corner Bakery");
+    await expect(page.getByTestId("num-note")).toContainText("reach Corner Bakery.");
+    expect(api.requests.filter((r) => r.startsWith("POST"))).toEqual([
+      "POST /businesses/b2/main-number", "POST /businesses/b1/main-number",
+    ]);
+  });
+
+  test("no number: the plain header, and picking assigns nothing", async ({ page }) => {
+    const api = await openApp(page);
+    await expect(page.getByRole("heading", { name: "Talk about a business, out loud" })).toBeVisible();
+    await pick(page, "Corner Bakery");
+    await expect(page.getByTestId("biz-num")).toHaveCount(0);
+    expect(api.requests.some((r) => r.includes("main-number"))).toBe(false);
+  });
+
   test("search filters by name or host; no-match message", async ({ page }) => {
     await openApp(page);
     const search = page.getByRole("textbox", { name: "Search businesses" });

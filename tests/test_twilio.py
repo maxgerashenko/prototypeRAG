@@ -71,6 +71,72 @@ def _stream_params(twiml: str) -> tuple[str, dict]:
     return stream.get("url"), {p.get("name"): p.get("value") for p in stream.findall("Parameter")}
 
 
+# --- main number: GET /twilio/number, POST/DELETE /businesses/{id}/main-number ------
+
+@pytest.fixture
+def main_number(settings, monkeypatch):
+    """`settings` plus TWILIO_PHONE_NUMBER=NUMBER, also for app/api/businesses.py."""
+    from app.api import businesses
+    s = settings.model_copy(update={"twilio_phone_number": NUMBER})
+    monkeypatch.setattr(twilio_routes, "get_settings", lambda: s)
+    monkeypatch.setattr(businesses, "get_settings", lambda: s)
+    return s
+
+
+@pytest.fixture
+def other_business():
+    bid = uuid.uuid4()
+    with tenant_session(bid) as s:
+        s.add(Business(id=bid, name="Yak Yoga", phone_numbers=["+15557770000"]))
+    yield bid
+    with tenant_session(bid) as s:
+        s.execute(delete(Business).where(Business.id == bid))
+
+
+def _phones(bid):
+    with tenant_session(bid) as s:
+        return s.scalar(select(Business.phone_numbers).where(Business.id == bid))
+
+
+def test_main_number_endpoint(settings, main_number, monkeypatch):
+    client = TestClient(app)
+    assert client.get("/twilio/number").json() == {"number": NUMBER}
+    monkeypatch.setattr(twilio_routes, "get_settings", lambda: settings)  # not set
+    assert client.get("/twilio/number").json() == {"number": None}
+
+
+def test_assign_main_number_moves_it_and_routes_calls(main_number, business, other_business):
+    client = TestClient(app)  # `business` starts with NUMBER
+    r = client.post(f"/businesses/{other_business}/main-number")
+    assert r.status_code == 200 and r.json()["number"] == NUMBER
+    # moved, not copied; the business's other numbers stay
+    assert _phones(business) == []
+    assert _phones(other_business) == ["+15557770000", NUMBER]
+    listed = {b["id"]: b["phone_numbers"] for b in client.get("/businesses").json()}
+    assert listed[str(other_business)] == ["+15557770000", NUMBER]
+    # a call to the number now reaches the new business
+    _, params = _stream_params(_post(client, "/twilio/voice", {"CallSid": "CA9", "To": NUMBER}).text)
+    assert params["business_id"] == str(other_business)
+    # assigning again doesn't add it twice
+    client.post(f"/businesses/{other_business}/main-number")
+    assert _phones(other_business) == ["+15557770000", NUMBER]
+
+
+def test_unassign_main_number(main_number, business):
+    client = TestClient(app)
+    assert client.delete(f"/businesses/{business}/main-number").status_code == 200
+    assert _phones(business) == []
+    assert "<Stream" not in _post(client, "/twilio/voice", {"CallSid": "CA8", "To": NUMBER}).text
+
+
+def test_assign_main_number_errors(settings, main_number, business, monkeypatch):
+    from app.api import businesses
+    client = TestClient(app)
+    assert client.post(f"/businesses/{uuid.uuid4()}/main-number").status_code == 404
+    monkeypatch.setattr(businesses, "get_settings", lambda: settings)  # TWILIO_PHONE_NUMBER not set
+    assert client.post(f"/businesses/{business}/main-number").status_code == 503
+
+
 # --- webhook ------------------------------------------------------------------------
 
 def test_phone_call_maps_dialled_number_to_business(settings, business):
