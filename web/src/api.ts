@@ -40,7 +40,8 @@ export type VoiceEvent =
   | { type: "latency"; [metric: string]: string | number }
   | { type: "error"; message: string }
   | { type: "conversation_id"; id: string }
-  | { type: "no_speech" }; // push-to-talk turn with nothing said (or noise the VAD took for speech)
+  | { type: "no_speech" } // push-to-talk turn with nothing said (or noise the VAD took for speech)
+  | { type: "hangup"; reason: "goodbye" | "silence" }; // the server ends the call (V17); the socket closes next
 
 // --- live phone calls: GET /voice/feed, Server-Sent Events (app/voice/call_feed.py, DEC-44) ---
 
@@ -79,10 +80,14 @@ export interface Business {
   default_location: Location | null;
 }
 
+/** "twilio": came through Twilio (a phone call or a Voice SDK call); "web": the browser voice app or chat page. */
+export type ConversationSource = "twilio" | "web";
+
 /** Calls nobody spoke in are not listed. `preview` already starts with "You: " when the caller spoke last. */
 export interface ConversationSummary {
   id: string;
   channel: "chat" | "voice";
+  source: ConversationSource;
   title: string;
   preview: string;
   started_at: string;
@@ -99,6 +104,7 @@ export interface StoredMessage {
 export interface ConversationDetail {
   id: string;
   channel: "chat" | "voice";
+  source: ConversationSource;
   title: string;
   started_at: string;
   duration_s: number;

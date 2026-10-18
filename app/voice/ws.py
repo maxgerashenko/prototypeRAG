@@ -7,8 +7,9 @@ are JSON text: `connected`, then `start` (streamSid, callSid, our custom paramet
 
 Thin like `browser_ws.py`: μ-law ↔ PCM16 at 8 kHz in and out, the call loop in
 `session.py` does the rest. The session's other events (transcript, reply, latency) have
-no Twilio equivalent and are only logged. All events, and how much audio went out, also go
-to the web app's live feed (`call_feed.py`, DEC-44), so `/web/` shows the call as it happens.
+no Twilio equivalent and are only logged. When the session hangs up (V17: silence, or the
+caller said goodbye) the socket is closed, which ends the call. All events, and how much
+audio went out, also go to the web app's live feed (`call_feed.py`, DEC-44), so `/web/` shows the call as it happens.
 """
 
 import base64
@@ -50,6 +51,11 @@ async def twilio_media_stream(ws: WebSocket) -> None:
         else:
             log.debug("twilio stream %s: %s", stream_sid, event)
 
+    async def hang_up() -> None:
+        # V17: closing the stream ends `<Connect>`; no TwiML verb follows it, so Twilio
+        # ends the call. The session calls this only after the goodbye has played out.
+        await ws.close(code=1000, reason="call ended")
+
     try:
         while True:
             try:
@@ -82,6 +88,7 @@ async def twilio_media_stream(ws: WebSocket) -> None:
                 session = CallSession(
                     business_id, TWILIO_SAMPLE_RATE, send_audio, send_event,
                     channel_caller=params.get("caller") or None, call_sid=call_sid or None,
+                    hang_up=hang_up,
                 )
                 try:
                     await session.start()

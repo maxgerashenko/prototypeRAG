@@ -30,7 +30,7 @@ from app.voice import twilio_routes, ws as ws_mod
 from app.voice.audio import pcm16_to_ulaw
 from app.voice.session import CallSession
 from tests.async_helpers import run_async
-from tests.test_voice_session import SILENCE_1S, FakeTranscriber, _chunk, _speech, fake_synthesize
+from tests.test_voice_session import SILENCE_1S, FakeTranscriber, _chunk, _speech, fake_synthesize, short_synthesize
 
 AUTH_TOKEN = "test-auth-token"
 PUBLIC = "https://abc.ngrok.app"
@@ -263,6 +263,36 @@ def test_media_stream_full_call(settings, business, monkeypatch):
         messages = s.scalars(select(Message.content).where(Message.conversation_id == conversation.id)).all()
     assert "What time do you close on Saturday?" in messages
     assert "We close at 5 pm on Saturday. Anything else?" in messages
+
+
+def test_media_stream_goodbye_closes_the_stream(settings, business, monkeypatch):
+    """V17: "Thank you. Bye." → answered, then the stream is closed, which ends the call."""
+    monkeypatch.setattr(session_mod, "get_async_chat_client", lambda: AnswerLLM())
+    monkeypatch.setattr(session_mod, "HANG_UP_GRACE_S", 0.0)
+    monkeypatch.setattr(FakeTranscriber, "finish", lambda self, timeout=5.0: "Thank you. Bye.")
+    monkeypatch.setattr(ws_mod, "CallSession", functools.partial(
+        CallSession, transcriber_factory=FakeTranscriber, synthesize=short_synthesize))
+    call_sid = "CA" + uuid.uuid4().hex
+
+    async def scenario():
+        sock = FakeSocket()
+        handler = asyncio.create_task(ws_mod.twilio_media_stream(sock))
+        sock.put(_start(business, call_sid, twilio_routes.stream_token(business, call_sid)))
+        await _until(lambda: any(m["event"] == "media" for m in sock.sent))
+        for frame in _media_frames(_speech() + SILENCE_1S):
+            sock.put(frame)
+        await _until(lambda: sock.closed is not None)
+        sock.inbound.put_nowait(None)  # Twilio's side of the close
+        await asyncio.wait_for(handler, 5)
+        return sock
+
+    sock = run_async(scenario())
+    assert sock.closed == (1000, "call ended")
+    with tenant_session(business) as s:
+        conversation = s.scalars(select(Conversation).where(Conversation.call_sid == call_sid)).one()
+        assert conversation.ended_at is not None
+        messages = s.scalars(select(Message.content).where(Message.conversation_id == conversation.id)).all()
+    assert "Thank you. Bye." in messages
 
 
 @pytest.mark.parametrize("token", ["", "forged"])

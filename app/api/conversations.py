@@ -1,9 +1,14 @@
 """Read-only conversation history for the voice test page (lists and transcripts per business).
 Every query runs in tenant_session(business_id) AND filters by business_id (multi-tenant rule);
-stage 1 has no login, like the rest of the dev pages."""
+stage 1 has no login, like the rest of the dev pages.
+
+`source` says where a conversation came from, for the history's icons: "twilio" when it
+went through Twilio (a phone call or a Voice SDK call, both store `call_sid`), "web"
+otherwise (the browser voice app or the chat page)."""
 
 import uuid
 from datetime import datetime
+from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -12,9 +17,12 @@ from app.db.models import Conversation, Message, message_order
 
 router = APIRouter()
 
+Source = Literal["twilio", "web"]
+
 class ConversationSummary(BaseModel):
     id: uuid.UUID
     channel: str
+    source: Source
     title: str
     preview: str
     started_at: datetime
@@ -29,6 +37,7 @@ class MessageOut(BaseModel):
 class ConversationDetail(BaseModel):
     id: uuid.UUID
     channel: str
+    source: Source
     title: str
     started_at: datetime
     duration_s: int
@@ -55,6 +64,9 @@ def make_preview(messages: list[Message]) -> str:
     if len(content) > 120:
         content = content[:119] + "…"
     return content
+
+def source_of(conversation: Conversation) -> Source:
+    return "twilio" if conversation.call_sid else "web"
 
 def duration_s(conversation: Conversation, messages: list[Message]) -> int:
     if conversation.ended_at is not None:
@@ -91,6 +103,7 @@ def list_conversations(business_id: uuid.UUID, limit: int = Query(50, ge=1, le=2
             results.append(ConversationSummary(
                 id=c.id,
                 channel=c.channel,
+                source=source_of(c),
                 title=make_title(c_msgs),
                 preview=make_preview(c_msgs),
                 started_at=c.started_at,
@@ -125,6 +138,7 @@ def get_conversation_detail(business_id: uuid.UUID, conversation_id: uuid.UUID) 
         return ConversationDetail(
             id=conv.id,
             channel=conv.channel,
+            source=source_of(conv),
             title=make_title(msgs),
             started_at=conv.started_at,
             duration_s=duration_s(conv, msgs),
