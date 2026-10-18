@@ -101,7 +101,7 @@ group one thread at a time, or expect merge conflicts.
 | # | Step | Plan ref | Main files | Needs |
 |---|---|---|---|---|
 | 1 | Twilio live: Voice SDK call through ngrok, then the trial number; latency over Twilio | 03 Tasks | none (manual) | Mac, Twilio |
-| 2 | Real call through the React app; "Test on Mac" checks (V3, V7, V9, V10, V12, V14, V17, V24); delete V25 test conversations | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
+| 2 | Real call through the React app; "Test on Mac" checks still open (V3, V9, V10, V12, V17; V7, V14, V24 and V25 done 2026-10-18) | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
 | 3 | Filler while a tool runs, if V16 latency needs it | 03 Tasks, V16 | `voice/session.py` | — |
 | 4 | Barge-in robustness if V9/V10 fail; VAD `end_silence_ms` tuning | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
 | 5 | Call transfer + take-a-message fallback | 03 Tasks | `voice/session.py`, `voice/tools.py`, `actions/` | after 9 |
