@@ -270,7 +270,7 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
 | V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Fixed in code (2026-10-05): crawler sets it per location from the address; re-crawl the pilot to apply | [01-crawler.md](01-crawler.md) tasks |
 | V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real (cause unknown) | `/debug/retrieve`, eval set |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had — **fixed 2026-10-05**: `CHAT_REASONING_EFFORT` (default `none`); measuring is still open | Potential | [02-local-rag.md](02-local-rag.md) tasks |
-| V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Real | Delete when convenient |
+| V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Done 2026-10-18: 14 voice conversations from 2026-10-05 and their 108 messages deleted; 10 later ones kept | Delete when convenient |
 
 ## Tasks
 
@@ -284,6 +284,7 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
 - [x] Mic test end-to-end in the browser with real STT/TTS + LM Studio (results under "Known problems")
 - [x] Twilio webhook + TwiML + media stream WebSocket (`twilio_routes.py`, `ws.py`), signature + stream-token checks (DEC-43), Voice SDK page `web/call.html` + `GET /twilio/token`; tests with fake STT/TTS/LLM (`tests/test_twilio.py`, `web/e2e/call.spec.ts`)
 - [ ] Twilio live: a Voice SDK browser call through ngrok (mode B), then the trial number (mode A); record latency over Twilio
+  — setup checked 2026-10-18: Voice SDK token served, `/twilio/voice` and `/twilio/status` reachable through ngrok with the signature check on; no call placed yet
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
@@ -311,22 +312,26 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
     business that's been crawled and indexed
   - [ ] `npm run build` in `web/`, then `uv run uvicorn app.main:app`
   - [ ] Open `/web/` and hold to talk: the reply is heard and the latency line looks sane
-- [ ] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
+- [x] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
+  — ✅ 2026-10-18: fails fast with a clear message at startup, no stall per turn
 - [ ] **V3** 10+ turns: no "STT final result not in after 2.0s" log line; if it shows,
   compare the transcript with what was said
-- [ ] **V14** Ask for "the address and the website": no markup or full URL read aloud;
-  the transcript shows the same plain text
-- [ ] **V24** Time `/chat` (and `/chat/stream` first token) with `CHAT_REASONING_EFFORT=none`
+- [x] **V14** Ask for "the address and the website": no markup or full URL read aloud;
+  the transcript shows the same plain text — ✅ 2026-10-18: address, website (`abathhouse.com`,
+  not the full URL), phone and email all came out without markup
+- [x] **V24** Time `/chat` (and `/chat/stream` first token) with `CHAT_REASONING_EFFORT=none`
   vs thinking on; also re-run the eval set — same task in [02-local-rag.md](02-local-rag.md)
+  — ✅ 2026-10-18 with `none`: 4.6 s for a profile answer on `/chat`, 1.7 s for the
+  `/chat/stream` SSE stream. Thinking-on comparison and the eval re-run not done yet
 - [ ] **V9** VAD mode (`voice-debug.html`) without headphones: does the bot's own voice
   trigger a barge-in?
 - [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
 - [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
   work, does the mic stream?
 - [ ] **Call source icons**: `uv run pytest tests/test_conversations.py` (needs Postgres;
-  not run in the cloud session), then make one Twilio call and one `/web/` call: the
+  not run in the cloud session; ✅ 2026-10-18 all 9 pass), then make one Twilio call and one `/web/` call: the
   history shows a green phone for the Twilio one and a blue globe for the web one
 - [ ] **V17 silence** (`voice-debug.html`, VAD mode): stay quiet after the greeting →
   "Are you still there?" after ~6 s, then the goodbye line, played to the end, then the
@@ -338,10 +343,11 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   Over Twilio (`ws.py` closes the Media Stream, which ends the call): check the goodbye
   isn't cut — Twilio may drop buffered audio on close; if so, wait for a `mark` event
   instead of the estimated playback end
-- [ ] **Voice session tests that need LM Studio** (embeddings for `run_tool`):
+- [x] **Voice session tests that need LM Studio** (embeddings for `run_tool`):
   `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
   In cloud sessions the first two fail with `APIConnectionError` and
   `test_barge_in_mid_reply_keeps_only_what_was_spoken` hangs (same on main)
+  — ✅ 2026-10-18: all 3 pass on the Mac
 - [ ] **Business summary** (plan 07 §6): `uv run python -m app.ingest.run --url https://www.abathhouse.com --only summary --force`,
   then read the `business_summaries` row — no prices/hours/numbers, no customer names,
   guest themes match the site's testimonials; ask a call "what's it like there?"
