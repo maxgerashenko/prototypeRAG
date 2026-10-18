@@ -7,7 +7,8 @@ are JSON text: `connected`, then `start` (streamSid, callSid, our custom paramet
 
 Thin like `browser_ws.py`: μ-law ↔ PCM16 at 8 kHz in and out, the call loop in
 `session.py` does the rest. The session's other events (transcript, reply, latency) have
-no Twilio equivalent and are only logged.
+no Twilio equivalent and are only logged. All events, and how much audio went out, also go
+to the web app's live feed (`call_feed.py`, DEC-44), so `/web/` shows the call as it happens.
 """
 
 import base64
@@ -18,6 +19,7 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.voice.audio import TWILIO_SAMPLE_RATE, pcm16_to_ulaw, ulaw_to_pcm16
+from app.voice.call_feed import CallFeed
 from app.voice.session import CallSession
 from app.voice.twilio_routes import check_stream_token
 
@@ -32,14 +34,17 @@ async def twilio_media_stream(ws: WebSocket) -> None:
     await ws.accept()
     stream_sid: str | None = None
     session: CallSession | None = None
+    feed = CallFeed()
 
     async def send_audio(pcm: bytes) -> None:
         ulaw = pcm16_to_ulaw(pcm)
         for i in range(0, len(ulaw), FRAME_BYTES):
             payload = base64.b64encode(ulaw[i:i + FRAME_BYTES]).decode()
             await ws.send_text(json.dumps({"event": "media", "streamSid": stream_sid, "media": {"payload": payload}}))
+        feed.audio_sent(len(pcm) / 2 / TWILIO_SAMPLE_RATE)
 
     async def send_event(event: dict) -> None:
+        feed.event(event)
         if event.get("type") == "clear":
             await ws.send_text(json.dumps({"event": "clear", "streamSid": stream_sid}))
         else:
@@ -86,11 +91,17 @@ async def twilio_media_stream(ws: WebSocket) -> None:
                     return
                 log.info("twilio stream %s: call %s, conversation %s", stream_sid, call_sid,
                          session.conversation_id)
+                # no await since session.start() returned, so the greeting's events come after this
+                feed.start(stream_sid or str(uuid.uuid4()), business_id, session.conversation_id,
+                           params.get("caller") or None)
 
             elif event == "stop":
                 break
     except WebSocketDisconnect:
         pass
     finally:
-        if session is not None:
-            await session.close()
+        try:
+            if session is not None:
+                await session.close()
+        finally:
+            feed.end()

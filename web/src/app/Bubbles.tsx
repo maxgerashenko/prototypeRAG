@@ -29,7 +29,8 @@ export function BotAvatar() {
   );
 }
 
-export function Bubble({ m }: { m: BubbleMessage }) {
+/** `caller`: who the user bubbles are ("You" on our own calls, "Caller" on a watched phone call). */
+export function Bubble({ m, caller = "You" }: { m: BubbleMessage; caller?: string }) {
   if (m.role === "system") {
     return <div className="pill error" role="status">{m.text}</div>;
   }
@@ -52,7 +53,7 @@ export function Bubble({ m }: { m: BubbleMessage }) {
         <div className="bubble-user">{m.text}</div>
         <div className="msg-meta">
           <MicSmallIcon />
-          You · {fmtClock(m.at)}
+          {caller} · {fmtClock(m.at)}
         </div>
       </div>
     </div>

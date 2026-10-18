@@ -120,6 +120,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-41 | Web UI stack | React + TypeScript (Vite multi-page build) in `web/`, built to `web/dist` and served by the one FastAPI service under `/web`; voice app, debug pages and later the owner dashboard | 1 · 2 (image build) | ✅ |
 | DEC-43 | Twilio adapter: business lookup and trust | Voice SDK calls send `business_id` as a custom parameter, phone calls match `To` in `businesses.phone_numbers`; webhooks checked with `X-Twilio-Signature` already in stage 1 (ngrok is public); `/voice/ws` accepts only streams carrying an HMAC from `/twilio/voice`; Voice SDK token served to localhost only; `conversations.call_sid` for the status callback | 1 · 3 (lookups need an RLS-exempt path) | ✅ |
 | DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
+| DEC-44 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 
 ---
 
@@ -742,7 +743,8 @@ Consequences:
   known — they need an RLS-exempt path (security-definer function or admin role), like
   `/businesses` ([06-scale.md](06-scale.md) tasks).
 - Twilio's per-call events (transcript, reply text) don't exist on a phone line; the session's
-  events are logged only, and `clear` maps to Twilio's `clear` (barge-in).
+  events are logged only, and `clear` maps to Twilio's `clear` (barge-in). DEC-44 also
+  streams them to the voice app, which shows the call live.
 - Fixed at the merge: a question and its answer are saved in one transaction and get the
   same `created_at` (`now()` = transaction start); `ORDER BY created_at, id` then ordered
   them by a random UUID, so a transcript, `continue_from` history or `/chat`'s LLM history
@@ -750,6 +752,35 @@ Consequences:
   `app/db/models.py`, used by every message query).
 - Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
   second business.
+
+### DEC-44 — Phone calls shown live in the voice app (stage 1)
+
+Context: Max wants a call the system takes over Twilio (modes A and B) to show in the web
+app like a call started from its own Call button — same screen, transcript and status,
+updating as the call goes. Before this, a phone call's events (transcript, reply,
+latency) only went to the server log (DEC-43 consequences).
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| Transport to the page | **Server-Sent Events, `GET /voice/feed`** | One-way is all it needs; `EventSource` reconnects by itself and sends the cookie; plain HTTP through ngrok / Cloud Run / the Vite proxy | One more long-lived request | ✅ |
+| | WebSocket | Two-way (e.g. a hang-up button later) | Reconnect logic by hand; nothing to send up yet | ❌ for now |
+| | Poll `/businesses/{id}/conversations` | No new endpoint | Seconds of delay, no speaking/thinking status, messages are saved per turn only | ❌ |
+| Where events come from | **`ws.py` hands every session event and the audio length it sends to a `CallFeed` (`app/voice/call_feed.py`)** | `session.py` (many threads edit it) untouched; same events and reducer as the browser call (`callState.ts`), so the same call screen | `playback` on the phone line is estimated from audio sent, not heard (as for barge-in) | ✅ |
+| Fan-out | **In-memory, per process; snapshot of calls in progress (with their events so far) first, then live messages** | No new service; a page opened or reconnected mid-call catches up | Only works while the call and the page hit the same process: fine for one uvicorn and one Cloud Run instance | ✅ stage 1 · 2 (one instance) |
+| | Postgres `LISTEN/NOTIFY` | Works across instances | More moving parts; not needed with one instance | 🔄 stage 2, when a second instance appears |
+| What the page can do | **Watch only: Close stops watching, the call goes on; a green button like the web Call button, with the phone icon and the caller's number (`+1 222 333 45 12`), brings it back** | Nothing on the page can affect a real caller | No hang-up / take-over from the page | ✅ (hang-up later if wanted) |
+| Audio | **Events only, no listening in** | No audio fan-out or consent question (DEC-22: no recording) | You read the call, you don't hear it | ✅ |
+| Switching to a call | **The app jumps to a phone call when it starts, once per call, unless a call of its own is on** (then the green button; the call shows after hang-up) | It's what Max asked for | Interrupts reading a transcript | ✅ |
+
+Consequences:
+- Cost (DEC-33, DEC-35): an open stream keeps a Cloud Run instance busy and billed, so the
+  page closes the feed while the tab is hidden and reopens it (snapshot) when shown. A
+  15 s keep-alive comment holds the stream open through proxies.
+- Access: the feed lists calls of every business with the caller's number, as open as
+  `/businesses` and the conversations API until OPEN-19's access control; it must sit
+  behind that before the URL is public in stage 2, and be scoped to the owner in stage 3
+  (OPEN-12).
+- A page that falls 500 messages behind gets a fresh snapshot instead.
 
 ## 4. Still considering (open questions)
 

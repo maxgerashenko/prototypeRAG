@@ -1,5 +1,5 @@
 // Shapes of the backend's JSON — app/api/chat.py, app/api/businesses.py, app/api/conversations.py,
-// app/voice/browser_ws.py, app/voice/twilio_routes.py.
+// app/voice/browser_ws.py, app/voice/twilio_routes.py, app/voice/call_feed.py.
 
 export interface Source {
   chunk_id: string;
@@ -41,6 +41,26 @@ export type VoiceEvent =
   | { type: "error"; message: string }
   | { type: "conversation_id"; id: string }
   | { type: "no_speech" }; // push-to-talk turn with nothing said (or noise the VAD took for speech)
+
+// --- live phone calls: GET /voice/feed, Server-Sent Events (app/voice/call_feed.py, DEC-44) ---
+
+export interface LiveCallInfo {
+  id: string;
+  business_id: string;
+  conversation_id: string | null;
+  caller: string | null; // the caller's number, or "client:…" for a Voice SDK call
+  started_at: number; // ms epoch
+}
+
+/** A session event of a phone call, plus `playback` (the bot's audio on the line), stamped
+ * with the server time `t` (ms epoch). */
+export type LiveEvent = (VoiceEvent | { type: "playback"; active: boolean }) & { t: number };
+
+export type LiveFeedMessage =
+  | { type: "snapshot"; calls: (LiveCallInfo & { events: LiveEvent[] })[] }
+  | { type: "call_started"; call: LiveCallInfo }
+  | { type: "call_event"; call_id: string; event: LiveEvent }
+  | { type: "call_ended"; call_id: string; t: number };
 
 // --- voice app (app/api/businesses.py, app/api/conversations.py) ---
 

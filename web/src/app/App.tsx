@@ -4,6 +4,8 @@
 // the design's stages. Keyboard and error handling follow the earlier plain-HTML version of
 // this app (main's web/mic-test.html): Space calls / holds to talk, Esc backs out or ends
 // the call, Backspace ends a call, "Unknown business" returns to the list.
+// Phone calls the system takes (Twilio, DEC-44) show up live on the same call screen,
+// watch-only: the app switches to one when it starts, unless the user is on a call here.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -14,12 +16,15 @@ import {
   type ConversationDetail,
   type ConversationSummary,
 } from "../api";
-import { CallScreen, ConnectingScreen, EndedScreen } from "./CallScreens";
+import { CallScreen, ConnectingScreen, EndedScreen, PhoneCallScreen } from "./CallScreens";
 import { ConversationsScreen } from "./ConversationsScreen";
 import { SelectScreen } from "./SelectScreen";
 import { TranscriptScreen } from "./TranscriptScreen";
 import { useVoiceCall } from "./useVoiceCall";
+import { PhoneIcon } from "./icons";
 import { callerSpoke } from "./callState";
+import { callerLabel, latestLive } from "./liveCalls";
+import { useLiveCalls } from "./useLiveCalls";
 
 export interface Loadable<T> {
   status: "loading" | "ok" | "error";
@@ -27,7 +32,7 @@ export interface Loadable<T> {
   error?: string;
 }
 
-type Stage = "select" | "convos" | "transcript" | "connecting" | "call" | "ended";
+type Stage = "select" | "convos" | "transcript" | "connecting" | "call" | "ended" | "phone" | "phoneEnded";
 
 interface TranscriptRef {
   bizId: string;
@@ -64,6 +69,11 @@ export function App() {
   const voice = useVoiceCall();
   const call = voice.state;
   const detailReq = useRef(0);
+  const phoneCalls = useLiveCalls();
+  const [phoneId, setPhoneId] = useState<string | null>(null); // the phone call on screen
+  const [phoneReturn, setPhoneReturn] = useState<Stage>("select"); // where Close goes
+  const shownPhone = useRef(new Set<string>()); // calls already switched to once
+  const phone = phoneId ? phoneCalls[phoneId] : undefined;
 
   const loadBusinesses = useCallback(() => {
     setBusinesses((prev) => ({ ...prev, status: "loading" }));
@@ -138,6 +148,32 @@ export function App() {
     }
   }, [stage, call, callBizId, loadBusinesses, loadConvos]);
 
+  // a phone call starts -> show it, once per call, unless a call of our own is on
+  const live = latestLive(phoneCalls);
+  useEffect(() => {
+    if (!live || shownPhone.current.has(live.info.id)) return;
+    if (stage === "connecting" || stage === "call" || stage === "phone") return;
+    shownPhone.current.add(live.info.id);
+    watchPhone(live.info.id);
+  }, [live, stage]);
+
+  // the watched phone call ended -> its summary; the new conversation shows up in the lists
+  useEffect(() => {
+    if (stage !== "phone" || !phone || phone.state.phase !== "ended") return;
+    loadBusinesses();
+    loadConvos(phone.info.business_id);
+    const { conversationId } = phone.state;
+    if (conversationId && callerSpoke(phone.state)) setNewIds((prev) => new Set(prev).add(conversationId));
+    setStage("phoneEnded");
+  }, [stage, phone, loadBusinesses, loadConvos]);
+
+  const closePhone = () => setStage(phoneReturn);
+  const watchPhone = (id: string) => {
+    setPhoneReturn(stage === "phoneEnded" ? "select" : stage);
+    setPhoneId(id);
+    setStage("phone");
+  };
+
   // keyboard (as in the plain-HTML app); ignored while typing in a text field
   const onKey = useRef<(e: KeyboardEvent, down: boolean) => void>(() => {});
   onKey.current = (e, down) => {
@@ -160,6 +196,7 @@ export function App() {
       else if (stage === "convos") setStage("select");
       else if (stage === "transcript" && transcript) setStage(transcript.returnTo);
       else if (stage === "ended") backToConversations();
+      else if (stage === "phone" || stage === "phoneEnded") closePhone();
     } else if (down && e.key === "Backspace") {
       if (stage === "connecting") cancelCall();
       else if (stage === "call") voice.hangUp();
@@ -241,6 +278,43 @@ export function App() {
       {stage === "call" && (
         <CallScreen biz={fallbackBiz(callBizId)} call={call} onPttDown={voice.pttDown} onPttUp={voice.pttUp}
           onEnd={voice.hangUp} />
+      )}
+
+      {stage === "phone" && phone && (
+        <PhoneCallScreen biz={fallbackBiz(phone.info.business_id)} call={phone.state}
+          caller={callerLabel(phone.info.caller)} onClose={closePhone} />
+      )}
+
+      {stage === "phoneEnded" && phone && (
+        <EndedScreen
+          biz={fallbackBiz(phone.info.business_id)}
+          call={phone.state}
+          onRead={() => {
+            if (!phone.state.conversationId) return;
+            setSelId(phone.info.business_id);
+            openConversation(phone.info.business_id, phone.state.conversationId, "convos");
+          }}
+          onBack={() => {
+            setSelId(phone.info.business_id);
+            setStage("convos");
+          }}
+        />
+      )}
+
+      {/* a phone call in progress that isn't on screen (closed, or one of our own calls was on):
+          the web call button's look, with the caller's number */}
+      {live && stage !== "phone" && stage !== "connecting" && stage !== "call" && (
+        <div className="call-wrap phone-live">
+          <div className="halo" />
+          <button className="call-btn" data-testid="phone-live" onClick={() => watchPhone(live.info.id)}
+            aria-label={`Phone call from ${callerLabel(live.info.caller)} about ${fallbackBiz(live.info.business_id).name}`}>
+            <PhoneIcon size={22} />
+            <span className="phone-live-text">
+              <span className="mono-font">{callerLabel(live.info.caller)}</span>
+              <small className="ellipsis">Phone call · {fallbackBiz(live.info.business_id).name}</small>
+            </span>
+          </button>
+        </div>
       )}
 
       {stage === "ended" && (

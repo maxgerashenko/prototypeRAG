@@ -385,3 +385,16 @@ a:hover { color: var(--bot-light); }
   color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .end-btn svg { transform: rotate(135deg); }
+
+/* ---------- phone calls watched live (DEC-44) ---------- */
+.phone-caller {
+  flex: 1; min-width: 0; height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 6px;
+  color: var(--muted); font-size: 15px; font-weight: 600;
+}
+.phone-caller svg { color: var(--call); flex-shrink: 0; }
+.call-controls .btn-pill { width: auto; padding: 0 28px; flex-shrink: 0; }
+.phone-live { position: absolute; left: 16px; right: 16px; bottom: 104px; z-index: 5; }
+.phone-live .call-btn { box-shadow: 0 6px 24px #0008; }
+.phone-live-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.15; }
+.phone-live-text .mono-font { font-size: 17px; font-weight: 800; letter-spacing: .02em; }
+.phone-live-text small { font-size: 12px; font-weight: 700; opacity: .75; max-width: 100%; }
