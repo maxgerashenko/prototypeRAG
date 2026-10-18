@@ -308,7 +308,8 @@ class FactSource(Base):
 
 class BusinessSummary(Base):
     """Business summary from testimonials/marketing text (plan/07-knowledge-quality.md
-    §6, DEC-39). Schema only in this change — `app/ingest/summary.py` is a later milestone."""
+    §6, DEC-39). Written by `app/ingest/summary.py`, read into the chat and voice prompts
+    by `app/rag/prompt.format_summary`."""
 
     __tablename__ = "business_summaries"
 

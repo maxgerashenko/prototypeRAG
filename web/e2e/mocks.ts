@@ -2,7 +2,7 @@
 // /voice/browser WebSocket of app/voice/browser_ws.py, driven from the test.
 
 import type { Page, Request, WebSocketRoute } from "@playwright/test";
-import type { Business, ConversationDetail, ConversationSummary, VoiceEvent } from "../src/api";
+import type { Business, ConversationDetail, ConversationSource, ConversationSummary, VoiceEvent } from "../src/api";
 
 const MIN = 60_000;
 
@@ -14,13 +14,14 @@ export function biz(id: string, name: string, website: string | null, conversati
  * assistant/user starting with the greeting, 19 s apart (at_s 2, 21, 40, …). */
 export function convo(
   id: string, title: string, lines: string[], startedMsAgo = 60 * MIN, durS = 95, now = Date.now(),
+  source: ConversationSource = "web",
 ): ConversationDetail {
   const messages = lines.map((content, i) => ({
     role: (i % 2 === 0 ? "assistant" : "user") as "assistant" | "user",
     content,
     at_s: 2 + i * 19,
   }));
-  return { id, channel: "voice", title, started_at: new Date(now - startedMsAgo).toISOString(), duration_s: durS, messages };
+  return { id, channel: "voice", source, title, started_at: new Date(now - startedMsAgo).toISOString(), duration_s: durS, messages };
 }
 
 /** List row for a conversation: preview = last message, "You: " first if the caller said it. */

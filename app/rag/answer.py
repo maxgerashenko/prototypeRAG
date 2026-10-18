@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from app.config import get_settings
 from app.db import tenant_session
-from app.db.models import BusinessProfile
+from app.db.models import BusinessProfile, BusinessSummary
 from app.llm import chat, get_chat_client
 from app.rag.prompt import build_prompt
 from app.rag.retrieve import RetrievedChunk, retrieve
@@ -24,8 +24,9 @@ def answer_question(
     """Non-streaming: retrieve, build the prompt, call the LLM once, return the full answer."""
     with tenant_session(business_id) as session:
         profile = session.get(BusinessProfile, business_id)
+        summary = session.get(BusinessSummary, business_id)
         chunks = retrieve(session, business_id, question, top_n)
-        messages = build_prompt(profile, chunks, history or [], question)
+        messages = build_prompt(profile, chunks, history or [], question, summary)
     answer = chat(messages, reasoning_effort=get_settings().chat_reasoning_effort)
     return AnswerResult(answer=answer, chunks=chunks, profile=profile)
 
@@ -38,8 +39,9 @@ def stream_answer(business_id: uuid.UUID, question: str, history: list[dict] | N
     """
     with tenant_session(business_id) as session:
         profile = session.get(BusinessProfile, business_id)
+        summary = session.get(BusinessSummary, business_id)
         chunks = retrieve(session, business_id, question, top_n)
-        messages = build_prompt(profile, chunks, history or [], question)
+        messages = build_prompt(profile, chunks, history or [], question, summary)
 
     settings = get_settings()
     stream = get_chat_client().chat.completions.create(
