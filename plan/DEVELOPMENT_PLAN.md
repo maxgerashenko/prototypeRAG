@@ -78,7 +78,7 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 5. Actions: tool calling, internal bookings, summaries, minimal dashboard (no login) —
    [04-actions.md](04-actions.md).
 6. Gemini comparison: switch `LLM_*` / `EMBED_*` env vars, re-run eval + booking tests.
-7. Containerize: API `Dockerfile` (+ `Dockerfile.crawler` only if Crawl4AI was added,
+7. 🔄 Containerize (`Dockerfile`, Compose `migrate`/`api`/`crawler` services under the `app`/`crawler` profiles — built; full run against LM Studio + ADC pending on the Mac): API `Dockerfile` (+ `Dockerfile.crawler` only if Crawl4AI was added,
    DEC-36); run everything via Compose with the same env vars — proves stage 2 readiness.
 
 **Stage 1 tuning — after step 7, before stage 2.** Fixes found while building, done as
@@ -230,9 +230,9 @@ app/
 web/                React + TypeScript pages (Vite, DEC-41): voice app at /web/ (DEC-42), chat and
                     voice-debug pages, later the dashboard; `npm run build` → web/dist,
                     served by FastAPI under /web; tests: `npm test` (Vitest), `npm run e2e` (Playwright)
-docker-compose.yml  stage 1: postgres only · stage-1 exit: + api + crawler
+docker-compose.yml  postgres by default · `--profile app`: + migrate + api · `crawler` profile: one-off crawls
 Dockerfile          API image (Node build stage for web/dist, DEC-41)
-Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8) — once needed (DEC-36)
+Dockerfile.crawler  not yet: the crawler runs from the API image until Crawl4AI is needed (R8, DEC-36)
 .env.example
 ```
 
