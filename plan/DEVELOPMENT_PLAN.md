@@ -105,7 +105,7 @@ group one thread at a time, or expect merge conflicts.
 | 3 | Filler while a tool runs, if V16 latency needs it | 03 Tasks, V16 | `voice/session.py` | — |
 | 4 | ✅ code 2026-10-18 (DEC-44) Barge-in robustness (stricter VAD while the bot speaks) + `end_silence_ms` tuned 500→700ms, both now env vars; none of it live-tested yet — still needs the Mac mic test (V9, V10) | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
 | 5 | Call transfer + take-a-message fallback | 03 Tasks | `voice/session.py`, `voice/tools.py`, `actions/` | after 9 |
-| 6 | Decide OPEN-20, then `facts.py` + `merge.py` incl. hours from `site_chrome` (V23) | 07 §5, §9 | `ingest/facts.py`, `merge.py`, `run.py` | LM Studio for OPEN-20 |
+| 6 | ✅ code 2026-10-19 `facts.py` + `merge.py` incl. hours from `site_chrome` (V23); OPEN-20 audit still open (Mac) | 07 §5, §9 | `ingest/facts.py`, `merge.py`, `run.py` | LM Studio for OPEN-20 |
 | 7 | Location card → prompt; fact chunks in retrieval, location filter, fact-first tool result (OPEN-23) | 07 §3, §5.5 | `rag/prompt.py`, `rag/retrieve.py`, `rag/index.py`, `voice/tools.py` | after 6 |
 | 8 | ✅ (PR #28) `summary.py` business summary from `pages.testimonials` | 07 §6 | `ingest/summary.py`, `rag/prompt.py` | — |
 | 9 | Tool registry + executor with confirmation guard and action log | 04 Tasks | `actions/`, `voice/tools.py`, migration | — |
@@ -206,6 +206,7 @@ DATABASE_URL=postgresql+psycopg://app:app@localhost:5432/app
 LLM_BASE_URL=http://localhost:1234/v1       # LM Studio server
 LLM_API_KEY=lm-studio                        # any value; LM Studio doesn't check it
 LLM_MODEL=google/gemma-4-12b                 # chat/voice (DEC-32); id as shown by `lms ps`
+FACTS_LLM_MODEL=                             # fact extraction (OPEN-20); empty = LLM_MODEL
 CHAT_REASONING_EFFORT=none                   # thinking off for /chat (V24)
 EMBED_BASE_URL=http://localhost:1234/v1
 EMBED_API_KEY=lm-studio

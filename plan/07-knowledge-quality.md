@@ -393,9 +393,32 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
     to the clean location name (A3) instead of leaving two rows or crashing.
 - [ ] Decide OPEN-20 (extraction model): run `facts.py` on 5 pilot pages with both
   candidates, audit precision
-  - Not started — `facts.py` doesn't exist yet (next milestone).
-- [ ] `facts.py` + `merge.py`: extraction, quote/number validation, dedupe, conflicts,
+  - **Open — needs the Mac** (no LM Studio in cloud sessions). The tooling is built:
+    `python -m app.ingest.run --url … --only facts --dry-run --force --model <id>` prints
+    every accepted fact (with its quote) and every rejection with the reason, writes
+    nothing. Run it once per candidate, compare precision by hand, then set
+    `FACTS_LLM_MODEL` in `.env` and turn OPEN-20 into a DEC. Until then `FACTS_LLM_MODEL`
+    is empty = `LLM_MODEL` (gemma-4-12b); expected pick is `qwen/qwen3.6-35b-a3b` with
+    thinking on (offline job, DEC-29), unverified.
+- [x] `facts.py` + `merge.py`: extraction, quote/number validation, dedupe, conflicts,
   stale handling, owner lock; idempotency test (second run = no changes)
+  - 2026-10-19, `tests/test_facts.py` (21 tests, LLM faked, real Postgres). `facts.py`:
+    per-page (site-chrome pseudo-page included) JSON-schema extraction, sections of
+    ≤ 12k chars; code rejects a quote not found in the page, a number in `value` not in
+    the quote, unknown type, placeholders, unknown location, time-sensitive types from
+    blog pages. Hours: `value_json` per day only for "daily / 7 days a week + one time
+    range", else text only. `merge.py`: `fact_key`, one `fact_sources` row per page;
+    `settle_facts` recomputes the status of every key from the sources alone (owner
+    fact > best page-type priority > newest page; losers with a source = `conflict`,
+    without = `stale`; owner facts never overwritten), so order and re-runs don't matter.
+    `run.py`: runs after organize in every crawl; `--only facts [--force] [--dry-run]
+    [--model]`, `--report conflicts`. Pages are skipped while `extracted_hash` =
+    `content_hash:EXTRACTOR_VERSION`.
+  - **Not built:** confidence raised by agreeing sources; deleting facts after N stale
+    crawls (stale rows are kept); the "source changed" flag for owner-confirmed facts;
+    `fact` chunks for retrieval (next task, step 7); `GET /debug/facts`.
+  - **Not run on real data yet** (no LM Studio in cloud) — see "Test on Mac" in
+    [03-voice-channel.md](03-voice-channel.md).
 - [x] (partial) Re-crawl the whole pilot domain — done, see Part C results below in the
   task report; audit 30 facts (§7) and `/debug/facts` **not done** (no `facts` rows exist
   yet — `facts.py` is the next milestone)
