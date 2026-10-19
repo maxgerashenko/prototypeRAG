@@ -221,7 +221,7 @@ Findings:
 | # | Problem | Kind | How to test | Fix idea if it fails |
 |---|---|---|---|---|
 | V9 | Speaker echo → VAD hears the bot → false barge-in; browser echo cancellation may not cover WebAudio playback | Potential | Mic test without headphones | Fixed in code 2026-10-18 (DEC-44): raise VAD aggressiveness while bot speaks. Mic test without headphones still open |
-| V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | Fixed in code 2026-10-18 (DEC-44): minimum speech length before barge-in, longer while the bot speaks |
+| V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | DEC-44 fix (minimum speech length before barge-in) insufficient — ❌ still reproduces live 2026-10-19 (real call): saying "hmm" or coughing stopped the bot's voice. Needs stronger hardening (longer `VAD_BARGE_IN_START_MS`, or an energy/pitch check beyond webrtcvad aggressiveness) |
 | V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | Client reports playback end; Twilio `mark` events |
 | V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); Safari untested | Closed (Safari ✅ 2026-10-19: works, mic streams; Firefox explicitly not supported/tested — not a target browser) | Open page in Chrome, Safari | — |
 | V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Potential | Look at `reply` events of real answers | Abbreviation list; split also on `,`/length cap |
@@ -257,11 +257,17 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
   just as well as a real caller. Reverts to the normal aggressiveness the instant a turn
   is confirmed, so it doesn't affect end-of-speech detection. Still needs a mic test
   without headphones (real echo, not the clean fixture) to confirm it actually helps.
-- **V10 ✅ code** Same mechanism, the duration half: while the bot is active, `speech_start`
-  also needs `VAD_BARGE_IN_START_MS` (default 300 ms) of continuous speech instead of the
-  normal 160 ms, so a short cough or "mm-hm" needs to last noticeably longer before it's
-  treated as a barge-in. Both default to env vars (`.env.example`) so they can be tuned
-  without a code change once the Mac test has real echo/noise to try them against.
+- **V10 ✅ code, ❌ live** Same mechanism, the duration half: while the bot is active,
+  `speech_start` also needs `VAD_BARGE_IN_START_MS` (default 300 ms) of continuous speech
+  instead of the normal 160 ms, so a short cough or "mm-hm" needs to last noticeably
+  longer before it's treated as a barge-in. Both default to env vars (`.env.example`) so
+  they can be tuned without a code change. **Live-checked 2026-10-19 (real call, issue
+  #84): still reproduces** — a cough/"mm-hm" stopped the bot. 300 ms at the strictest
+  webrtcvad aggressiveness (3) isn't enough to reject a real cough/voiced filler; webrtcvad
+  classifies frames on spectral shape, not "is this a word," so a loud or sustained
+  cough/"mmm" can look like speech for well over 300 ms. Next: try a longer
+  `VAD_BARGE_IN_START_MS`, or a check beyond webrtcvad (e.g. energy/duration heuristic, or
+  requiring partial STT text before committing to `clear`).
 - **V3 end_silence_ms tuned** `VAD_END_SILENCE_MS` default raised 500 → 700 ms (budget
   widened to 300–700 ms, DEC-44) after the 2026-10-03 mic test ("What if I want to
   come?" … "Today, night at 9 pm" — a mid-thought pause ended the turn early). Trades
@@ -353,9 +359,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   trigger a barge-in? — checked by code review only as of 2026-10-18, not run live; code
   hardened 2026-10-18 (DEC-44, stricter VAD while the bot speaks) ahead of a live mic test,
   with and without headphones
-- [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
-  — checked by code review only as of 2026-10-18, not run live; code hardened further
-  2026-10-18 (DEC-44, longer minimum speech length while the bot speaks)
+- [x] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
+  — ❌ 2026-10-19, real call (issue #84): saying "hmm" or coughing stopped the bot's voice.
+  The DEC-44 hardening (longer minimum speech length while the bot speaks) did not fix it
+  live — needs further work, see "Known problems" V10
 - [x] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
   work, does the mic stream? — ✅ 2026-10-19: works in Safari, mic streams fine. Firefox
   explicitly not tested — not a supported browser for this project
