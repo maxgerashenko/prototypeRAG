@@ -102,7 +102,7 @@ group one thread at a time, or expect merge conflicts.
 |---|---|---|---|---|
 | 1 | Twilio live: Voice SDK call through ngrok, then the trial number; latency over Twilio | 03 Tasks | none (manual) | Mac, Twilio |
 | 2 | Real call through the React app; "Test on Mac" checks still open (V3, V9, V10, V12, V17 — checked by code review only, not run live; V7, V14, V24 and V25 done 2026-10-18) | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
-| 3 | Filler while a tool runs, if V16 latency needs it | 03 Tasks, V16 | `voice/session.py` | — |
+| 3 | ❌ dropped 2026-10-19 (#40): spoken filler while a tool runs — the quiet ticks (T1) are enough | 03 Tasks, V16 | — | — |
 | 4 | ✅ code 2026-10-18 (DEC-44) Barge-in robustness (stricter VAD while the bot speaks) + `end_silence_ms` tuned 500→700ms, both now env vars; none of it live-tested yet — still needs the Mac mic test (V9, V10) | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
 | 5 | Call transfer + take-a-message fallback | 03 Tasks | `voice/session.py`, `voice/tools.py`, `actions/` | after 9 |
 | 6 | ✅ code 2026-10-19 `facts.py` + `merge.py` incl. hours from `site_chrome` (V23); OPEN-20 audit still open (Mac) | 07 §5, §9 | `ingest/facts.py`, `merge.py`, `run.py` | LM Studio for OPEN-20 |
