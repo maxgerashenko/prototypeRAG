@@ -121,6 +121,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-43 | Twilio adapter: business lookup and trust | Voice SDK calls send `business_id` as a custom parameter, phone calls match `To` in `businesses.phone_numbers`; webhooks checked with `X-Twilio-Signature` already in stage 1 (ngrok is public); `/voice/ws` accepts only streams carrying an HMAC from `/twilio/voice`; Voice SDK token served to localhost only; `conversations.call_sid` for the status callback | 1 · 3 (lookups need an RLS-exempt path) | ✅ |
 | DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
 | DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (live Mac mic test) |
+| DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `stage:*` / `blocked` labels; blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
 
 ---
 
@@ -786,6 +787,31 @@ Consequences:
 - If 700 ms still isn't enough against real mid-thought pauses, the next step is the
   adaptive option above, not a further blanket increase (diminishing returns on latency
   spent per turn where most turns don't pause mid-sentence).
+
+### DEC-45 — Task tracking in GitHub Issues and one Project (stage 1)
+
+Context: the plan files hold what each part needs as `- [ ]` lists, but there was no place
+for work in progress, bugs, or "this waits for that" across parts, and no per-task link to
+branch and PR.
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| Tracker | **GitHub Issues + one free GitHub Project** | Next to code and PRs (`Fixes #n`); free (DEC-33); Claude has tools for it | Claude's tools can create sub-issues but not set "blocked by" links | ✅ |
+| | Notion / Linear / Jira | Nicer UI (Linear) | Not tied to commits; Linear paid beyond its free tier; Jira heavy for a solo prototype | ❌ |
+| | Only `plan/*.md` checklists | No API, in git history | No discussion, status or cross-part blocking | ❌ (kept as the plan, not the work log) |
+| Stage vs milestone | **One milestone per plan milestone, named `S<stage> · M<n> <name>`, plus a `stage:n` label** | A stage is too big for one milestone; milestones filter by exact name, so the label is the only "all of stage 1" filter | Stage is stored twice (each milestone is in exactly one stage, so no drift) | ✅ |
+| Blocking | **"Blocked by" link in the sidebar + `blocked` label + `Blocked by:` line in the issue body** | Badge in GitHub; one label filter; the body line is readable by Claude | The link is set by hand (one click) | ✅ |
+| | Sub-issues for blocking | Native | Means "part of", not "must finish first" | ❌ (sub-issues only for parts of a bigger issue) |
+
+Rules:
+- Labels: exactly one `area:` (front = `web/`, api = `app/api/` + `main.py`, parser =
+  `app/ingest/`, rag = `app/rag/` + `llm.py`, voice = `app/voice/`, actions = `app/actions/`,
+  other = db, docker, config, docs), one `type:` (feature, bug, chore), one `stage:`;
+  `blocked` while a blocker is open. Area is where the fix goes, not where the symptom shows.
+- Plan files stay the plan and link the issue (`- [ ] Booking action (#14)`); decisions
+  stay here. Template: `.github/ISSUE_TEMPLATE/task.md`.
+- An issue blocked by one in a *later* milestone means one of the two is in the wrong milestone.
+- Stage 2 and 3 get milestones now and issues when their stage starts.
 
 ## 4. Still considering (open questions)
 
