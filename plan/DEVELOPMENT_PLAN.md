@@ -111,7 +111,7 @@ group one thread at a time, or expect merge conflicts.
 | 9 | Tool registry + executor with confirmation guard and action log | 04 Tasks | `actions/`, `voice/tools.py`, migration | — |
 | 10 | Tool-calling loop in text chat, then voice | 04 Tasks | `rag/answer.py`, `api/chat.py`, `voice/session.py` | after 9 |
 | 11 | Internal booking backend + rules; SMS confirmation | 04 Booking backends | `actions/booking.py`, migration | after 9 (wants 6); Twilio for SMS |
-| 12 | Post-conversation summary job, run from `POST /twilio/status` (DEC-24) | 04 Summaries, 03 Tasks | `actions/summary.py`, `voice/twilio_routes.py`, migration | — |
+| 12 | ✅ (#43, live check pending) Post-conversation summary job, run from `POST /twilio/status` (DEC-24) | 04 Summaries, 03 Tasks | `actions/summary.py`, `voice/twilio_routes.py`, migration | — |
 | 13 | Owner dashboard (conversations, bookings, unanswered questions) + owner notifications | 04 Dashboard, DEC-41 | `dashboard/`, `web/` | after 11, 12 |
 | 14 | Simulated booking conversations (happy path + edge cases) | 04 Tasks | `tests/` | after 10, 11 |
 | 15 | Extended eval + `RETRIEVAL_MODE` A/B → OPEN-22; re-measure V16; retire `business_profile`; update 01/02 data-model sections | 07 §7, §9 | `rag/eval.py`, `rag/prompt.py`, plan files | after 7, 8; Mac |
