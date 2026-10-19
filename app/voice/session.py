@@ -65,6 +65,11 @@ SendEvent = Callable[[dict], Awaitable[None]]
 MAX_TOOL_ROUNDS = 3  # LLM → tool → LLM ... before giving up on a turn
 WORKING_SOUND_CHUNK_S = 0.2  # T1: sent in real time, so stopping it is never more than ~this late
 
+# V16: spoken right after the tool call is detected, if nothing was said yet this turn, so
+# the caller hears something ~0.3 s after the model decides to search instead of ~5 s of
+# ticks. Not in the transcript or the LLM history. "" turns it off.
+SEARCH_FILLER_TEXT = "One moment."
+
 # V17: silence handling (VAD mode). Quiet is counted from the later of the caller's last
 # speech and the end of the bot's audio, so a long answer doesn't count as silence.
 SILENCE_REPROMPT_S = 6.0
@@ -417,10 +422,15 @@ class CallSession:
             )
             buffer = ""
             calls: dict[int, dict] = {}
+            filler_done = bool(spoken) or not SEARCH_FILLER_TEXT
             async for chunk in stream:
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
+                if delta.tool_calls and not filler_done:
+                    filler_done = True
+                    timings.setdefault("filler_ms", _ms(speech_end))
+                    await self._play_filler()
                 if delta.tool_calls:
                     self._start_working_sound(speech_end, timings)
                 for tc in delta.tool_calls or []:
@@ -471,6 +481,17 @@ class CallSession:
         await self._play(audio)
         spoken.append(sentence)
         play_ends.append(self._playing_until)
+
+    async def _play_filler(self) -> None:
+        """V16: a short phrase while the search runs. Audio is cached like the greeting;
+        it's bot audio (barge-in stops it) but not part of the transcript or history."""
+        settings = get_settings()
+        key = (SEARCH_FILLER_TEXT, self.sample_rate, settings.tts_voice, settings.voice_language)
+        audio = _greeting_audio.get(key)
+        if audio is None:
+            audio = await asyncio.to_thread(self._synthesize, SEARCH_FILLER_TEXT, self.sample_rate)
+            _greeting_audio[key] = audio
+        await self._play(audio)
 
     async def _speak_fixed(self, text: str, cache: bool = True, history: bool = True) -> None:
         """A line not written by the LLM: the greeting, or a silence re-prompt/goodbye

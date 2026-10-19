@@ -112,6 +112,12 @@ def business():
         s.execute(delete(Business).where(Business.id == bid))
 
 
+@pytest.fixture(autouse=True)
+def _no_search_filler(monkeypatch):
+    """V16's filler would add a chunk to every search turn; its own test turns it on."""
+    monkeypatch.setattr(session_mod, "SEARCH_FILLER_TEXT", "")
+
+
 def _make_session(business_id, llm, monkeypatch):
     monkeypatch.setattr(session_mod, "get_async_chat_client", lambda: llm)
     session_mod._greeting_audio.clear()
@@ -833,6 +839,32 @@ def test_working_sound_plays_during_search_and_stops_for_the_answer(business, mo
     with tenant_session(business) as db:  # never in the transcript
         rows = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at))
         assert [m.content for m in rows][-1] == "We close at 5 pm on Saturday. Anything else?"
+
+
+def test_search_filler_plays_before_ticks_and_stays_out_of_the_transcript(business, monkeypatch):
+    monkeypatch.setattr(session_mod, "SEARCH_FILLER_TEXT", "One moment.")
+    _slow_tool(monkeypatch)
+    s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._playing_until = 0.0
+        await _feed(s, _speech() + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    sizes = [len(a) for a in audio_out]
+    answer = len(fake_synthesize("", RATE))
+    # greeting, filler, ticks, answer: the filler is the same size as any fake utterance
+    assert sizes[0] == answer and sizes[1] == answer and sizes[-1] == answer
+    latency = next(e for e in events if e["type"] == "latency")
+    assert latency["filler_ms"] <= latency["tool_end_ms"]
+    assert not any(e.get("text") == "One moment." for e in events)
+    with tenant_session(business) as db:
+        rows = db.scalars(select(Message).where(Message.business_id == business))
+        assert "One moment." not in [m.content for m in rows]
 
 
 def test_barge_in_stops_working_sound(business, monkeypatch):

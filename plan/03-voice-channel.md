@@ -318,7 +318,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
-- [ ] Filler while a tool runs, if latency needs it
+- [x] Filler while a tool runs (V16, #40): "One moment." (`SEARCH_FILLER_TEXT`) plays when the tool call is detected and nothing was said yet this turn, then the T1 ticks; cached audio, kept out of transcript/history; `filler_ms` in the `latency` event. Unit test with fakes; live check under "Test on Mac"
 - [x] Called number / TwiML App → business_id mapping from Postgres (`To` in `businesses.phone_numbers`; Voice SDK `business_id` parameter)
 - [ ] Call transfer + take-a-message fallback
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
@@ -342,6 +342,7 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
     business that's been crawled and indexed
   - [ ] `npm run build` in `web/`, then `uv run uvicorn app.main:app`
   - [ ] Open `/web/` and hold to talk: the reply is heard and the latency line looks sane
+- [ ] **V16 filler** On a search question the caller hears "One moment." ≈ 0.3–0.5 s after the question, then ticks, then the answer; talking over it stops it. Judge whether it sounds natural or annoying; set `SEARCH_FILLER_TEXT = ""` to turn off
 - [x] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
