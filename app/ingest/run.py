@@ -8,7 +8,7 @@ detect locations from site content, assign page_type/location/retrievable per pa
 idempotent on re-crawl) -> CHUNK only the pages organize says changed, tagged with
 their location -> delete pages no longer linked -> profile extraction -> timezone per
 location (V22) -> facts (plan 07 §5: only pages whose text changed; merge decides the
-winner per fact) -> business summary (plan 07 §6, only when its source pages changed).
+winner per fact; then one `kind='fact'` chunk per active fact for retrieval) -> business summary (plan 07 §6, only when its source pages changed).
 `--only summary|facts` re-runs one step for an already-crawled site (`--only facts
 --dry-run [--model ID]` prints what a model extracts and writes nothing: the OPEN-20 audit);
 `--report conflicts` lists facts whose sources disagree. Indexing
@@ -30,6 +30,7 @@ from app.ingest.chunk import chunk_markdown
 from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
 from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex
 from app.ingest.fetch import fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client
+from app.ingest.fact_chunks import sync_fact_chunks
 from app.ingest.facts import extract_page_facts, pages_to_extract
 from app.ingest.identity import domain_of, site_root
 from app.ingest.merge import MergeStats, apply_page_facts, conflicts_report, settle_facts
@@ -194,10 +195,12 @@ def extract_facts(
     if not dry_run:
         with tenant_session(business_id) as session:
             settle_facts(session, business_id, stats)
+            chunks = sync_fact_chunks(session, business_id)
     return {
         "pages_extracted": stats.pages if not dry_run else len(todo_ids) - failed,
         "facts_seen": stats.facts_seen, "facts_created": stats.created,
         "rejected": rejected, "failed": failed, "by_status": stats.by_status,
+        "fact_chunks": None if dry_run else f"+{chunks.created} ~{chunks.updated} -{chunks.deleted}",
     }
 
 
