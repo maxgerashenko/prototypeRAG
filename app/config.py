@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     twilio_api_key_sid: str = ""  # API key + secret sign Voice SDK access tokens (mode B)
     twilio_api_key_secret: str = ""
     twilio_twiml_app_sid: str = ""
+    # The main Twilio number (E.164, e.g. +15550001234). The voice app's business list
+    # assigns it to one business at a time (POST /businesses/{id}/main-number).
+    twilio_phone_number: str = ""
     # Public URL Twilio reaches us at (the ngrok URL locally, the Cloud Run URL in stage 2).
     # Webhook signatures cover this URL, and the media stream URL is built from it. Empty:
     # derived from the request (Host + X-Forwarded-Proto).

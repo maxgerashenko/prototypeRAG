@@ -1,7 +1,7 @@
 import type { ConversationDetail } from "../api";
 import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
-import { ChevronLeft, PhoneIcon } from "./icons";
+import { ChevronLeft, GlobeIcon } from "./icons";
 import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, plural } from "./format";
 
@@ -59,7 +59,7 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
 
       <div className="footer">
         <button className="btn-pill btn-call" onClick={onContinue}>
-          <PhoneIcon />
+          <GlobeIcon />
           Continue in a new call
         </button>
       </div>

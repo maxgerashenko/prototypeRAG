@@ -7,6 +7,8 @@
 - POST /twilio/status  Call status callback: sets `conversations.ended_at` for a call whose
   WebSocket didn't close cleanly (V19). The summary (DEC-24) hooks in here in step 5.
 - GET /twilio/token    Voice SDK access token for `web/call.html` (mode B).
+- GET /twilio/number   The main number (`TWILIO_PHONE_NUMBER`), or null when not set; the
+  voice app assigns it to a business (app/api/businesses.py).
 
 Business resolution: a Voice SDK call sends `business_id` as a custom parameter (mode B);
 a phone call is matched by the dialled number (`To`) against `businesses.phone_numbers`
@@ -160,6 +162,11 @@ async def twilio_status(request: Request) -> Response:
                     conversation.ended_at = datetime.now().astimezone()
             # step 5 (plan/04-actions.md): the call summary runs here, inside the request (DEC-24)
     return Response(status_code=204)
+
+
+@router.get("/twilio/number")
+def twilio_number() -> dict:
+    return {"number": get_settings().twilio_phone_number or None}
 
 
 @router.get("/twilio/token")
