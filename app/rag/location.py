@@ -1,4 +1,4 @@
-"""Which location a conversation is about (DEC-48, resolves OPEN-23).
+"""Which location a conversation is about (DEC-49, resolves OPEN-23).
 
 To the caller each location is its own business: answers use that location's facts and
 chunks plus the business-wide ones (`location_id IS NULL`: what the business is, its

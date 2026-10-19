@@ -31,7 +31,7 @@ def prepare_prompt(
     with tenant_session(business_id) as session:
         profile = session.get(BusinessProfile, business_id)
         summary = session.get(BusinessSummary, business_id)
-        location_id = default_location_id(session, business_id)  # DEC-48
+        location_id = default_location_id(session, business_id)  # DEC-49
         chunks = retrieve(session, business_id, question, top_n, location_id=location_id)
         messages = build_prompt(
             profile, chunks, history or [], question, summary,

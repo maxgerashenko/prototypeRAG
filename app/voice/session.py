@@ -612,7 +612,7 @@ class CallSession:
             if locations_text := format_locations(
                 session, self.business_id, default_location_id(session, self.business_id)
             ):
-                self._system_prompt += f"\n\n{locations_text}"  # DEC-48
+                self._system_prompt += f"\n\n{locations_text}"  # DEC-49
             if summary_text := format_summary(session.get(BusinessSummary, self.business_id)):
                 self._system_prompt += f"\n\n{summary_text}"
             # A3 (plan/07-knowledge-quality.md §3): business.name is now the brand

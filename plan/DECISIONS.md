@@ -124,8 +124,8 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `blocked` labels (stage = milestone prefix); blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
-| DEC-48 | A conversation is about one location (resolves OPEN-23) | To the caller each location is its own business: retrieval and the prompt use that location's facts/chunks plus business-wide ones (`location_id IS NULL`: what the business is, policies, that other locations exist); the other locations are listed (name, address) but never answered for. The location is fixed by the entry point, not guessed per question; until one can choose (phone number -> location, OPEN-21, stage 3) it is the default location. Storage stays DEC-37 (one business, `location_id` scoping) | 1 · 3 (number -> location) | ✅ (user decision 2026-10-19) |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
+| DEC-49 | A conversation is about one location (resolves OPEN-23) | To the caller each location is its own business: retrieval and the prompt use that location's facts/chunks plus business-wide ones (`location_id IS NULL`: what the business is, policies, that other locations exist); the other locations are listed (name, address) but never answered for. The location is fixed by the entry point, not guessed per question; until one can choose (phone number -> location, OPEN-21, stage 3) it is the default location. Storage stays DEC-37 (one business, `location_id` scoping) | 1 · 3 (number -> location) | ✅ (user decision 2026-10-19) |
 
 ---
 
@@ -862,7 +862,7 @@ indexed, so one question can return both ([07-knowledge-quality.md](07-knowledge
 Consequences: implemented with the retrieval change (build order step 7). OPEN-22 still
 decides how many fallback chunks follow the facts.
 
-### DEC-48 — A conversation is about one location (stage 1; entry-point choice stage 3)
+### DEC-49 — A conversation is about one location (stage 1; entry-point choice stage 3)
 
 Context: the pilot is one business with four locations; address, hours, prices and
 services differ per location (DEC-37). Mixing them in one answer ("open until 11:30" for

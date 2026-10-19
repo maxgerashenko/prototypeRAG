@@ -1,4 +1,4 @@
-"""A conversation is about one location (DEC-48, OPEN-23). Postgres only; the question
+"""A conversation is about one location (DEC-49, OPEN-23). Postgres only; the question
 embedding is faked, so ranking is by keyword."""
 
 import uuid

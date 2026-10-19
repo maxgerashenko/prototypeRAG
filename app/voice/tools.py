@@ -26,7 +26,7 @@ def search_business_info(business_id: uuid.UUID, query: str) -> str:
     with tenant_session(business_id) as session:
         chunks = retrieve(
             session, business_id, query, SEARCH_TOP_N, location_id=default_location_id(session, business_id)
-        )  # DEC-48
+        )  # DEC-49
     return format_chunks(chunks)
 
 
