@@ -44,7 +44,7 @@ def _fake_llm(monkeypatch, result):
     return calls
 
 
-GOOD = {"summary": "Asked about opening hours.", "intent": "opening hours", "outcome": "answered",
+GOOD = {"summary": "Asked about opening hours.", "intent": "opening hours", "outcome": "info_request",
         "follow_up": False}
 TURNS = [("user", "When do you open?"), ("tool", "{...}"), ("assistant", "At nine.")]
 
@@ -60,7 +60,7 @@ def test_stores_summary_and_is_idempotent(business_id, monkeypatch):
     assert summary.summarize_conversation(business_id, cid) is True
     with tenant_session(business_id) as s:
         c = s.get(Conversation, cid)
-        assert (c.summary, c.intent, c.outcome, c.follow_up) == ("Asked about opening hours.", "opening hours", "answered", False)
+        assert (c.summary, c.intent, c.outcome, c.follow_up) == ("Asked about opening hours.", "opening hours", "info_request", False)
         assert c.summarized_at is not None
     assert "Caller: When do you open?" in calls[0][1]["content"] and "tool" not in calls[0][1]["content"].lower()
     # a repeated status callback doesn't call the model again

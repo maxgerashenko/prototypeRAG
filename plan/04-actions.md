@@ -67,7 +67,7 @@ class BookingBackend(Protocol):
 At the end of each call/chat — run **inside a request** (Twilio status callback for calls,
 end-of-chat request for chat), not as fire-and-forget background work, because Cloud Run
 throttles CPU after a response is sent (DEC-24, R19):
-- LLM generates: short summary, caller intent, outcome (`answered | booked | message | transferred | unresolved`),
+- LLM generates: short summary, caller intent, outcome (`info_request | booked | message | transferred | unresolved`; the summary is one standardized line of at most 25 words with every concrete detail (service, time, name, number, unanswered question)),
   extracted contact details, follow-up needed (yes/no), sentiment.
 - Stored in `conversations` table with full transcript.
 - Owner notification: email/SMS/Telegram for bookings, messages, and unresolved calls.
@@ -120,7 +120,7 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 - [ ] Tool-calling loop in the RAG pipeline (text chat first, then voice)
 - [ ] Internal booking backend + rules
 - [ ] SMS confirmation
-- [x] Post-conversation summary job (#43): `actions/summary.py`, run from `POST /twilio/status`; stores summary, intent, outcome, follow_up on `conversations` (migration 0006). Sentiment, contact details and owner notification are not done yet. Needs a live check on the Mac (see 03 "Test on Mac")
+- [x] Post-conversation summary job (#43): `actions/summary.py`, run from `POST /twilio/status`; stores a one-line summary, intent, outcome (info_request, booked, message, transferred, unresolved), follow_up on `conversations` (migration 0006). Sentiment, contact details and owner notification are not done yet. Needs a live check on the Mac (see 03 "Test on Mac")
 - [ ] Owner dashboard: conversations, bookings, unanswered questions
 - [ ] Google Calendar backend (OAuth, free/busy, create event) — stage 3
 - [ ] Owner notifications

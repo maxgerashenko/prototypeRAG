@@ -22,7 +22,7 @@ from app.llm import chat_json
 
 log = logging.getLogger(__name__)
 
-OUTCOMES = ("answered", "booked", "message", "transferred", "unresolved")
+OUTCOMES = ("info_request", "booked", "message", "transferred", "unresolved")
 
 SUMMARY_SCHEMA = {
     "type": "object",
@@ -38,14 +38,21 @@ SUMMARY_SCHEMA = {
 
 _SYSTEM_PROMPT = (
     "You summarize one finished phone call between a caller and a business's voice "
-    "assistant, for the business owner.\n"
-    "- summary: 1-3 sentences, what the caller wanted and what happened.\n"
-    "- intent: what the caller wanted, at most 10 words.\n"
-    "- outcome: answered (questions answered), booked (a booking or appointment was made), "
-    "message (the caller left a message), transferred (handed to a person), or unresolved "
-    "(the assistant could not help).\n"
+    "assistant, for the business owner, who skims many of these.\n"
+    "- outcome: exactly one of\n"
+    "  booked: a booking or appointment was made;\n"
+    "  info_request: the caller wanted information (hours, prices, services, location) and got it;\n"
+    "  message: the caller left a message for the business;\n"
+    "  transferred: handed to a person;\n"
+    "  unresolved: the assistant could not answer or do what the caller wanted.\n"
+    "- summary: ONE line, at most 25 words, packed with the facts the owner needs: what the "
+    "caller wanted plus every concrete detail from the call (service, date and time, party "
+    "size, name, callback number, the question left unanswered). No filler such as 'the caller "
+    "called to', no greetings, no opinions. Example: 'Booked massage Sat 14:00, 2 people, name "
+    "Anna, +1 555 0100.' or 'Asked if dogs are allowed; not in my info.'\n"
+    "- intent: what the caller wanted, 2-5 words, lowercase (e.g. 'book massage', 'opening hours').\n"
     "- follow_up: true if the owner should do something afterwards (call back, answer a "
-    "question the assistant could not).\n"
+    "question the assistant could not); always true for message and unresolved.\n"
     "Use only what the transcript says; do not invent details."
 )
 
