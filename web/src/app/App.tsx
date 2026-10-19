@@ -4,14 +4,16 @@
 // the design's stages. Keyboard and error handling follow the earlier plain-HTML version of
 // this app (main's web/mic-test.html): Space calls / holds to talk, Esc backs out or ends
 // the call, Backspace ends a call, "Unknown business" returns to the list.
-// Phone calls the system takes (Twilio, DEC-44) show up live on the same call screen,
+// Phone calls the system takes (Twilio, DEC-46) show up live on the same call screen,
 // watch-only: the app switches to one when it starts, unless the user is on a call here.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getConversation,
+  getMainNumber,
   listBusinesses,
   listConversations,
+  setMainNumber,
   type Business,
   type ConversationDetail,
   type ConversationSummary,
@@ -66,6 +68,7 @@ export function App() {
   const [transcript, setTranscript] = useState<TranscriptRef | null>(null);
   const [detail, setDetail] = useState<Loadable<ConversationDetail>>({ status: "loading" });
   const [callBizId, setCallBizId] = useState<string | null>(null);
+  const [mainNumber, setMainNumberState] = useState<string | null>(null);
   const voice = useVoiceCall();
   const call = voice.state;
   const detailReq = useRef(0);
@@ -92,6 +95,25 @@ export function App() {
   }, []);
 
   useEffect(loadBusinesses, [loadBusinesses]);
+  useEffect(() => {
+    getMainNumber().then((r) => setMainNumberState(r.number), () => setMainNumberState(null));
+  }, []);
+
+  // picking a business also points the one main number at it (taken off whichever had it),
+  // so dialling the number from a phone reaches the business on screen
+  const assignMainNumber = (bizId: string) => {
+    if (!mainNumber || find(bizId)?.phone_numbers.includes(mainNumber)) return;
+    setMainNumber(bizId, true).then(
+      () => setBusinesses((prev) => ({
+        ...prev,
+        data: prev.data?.map((b) => {
+          const rest = b.phone_numbers.filter((n) => n !== mainNumber);
+          return { ...b, phone_numbers: b.id === bizId ? [...rest, mainNumber] : rest };
+        }),
+      })),
+      (err) => setBanner(`Couldn’t assign ${mainNumber}: ${errorText(err)}`),
+    );
+  };
 
   const openConversation = (bizId: string, convoId: string, returnTo: TranscriptRef["returnTo"]) => {
     const req = ++detailReq.current;
@@ -225,7 +247,7 @@ export function App() {
   const all = businesses.data ?? [];
   const find = (id: string | null) => all.find((b) => b.id === id);
   const fallbackBiz = (id: string | null): Business =>
-    find(id) ?? { id: id ?? "", name: "Business", website: null, domain: null, conversation_count: 0, default_location: null };
+    find(id) ?? { id: id ?? "", name: "Business", website: null, domain: null, conversation_count: 0, default_location: null, phone_numbers: [] };
 
   return (
     <div className="vapp">
@@ -240,7 +262,10 @@ export function App() {
           onQuery={setQuery}
           onPick={(id) => {
             setSelId(id);
-            if (id) loadConvos(id);
+            if (id) {
+              loadConvos(id);
+              assignMainNumber(id);
+            }
           }}
           onOpen={(bizId, convoId) => openConversation(bizId, convoId, "select")}
           onSeeAll={(bizId) => {
@@ -248,6 +273,7 @@ export function App() {
             setStage("convos");
           }}
           onCall={startCall}
+          mainNumber={mainNumber}
           onRetry={loadBusinesses}
           onDismissBanner={() => setBanner(null)}
         />

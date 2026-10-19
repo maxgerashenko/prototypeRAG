@@ -101,9 +101,9 @@ group one thread at a time, or expect merge conflicts.
 | # | Step | Plan ref | Main files | Needs |
 |---|---|---|---|---|
 | 1 | Twilio live: Voice SDK call through ngrok, then the trial number; latency over Twilio | 03 Tasks | none (manual) | Mac, Twilio |
-| 2 | Real call through the React app; "Test on Mac" checks still open (V3, V9, V10, V12, V17; V7, V14, V24 and V25 done 2026-10-18) | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
+| 2 | Real call through the React app; "Test on Mac" checks still open (V3, V9, V10, V12, V17 — checked by code review only, not run live; V7, V14, V24 and V25 done 2026-10-18) | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
 | 3 | Filler while a tool runs, if V16 latency needs it | 03 Tasks, V16 | `voice/session.py` | — |
-| 4 | Barge-in robustness if V9/V10 fail; VAD `end_silence_ms` tuning | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
+| 4 | ✅ code 2026-10-18 (DEC-44) Barge-in robustness (stricter VAD while the bot speaks) + `end_silence_ms` tuned 500→700ms, both now env vars; none of it live-tested yet — still needs the Mac mic test (V9, V10) | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
 | 5 | Call transfer + take-a-message fallback | 03 Tasks | `voice/session.py`, `voice/tools.py`, `actions/` | after 9 |
 | 6 | Decide OPEN-20, then `facts.py` + `merge.py` incl. hours from `site_chrome` (V23) | 07 §5, §9 | `ingest/facts.py`, `merge.py`, `run.py` | LM Studio for OPEN-20 |
 | 7 | Location card → prompt; fact chunks in retrieval, location filter, fact-first tool result (OPEN-23) | 07 §3, §5.5 | `rag/prompt.py`, `rag/retrieve.py`, `rag/index.py`, `voice/tools.py` | after 6 |
@@ -118,7 +118,7 @@ group one thread at a time, or expect merge conflicts.
 | 16 | Gemini comparison (step 6): request `EMBED_DIM` from the embeddings endpoint, eval + booking tests, V20 | step 6, 02 Tasks | `llm.py`, `.env.example` | Gemini key; reuse closed PR #20 |
 | 17 | Containerize (step 7): API `Dockerfile` with Node build stage + Compose api/crawler/migrate | step 7, DEC-41 | `Dockerfile`, `docker-compose.yml`, README | reuse closed PR #21 |
 | 18 | Crawler: PDF menus wired in; honour `Crawl-delay`; tests on 3 more real sites | 01 Tasks | `ingest/discover.py`, `fetch.py`, `run.py`, `tests/` | — |
-| 19 | Show the full prompt in the chat page / debug endpoint; log every LLM call | 02 Tasks | `api/chat.py`, `web/`, `llm.py` | — |
+| 19 | ✅ (PRs #36, #33; issue #47) Show the full prompt in the chat page / debug endpoint; log every LLM call | 02 Tasks | `api/chat.py`, `web/`, `llm.py` | — |
 | 20 | LM Studio setup notes | 02 Tasks | README | — |
 
 Same-file groups: `voice/session.py` 3, 4, 5, 10 · `voice/tools.py` 5, 7, 9 · `rag/prompt.py`

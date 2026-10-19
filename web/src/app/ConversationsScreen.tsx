@@ -1,6 +1,6 @@
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
-import { ChatIcon, ChevronLeft, ClockIcon, PhoneIcon } from "./icons";
+import { ChatIcon, ChevronLeft, ClockIcon, GlobeIcon } from "./icons";
 import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
 
@@ -34,7 +34,7 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
 
       <div style={{ padding: "0 20px 20px" }}>
         <button className="btn-pill btn-call" onClick={onCall}>
-          <PhoneIcon />
+          <GlobeIcon />
           Start new call
         </button>
       </div>

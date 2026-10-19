@@ -1,7 +1,8 @@
 """CLI entry (plan/01-crawler.md, plan/07-knowledge-quality.md §2/§8):
 `python -m app.ingest.run --url <site>`.
 
-Pipeline (plan 07 §2): discover (priority order) -> fetch -> clean (main text + site
+Pipeline (plan 07 §2): discover (priority order) -> fetch (HTML pages, plus same-site PDFs
+they link to -- menus, price lists) -> clean (main text + site
 chrome kept apart) -> store every page -> ORGANIZE (dedupe chrome into one pseudo-page,
 detect locations from site content, assign page_type/location/retrievable per page,
 idempotent on re-crawl) -> CHUNK only the pages organize says changed, tagged with
@@ -23,9 +24,9 @@ from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, Location, Page
 from app.db.session import SessionLocal
 from app.ingest.chunk import chunk_markdown
-from app.ingest.clean import clean_page, content_hash, extract_og_site_name, extract_title
-from app.ingest.discover import RobotsChecker, discover_links, discover_pages, has_noindex
-from app.ingest.fetch import fetch_robots_txt, fetch_sitemap, fetch_text, make_client
+from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
+from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex
+from app.ingest.fetch import fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client
 from app.ingest.identity import domain_of, site_root
 from app.ingest.organize import (
     chrome_pseudo_url,
@@ -46,6 +47,10 @@ from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 from app.ingest.summary import summarize_business
 from app.ingest.timezone import assign_timezones
 
+
+# PDFs linked from crawled pages, on top of max_pages (a sitemap crawl already fills
+# max_pages with pages, so counting PDFs against it would leave no room for them)
+DEFAULT_PDF_CAP = 10
 
 _PROFILE_FIELDS = (
     "name", "address", "phone", "email",
@@ -114,10 +119,12 @@ def _expand_by_links(
                 continue
             try:
                 html = fetch_text(url, client)
-                time.sleep(client._crawl_delay)
             except Exception as exc:
                 print(f"fetch failed, skipping: {url} ({exc})")
                 continue
+            finally:
+                # a failed request still hit the server -- the delay applies to it too
+                time.sleep(client._crawl_delay)
             fetched[url] = html
             for link in discover_links(html, url):
                 # robots check here too, not only before fetching the frontier: every URL in
@@ -172,8 +179,10 @@ def crawl_business(
     max_depth: int = 3,
     delay_seconds: float = 0.5,
     extract_profile: bool = True,
+    pdf_cap: int = DEFAULT_PDF_CAP,
 ) -> dict:
-    """One full crawl: discover -> fetch -> clean -> store every page -> organize
+    """One full crawl: discover -> fetch (pages, then up to `pdf_cap` linked PDFs) ->
+    clean -> store every page -> organize
     (locations, page type, retrievable) -> chunk the pages organize touched -> delete
     pages no longer linked -> profile extraction (plan 07 §2) -> timezone per location (V22)."""
     client = make_client(delay_seconds)
@@ -184,6 +193,13 @@ def crawl_business(
         robots_txt = fetch_robots_txt(base_url, client)
         sitemap_xml = fetch_sitemap(base_url, client)
         robots_checker = RobotsChecker(robots_txt) if robots_txt else None
+        robots_delay = robots_checker.crawl_delay() if robots_checker else None
+        if robots_delay is not None and robots_delay > client._crawl_delay:
+            # honour it in full, however long (correctness & legal first): only ever
+            # raises our own delay, never lowers it below delay_seconds
+            client._crawl_delay = robots_delay
+            print(f"robots.txt Crawl-delay: {robots_delay:g} s between requests")
+        time.sleep(client._crawl_delay)  # after the robots.txt + sitemap requests
 
         sitemap_urls = discover_pages(start_url, sitemap_xml, robots_txt, max_pages, max_depth)
         if len(sitemap_urls) > 1:
@@ -200,20 +216,44 @@ def crawl_business(
         brand_name: str | None = None  # first og:site_name seen (A3) -- site-wide, so one hit is enough
         noindex_urls: set[str] = set()  # K1: honoured by organize_business as "not retrievable"
 
+        pdf_urls_seen: set[str] = set()
+
+        # urls_to_crawl grows while this loop runs: PDFs linked from a page are appended
+        # to it (so they're fetched here too, and kept by delete_pages_not_in below)
         for url in urls_to_crawl:
             try:
                 html = fetched.get(url)
+                document = None
                 if html is None:
-                    html = fetch_text(url, client)
-                    time.sleep(client._crawl_delay)
+                    try:
+                        document = fetch_document(url, client)
+                    finally:
+                        time.sleep(client._crawl_delay)
+                    html = document.html
 
-                if has_noindex(html):
-                    noindex_urls.add(url)
-                title = extract_title(html)
-                cleaned = clean_page(html)
+                if html is None:
+                    if not document.pdf_text:
+                        print(f"skipping {url}: PDF has no text (scanned image?)")
+                        continue
+                    title = document.pdf_title
+                    cleaned = CleanedPage(main_markdown=document.pdf_text, chrome_markdown="", language=None)
+                else:
+                    if has_noindex(html):
+                        noindex_urls.add(url)
+                    title = extract_title(html)
+                    cleaned = clean_page(html)
+                    if brand_name is None:
+                        brand_name = extract_og_site_name(html)
+                    for pdf_url in discover_pdf_links(html, url):
+                        if len(pdf_urls_seen) >= pdf_cap:
+                            break
+                        if pdf_url in pdf_urls_seen or pdf_url in urls_to_crawl:
+                            continue
+                        if robots_checker and not robots_checker.can_fetch(pdf_url):
+                            continue
+                        pdf_urls_seen.add(pdf_url)
+                        urls_to_crawl.append(pdf_url)
                 hash_ = content_hash(cleaned.main_markdown)
-                if brand_name is None:
-                    brand_name = extract_og_site_name(html)
 
                 with tenant_session(business_id) as session:
                     page, changed = upsert_page(

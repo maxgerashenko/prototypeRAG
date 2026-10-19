@@ -1,4 +1,4 @@
-// Phone calls the system is taking right now (DEC-44), from GET /voice/feed: a pure
+// Phone calls the system is taking right now (DEC-46), from GET /voice/feed: a pure
 // reducer (unit-tested in liveCalls.test.ts) that turns feed messages into one CallState per
 // call with the same callReducer the app's own calls use, so a phone call shows on the same
 // call screen. useLiveCalls.ts wires it to an EventSource.

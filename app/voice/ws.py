@@ -9,7 +9,7 @@ Thin like `browser_ws.py`: μ-law ↔ PCM16 at 8 kHz in and out, the call loop i
 `session.py` does the rest. The session's other events (transcript, reply, latency) have
 no Twilio equivalent and are only logged. When the session hangs up (V17: silence, or the
 caller said goodbye) the socket is closed, which ends the call. All events, and how much
-audio went out, also go to the web app's live feed (`call_feed.py`, DEC-44), so `/web/` shows the call as it happens.
+audio went out, also go to the web app's live feed (`call_feed.py`, DEC-46), so `/web/` shows the call as it happens.
 """
 
 import base64

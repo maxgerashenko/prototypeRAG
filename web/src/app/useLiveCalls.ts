@@ -4,7 +4,7 @@ import { liveCallsReducer, type PhoneCalls } from "./liveCalls";
 
 const reducer = (calls: PhoneCalls, msg: LiveFeedMessage) => liveCallsReducer(calls, msg, Date.now());
 
-/** Phone calls in progress, live from GET /voice/feed (DEC-44). The feed is open only while
+/** Phone calls in progress, live from GET /voice/feed (DEC-46). The feed is open only while
  * the page is visible: an open stream keeps a Cloud Run instance busy (DEC-35), and the
  * snapshot sent on reconnect catches the page up when it's shown again. */
 export function useLiveCalls(): PhoneCalls {

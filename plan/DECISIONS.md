@@ -120,7 +120,9 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-41 | Web UI stack | React + TypeScript (Vite multi-page build) in `web/`, built to `web/dist` and served by the one FastAPI service under `/web`; voice app, debug pages and later the owner dashboard | 1 · 2 (image build) | ✅ |
 | DEC-43 | Twilio adapter: business lookup and trust | Voice SDK calls send `business_id` as a custom parameter, phone calls match `To` in `businesses.phone_numbers`; webhooks checked with `X-Twilio-Signature` already in stage 1 (ngrok is public); `/voice/ws` accepts only streams carrying an HMAC from `/twilio/voice`; Voice SDK token served to localhost only; `conversations.call_sid` for the status callback | 1 · 3 (lookups need an RLS-exempt path) | ✅ |
 | DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
-| DEC-44 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
+| DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (live Mac mic test) |
+| DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `blocked` labels (stage = milestone prefix); blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
+| DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 
 ---
 
@@ -743,7 +745,7 @@ Consequences:
   known — they need an RLS-exempt path (security-definer function or admin role), like
   `/businesses` ([06-scale.md](06-scale.md) tasks).
 - Twilio's per-call events (transcript, reply text) don't exist on a phone line; the session's
-  events are logged only, and `clear` maps to Twilio's `clear` (barge-in). DEC-44 also
+  events are logged only, and `clear` maps to Twilio's `clear` (barge-in). DEC-46 also
   streams them to the voice app, which shows the call live.
 - Fixed at the merge: a question and its answer are saved in one transaction and get the
   same `created_at` (`now()` = transaction start); `ORDER BY created_at, id` then ordered
@@ -753,7 +755,68 @@ Consequences:
 - Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
   second business.
 
-### DEC-44 — Phone calls shown live in the voice app (stage 1)
+### DEC-44 — Barge-in robustness (V9/V10) and turn-end tuning (stage 1, step 4)
+
+Context: the 2026-10-03 mic test ([03-voice-channel.md](03-voice-channel.md) "Known
+problems") found two open robustness gaps and one latency/correctness trade still to
+tune, none of them live-confirmed yet on the Mac (as of 2026-10-18 only checked by code
+review, per the "Test on Mac" checklist):
+- **V9** — speaker echo could make the VAD hear the bot's own voice as the caller
+  interrupting (not reproduced without headphones; the clean speech fixture can't
+  simulate it, only a real mic/speaker setup can).
+- **V10** — a short cough or "mm-hm" during an answer could look like it should stop the
+  bot, with no resume, by design margin only: the normal 160 ms minimum speech length is
+  short.
+- Mid-thought pauses ("What if I want to come?" … "Today, night at 9 pm") can end a turn
+  before the caller is done, cut by the VAD's `end_silence_ms` silence window.
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| V9/V10 fix | **Stricter VAD while the bot is active** (`TurnDetector.set_bot_active()`): higher `webrtcvad` aggressiveness + a longer minimum speech length before `speech_start` fires, both only while deciding whether to *start* a turn — reverts to the normal settings the instant a turn is confirmed | One mechanism for both; no STT dependency; cheap (`Vad.set_mode()` on the existing instance); doesn't touch end-of-speech detection | A genuine barge-in takes a little longer to register while the bot is speaking (up to `VAD_BARGE_IN_START_MS` instead of the normal start); a quieter real interruption could in theory be missed at the higher aggressiveness | ✅ |
+| | Require STT text before sending `clear` (the original V9 fix idea) | Confirms real words before interrupting | Doesn't actually distinguish echo from a real caller — echo of the bot's own words transcribes just as well as real speech; adds the STT round trip to every barge-in's latency | ❌ |
+| | Leave V10's existing 160 ms minimum as the only gate (no bot-active gate) | Simplest, no change | Same 160 ms whether or not the bot is talking, so the exact case most likely to misfire (echo while the bot speaks) gets no extra protection | ❌ |
+| Turn-end tuning | **Raise `end_silence_ms` 500→700 ms** (plan latency budget widened 300–500 → 300–700 ms) | Fewer turns cut by a mid-thought pause, the caller experience problem the 2026-10-03 test flagged | ~200 ms more latency on every turn | ✅ |
+| | Leave at 500 ms | No extra latency | The mid-thought-pause problem is "by design" (history keeps both parts, DEC-30's shared-tools model doesn't change), but it reads as the bot interrupting the caller | ❌ for now — revisit if 700 ms still cuts turns often in real calls |
+| | Adaptive end-silence (e.g. longer if the partial transcript looks unfinished) | Could fix the pause case without a blanket latency cost | Needs STT interim text mid-turn and a model of "sounds unfinished"; a bigger feature than this step's scope | ❌ for now — reconsider if 700 ms isn't enough |
+| Tunability | **All three (`VAD_END_SILENCE_MS`, `VAD_BARGE_IN_AGGRESSIVENESS`, `VAD_BARGE_IN_START_MS`) are env vars (`.env.example`), not code constants** | Re-tunable from real-call data without a deploy, matching `VOICE_REASONING_EFFORT`'s pattern | One more thing to keep documented | ✅ |
+
+Consequences:
+- Priority order applied: caller experience (fewer false barge-ins, fewer cut-off turns)
+  over the local latency budget, which the table above records as now widened.
+- None of this is live-confirmed yet — this decision hardens the code ahead of the Mac
+  mic test (V9 with and without headphones, V10's cough/"mm-hm" case), it doesn't close
+  either item.
+- If 700 ms still isn't enough against real mid-thought pauses, the next step is the
+  adaptive option above, not a further blanket increase (diminishing returns on latency
+  spent per turn where most turns don't pause mid-sentence).
+
+### DEC-45 — Task tracking in GitHub Issues and one Project (stage 1)
+
+Context: the plan files hold what each part needs as `- [ ]` lists, but there was no place
+for work in progress, bugs, or "this waits for that" across parts, and no per-task link to
+branch and PR.
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| Tracker | **GitHub Issues + one free GitHub Project** | Next to code and PRs (`Fixes #n`); free (DEC-33); Claude has tools for it | Claude's tools can create sub-issues but not set "blocked by" links | ✅ |
+| | Notion / Linear / Jira | Nicer UI (Linear) | Not tied to commits; Linear paid beyond its free tier; Jira heavy for a solo prototype | ❌ |
+| | Only `plan/*.md` checklists | No API, in git history | No discussion, status or cross-part blocking | ❌ (kept as the plan, not the work log) |
+| Stage vs milestone | **One milestone per plan milestone, named `S<stage> · M<n> <name>`; no stage label** | A stage is too big for one milestone; the prefix sorts milestones by stage and each milestone is in exactly one stage | "All of stage 1" needs a milestone-list view or a Project grouping, not one filter | ✅ |
+| Blocking | **"Blocked by" link in the sidebar + `blocked` label + `Blocked by:` line in the issue body** | Badge in GitHub; one label filter; the body line is readable by Claude | The link is set by hand (one click) | ✅ |
+| | Sub-issues for blocking | Native | Means "part of", not "must finish first" | ❌ (sub-issues only for parts of a bigger issue) |
+
+Rules:
+- Labels: exactly one `area:` (front = `web/`, api = `app/api/` + `main.py`, parser =
+  `app/ingest/`, rag = `app/rag/` + `llm.py`, voice = `app/voice/`, actions = `app/actions/`,
+  other = db, docker, config, docs), one `type:` (feature, bug, chore);
+  `blocked` while a blocker is open. Area is where the fix goes, not where the symptom shows.
+- Plan files stay the plan and link the issue (`- [ ] Booking action (#14)`); decisions
+  stay here. Template: `.github/ISSUE_TEMPLATE/task.md`.
+- An issue blocked by one in a *later* milestone means one of the two is in the wrong milestone.
+- Stage 2 and 3 get milestones now and issues when their stage starts.
+- Milestones play the epic role (grouped work with a progress bar); stage is the `S<n> ·` prefix of the milestone name. No stage labels and no separate epic issues.
+
+### DEC-46 — Phone calls shown live in the voice app (stage 1)
 
 Context: Max wants a call the system takes over Twilio (modes A and B) to show in the web
 app like a call started from its own Call button — same screen, transcript and status,

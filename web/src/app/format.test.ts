@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatsLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText } from "./format";
+import { chatsLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText, fmtPhone } from "./format";
 
 // dates are built in local time, so the tests pass in any time zone
 const local = (y: number, mo: number, d: number, h: number, mi: number, s = 0) =>
@@ -83,5 +83,12 @@ describe("matchesQuery", () => {
     expect(matchesQuery(b, "cornerbakery.example")).toBe(true);
     expect(matchesQuery(b, "dental")).toBe(false);
     expect(matchesQuery({ name: "X", website: null }, "no website")).toBe(true); // like main's page
+  });
+});
+
+describe("fmtPhone", () => {
+  it("groups US/Canada numbers, leaves others as given", () => {
+    expect(fmtPhone("+15550001234")).toBe("+1 (555) 000-1234");
+    expect(fmtPhone("+447700900123")).toBe("+447700900123");
   });
 });

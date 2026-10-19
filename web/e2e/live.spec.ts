@@ -1,4 +1,4 @@
-// Phone calls the system takes show up live in the voice app (DEC-44): GET /voice/feed is
+// Phone calls the system takes show up live in the voice app (DEC-46): GET /voice/feed is
 // mocked as a Server-Sent Events stream. Each response is one batch of feed messages; the
 // page's EventSource reconnects after it (retry: 50 ms) and gets the next batch once the
 // test releases it, like a reconnect that starts with a fresh snapshot.

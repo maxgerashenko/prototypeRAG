@@ -41,7 +41,7 @@ interface CallProps {
   onEnd: () => void;
 }
 
-/** A phone call the system is taking (DEC-44), watched live: no push-to-talk (the caller
+/** A phone call the system is taking (DEC-46), watched live: no push-to-talk (the caller
  * talks on the phone line), and Close stops watching without hanging up. */
 interface PhoneProps {
   biz: Business;

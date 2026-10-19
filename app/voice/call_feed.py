@@ -1,4 +1,4 @@
-"""Live phone calls for the web app (DEC-44): GET /voice/feed, Server-Sent Events.
+"""Live phone calls for the web app (DEC-46): GET /voice/feed, Server-Sent Events.
 
 When the system takes a call over Twilio (`ws.py`, modes A and B), the voice app at
 `/web/` shows it the way it shows its own browser calls: the same call screen, transcript
@@ -15,7 +15,7 @@ Feed messages (one JSON object per SSE `data:` line):
 
 Events only, no audio: watching doesn't let you listen in. In-memory and per process:
 fine for stage 1 (one uvicorn) and one Cloud Run instance; several instances in stage 2
-would need a shared channel (Postgres LISTEN/NOTIFY), see DEC-44. Lists calls of every
+would need a shared channel (Postgres LISTEN/NOTIFY), see DEC-46. Lists calls of every
 business, as open as `/businesses` and the conversations API until access control lands
 (OPEN-19); per-owner scoping is stage 3 (OPEN-12).
 """

@@ -1,4 +1,4 @@
-"""Live phone calls for the web app (DEC-44): the in-memory feed of `app/voice/call_feed.py` and
+"""Live phone calls for the web app (DEC-46): the in-memory feed of `app/voice/call_feed.py` and
 what a Twilio call over /voice/ws publishes to it. Fake STT/TTS/LLM, real Postgres, the
 in-memory socket of tests/test_twilio.py.
 """

@@ -7,7 +7,7 @@ import type { Business, ConversationDetail, ConversationSource, ConversationSumm
 const MIN = 60_000;
 
 export function biz(id: string, name: string, website: string | null, conversation_count = 0, domain: string | null = null): Business {
-  return { id, name, website, domain, conversation_count, default_location: null };
+  return { id, name, website, domain, conversation_count, default_location: null, phone_numbers: [] };
 }
 
 /** A stored conversation, shaped like app/api/conversations.py: messages alternate
@@ -38,17 +38,30 @@ export interface ApiState {
   /** Make an endpoint fail: "businesses" | "conversations" | "detail". */
   fail: Set<string>;
   requests: string[];
+  /** GET /twilio/number; null = TWILIO_PHONE_NUMBER not set. */
+  mainNumber: string | null;
 }
 
 export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise<ApiState> {
-  const api: ApiState = { businesses: [], conversations: {}, fail: new Set(), requests: [], ...init };
+  const api: ApiState = { businesses: [], conversations: {}, fail: new Set(), requests: [], mainNumber: null, ...init };
   const json = (body: unknown) => ({ contentType: "application/json", body: JSON.stringify(body) });
+  await page.route("**/twilio/number", (route) => route.fulfill(json({ number: api.mainNumber })));
   await page.route(
     (url) => url.pathname.startsWith("/businesses"),
     async (route) => {
       const path = new URL(route.request().url()).pathname;
-      api.requests.push(path);
-      const [, , bizId, , convoId] = path.split("/");
+      const method = route.request().method();
+      api.requests.push(method === "GET" ? path : `${method} ${path}`);
+      const [, , bizId, sub, convoId] = path.split("/");
+      if (sub === "main-number" && api.mainNumber) {
+        // like app/api/businesses.py: the number moves to this business, or comes off it
+        const n = api.mainNumber;
+        api.businesses = api.businesses.map((b) => {
+          const rest = b.phone_numbers.filter((x) => x !== n);
+          return { ...b, phone_numbers: method === "POST" && b.id === bizId ? [...rest, n] : rest };
+        });
+        return route.fulfill(json({ business_id: bizId, number: method === "POST" ? n : null }));
+      }
       const kind = convoId ? "detail" : bizId ? "conversations" : "businesses";
       if (api.fail.has(kind)) return route.fulfill({ status: 500, body: "boom" });
       if (kind === "businesses") return route.fulfill(json(api.businesses));
