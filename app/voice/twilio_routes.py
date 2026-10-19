@@ -5,7 +5,8 @@
   WebSocket `/voice/ws` (`ws.py`), which runs the call. The caller hears
   ringing while this runs, which is also when the DB wakes up (DEC-17, DEC-35).
 - POST /twilio/status  Call status callback: sets `conversations.ended_at` for a call whose
-  WebSocket didn't close cleanly (V19). The summary (DEC-24) hooks in here in step 5.
+  WebSocket didn't close cleanly (V19), then stores the call summary (DEC-24, run inside
+  the request: app/actions/summary.py).
 - GET /twilio/token    Voice SDK access token for `web/call.html` (mode B).
 - GET /twilio/number   The main number (`TWILIO_PHONE_NUMBER`), or null when not set; the
   voice app assigns it to a business (app/api/businesses.py).
@@ -29,12 +30,14 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import any_, literal, select
 from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VoiceGrant
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
+from app.actions.summary import summarize_conversation
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, Conversation
@@ -160,7 +163,9 @@ async def twilio_status(request: Request) -> Response:
                 conversation = session.get(Conversation, row.id)
                 if conversation is not None and conversation.ended_at is None:
                     conversation.ended_at = datetime.now().astimezone()
-            # step 5 (plan/04-actions.md): the call summary runs here, inside the request (DEC-24)
+            # DEC-24: summarize inside the request (CPU is throttled after the response, R19);
+            # blocking LLM call, so off the event loop. Failures are logged, never raised.
+            await run_in_threadpool(summarize_conversation, row.business_id, row.id)
     return Response(status_code=204)
 
 

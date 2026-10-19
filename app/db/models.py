@@ -330,6 +330,9 @@ class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (
         CheckConstraint("channel IN ('chat', 'voice')", name="channel"),
+        CheckConstraint(
+            "outcome IN ('answered', 'booked', 'message', 'transferred', 'unresolved')", name="outcome"
+        ),
         UniqueConstraint("business_id", "id"),
     )
 
@@ -342,6 +345,12 @@ class Conversation(Base):
     call_sid: Mapped[str | None] = mapped_column(Text, unique=True)
     started_at: Mapped[datetime] = _now()
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Post-call summary (app/actions/summary.py, DEC-24); NULL until `summarized_at` is set.
+    summary: Mapped[str | None] = mapped_column(Text)
+    intent: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str | None] = mapped_column(Text)
+    follow_up: Mapped[bool | None] = mapped_column(Boolean)
+    summarized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Message(Base):

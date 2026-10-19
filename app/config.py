@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:1234/v1"
     llm_api_key: str = "lm-studio"
     llm_model: str = "google/gemma-4-12b"  # chat/voice model (DEC-32)
+    # fact extraction (plan/07 §5.3, OPEN-20) is an offline job, so it may use a stronger
+    # model than the chat one; empty = LLM_MODEL
+    facts_llm_model: str = ""
     embed_base_url: str = "http://localhost:1234/v1"
     embed_api_key: str = "lm-studio"
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"

@@ -333,6 +333,12 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **Facts extraction (OPEN-20, V23)** on the crawled pilot: `uv run python -m app.ingest.run
+  --url https://www.abathhouse.com/ --only facts --dry-run --force --model google/gemma-4-12b`,
+  then again with `--model qwen/qwen3.6-35b-a3b` (`lms ps` first). Audit 5 pages: every
+  `+` line true to its quote, nothing missed, rejections sensible; the site-chrome page
+  must yield the "7 days a week 8am to 11:30pm" hours fact. Pick the model → `FACTS_LLM_MODEL`
+  in `.env`, then run without `--dry-run` and check `--report conflicts`.
 - [ ] **Real call through the React app** (`/web/`, push-to-talk): STT/TTS + LM Studio end
   to end — the open task above. Steps:
   - [ ] `gcloud auth application-default login` (Speech-to-Text and Text-to-Speech
@@ -342,6 +348,11 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
     business that's been crawled and indexed
   - [ ] `npm run build` in `web/`, then `uv run uvicorn app.main:app`
   - [ ] Open `/web/` and hold to talk: the reply is heard and the latency line looks sane
+- [ ] **Post-call summary (#43, DEC-24)**: `uv run alembic upgrade head` (0006), make a
+  short Voice SDK call (`/web/call.html`), hang up; the `conversations` row has `summary`,
+  `intent`, `outcome`, `follow_up`, `summarized_at` set (the status callback needs the ngrok
+  URL as the TwiML App's status URL). A second status callback must not call the model again.
+  Also `uv run pytest tests/test_call_summary.py tests/test_twilio.py` (needs pgvector Postgres)
 - [x] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn

@@ -7,8 +7,11 @@ chrome kept apart) -> store every page -> ORGANIZE (dedupe chrome into one pseud
 detect locations from site content, assign page_type/location/retrievable per page,
 idempotent on re-crawl) -> CHUNK only the pages organize says changed, tagged with
 their location -> delete pages no longer linked -> profile extraction -> timezone per
-location (V22) -> business summary (plan 07 §6, only when its source pages changed).
-`--only summary` re-runs just the summary for an already-crawled site. Indexing
+location (V22) -> facts (plan 07 §5: only pages whose text changed; merge decides the
+winner per fact) -> business summary (plan 07 §6, only when its source pages changed).
+`--only summary|facts` re-runs one step for an already-crawled site (`--only facts
+--dry-run [--model ID]` prints what a model extracts and writes nothing: the OPEN-20 audit);
+`--report conflicts` lists facts whose sources disagree. Indexing
 (embedding) is a separate step: `python -m app.rag.index`.
 """
 
@@ -27,7 +30,9 @@ from app.ingest.chunk import chunk_markdown
 from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
 from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex
 from app.ingest.fetch import fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client
+from app.ingest.facts import extract_page_facts, pages_to_extract
 from app.ingest.identity import domain_of, site_root
+from app.ingest.merge import MergeStats, apply_page_facts, conflicts_report, settle_facts
 from app.ingest.organize import (
     chrome_pseudo_url,
     chunk_prefix,
@@ -139,6 +144,61 @@ def _expand_by_links(
         frontier = next_frontier
 
     return all_urls[:max_pages], fetched
+
+
+def extract_facts(
+    business_id: uuid.UUID, force: bool = False, model: str | None = None, dry_run: bool = False, verbose: bool = False
+) -> dict:
+    """Facts step (plan 07 §5): extract from every page whose text changed since its last
+    extraction (all with `force`), store them, then settle which fact wins per key.
+    `dry_run` extracts and prints but writes nothing. One page failing doesn't stop the
+    rest; its `extracted_hash` stays old, so the next run retries it."""
+    with tenant_session(business_id) as session:
+        business = session.get(Business, business_id)
+        if business is None:
+            raise LookupError(f"unknown business {business_id}")
+        name = None if is_placeholder_name(business.name) else business.name
+        locations = {
+            loc.name: loc.id for loc in session.scalars(select(Location).where(Location.business_id == business_id)) if loc.name
+        }
+        location_names = {loc_id: n for n, loc_id in locations.items()}
+        pages = list(session.scalars(select(Page).where(Page.business_id == business_id)))
+        todo = pages_to_extract(pages, force=force)
+        todo_ids = [p.id for p in todo]
+        for p in todo:
+            session.expunge(p)  # the LLM calls below run outside any transaction
+
+    stats = MergeStats()
+    rejected = failed = 0
+    for page in todo:
+        try:
+            result = extract_page_facts(page, name, locations, location_names.get(page.location_id), model=model)
+        except Exception as exc:
+            print(f"facts failed, will retry next run: {page.url} ({exc})")
+            failed += 1
+            continue
+        rejected += len(result.rejected)
+        if verbose or dry_run:
+            print(f"\n== {page.url} ({page.page_type}): {len(result.facts)} facts, {len(result.rejected)} rejected")
+            for f in result.facts:
+                print(f"  + [{f.type}] {location_names.get(f.location_id, 'all')}: {f.statement}  | {f.quote!r}")
+            for raw, reason in result.rejected:
+                print(f"  - {reason}: {raw.get('statement') or raw}")
+        if dry_run:
+            continue
+        with tenant_session(business_id) as session:
+            live = session.get(Page, page.id)
+            if live is None or live.content_hash != page.content_hash:
+                continue  # re-crawled while the model ran; the next run extracts the new text
+            apply_page_facts(session, business_id, live, result.facts, stats)
+    if not dry_run:
+        with tenant_session(business_id) as session:
+            settle_facts(session, business_id, stats)
+    return {
+        "pages_extracted": stats.pages if not dry_run else len(todo_ids) - failed,
+        "facts_seen": stats.facts_seen, "facts_created": stats.created,
+        "rejected": rejected, "failed": failed, "by_status": stats.by_status,
+    }
 
 
 def _rechunk_page(session, business_id: uuid.UUID, page: Page, business_name: str) -> None:
@@ -347,6 +407,15 @@ def crawl_business(
             except Exception as exc:
                 print(f"timezone lookup failed: {exc}")
 
+        # plan 07 §5: after organize (page types, locations, site-chrome page) and before
+        # the summary; needs the LLM like the profile does
+        facts_summary = None
+        if extract_profile:
+            try:
+                facts_summary = extract_facts(business_id)
+            except Exception as exc:
+                print(f"facts failed: {exc}")
+
         # plan 07 §6: last, after organize stored the testimonials it reads
         summary_status = "skipped"
         if extract_profile:
@@ -364,6 +433,7 @@ def crawl_business(
             "locations_found": organize_result.locations_found,
             "profile_extracted": profile_extracted,
             "timezones_set": timezones_set,
+            "facts": facts_summary,
             "summary": summary_status,
         }
     finally:
@@ -376,13 +446,27 @@ def main() -> None:
     parser.add_argument("--business-id", type=uuid.UUID, default=None)
     parser.add_argument("--max-pages", type=int, default=200)
     parser.add_argument("--no-profile", action="store_true")
-    parser.add_argument("--only", choices=["summary"], help="re-run one step on the stored pages, no crawl")
-    parser.add_argument("--force", action="store_true", help="with --only summary: regenerate even if unchanged")
+    parser.add_argument("--only", choices=["summary", "facts"], help="re-run one step on the stored pages, no crawl")
+    parser.add_argument("--force", action="store_true", help="with --only: redo even if nothing changed")
+    parser.add_argument("--dry-run", action="store_true", help="with --only facts: print the facts, write nothing")
+    parser.add_argument("--model", help="with --only facts: model ID instead of FACTS_LLM_MODEL (OPEN-20 audit)")
+    parser.add_argument("--report", choices=["conflicts"], help="print a report on the stored facts, no crawl")
     args = parser.parse_args()
 
     business_id = resolve_business(args.url, args.business_id)
+    if args.report == "conflicts":
+        with tenant_session(business_id) as session:
+            lines = conflicts_report(session, business_id)
+        print("\n".join(lines) or "no conflicts")
+        return
     if args.only == "summary":
         print(f"summary: {summarize_business(business_id, force=args.force)}")
+        return
+    if args.only == "facts":
+        for key, value in extract_facts(
+            business_id, force=args.force, model=args.model, dry_run=args.dry_run, verbose=True
+        ).items():
+            print(f"{key}: {value}")
         return
 
     summary = crawl_business(
