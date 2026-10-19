@@ -123,6 +123,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (live Mac mic test) |
 | DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `blocked` labels (stage = milestone prefix); blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
+| DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 
 ---
 
@@ -845,6 +846,20 @@ Consequences:
   (OPEN-12).
 - A page that falls 500 messages behind gets a fresh snapshot instead.
 
+### DEC-47 — Fact vs raw chunk duplicates in retrieval (stage 1)
+
+Context: a fact (`chunks.kind='fact'`) is extracted from a page whose raw chunks are also
+indexed, so one question can return both ([07-knowledge-quality.md](07-knowledge-quality.md)
+§5.5). Max asked how to avoid the duplicate (2026-10-19).
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **A. Quote match:** drop a returned scraped chunk if it contains the quote of a returned fact (`fact_sources.quote`) | Keeps what extraction missed (recall is never 100 %, R1); no new schema; reversible | A chunk that only partly overlaps a quote can survive as a near-duplicate; one substring check per result | ✅ |
+| B. Never retrieve chunks of pages that yielded facts | Simplest; smallest tool result (V16) | Anything the extractor missed on that page is unreachable (assistant says "I don't know" when the page says); hard to undo; makes the OPEN-22 eval moot | ❌ |
+
+Consequences: implemented with the retrieval change (build order step 7). OPEN-22 still
+decides how many fallback chunks follow the facts.
+
 ## 4. Still considering (open questions)
 
 Grouped by the stage in which the answer is needed.
@@ -855,8 +870,8 @@ Grouped by the stage in which the answer is needed.
 | OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? May a summary derived from Places reviews be stored (assumed no, DEC-39)? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
 | OPEN-18 | 1 | Phone/booking tests with the pilot (DEC-31) | Browser test calls by the developer only (Voice SDK, DEC-34), with the pilot's data as a fixture · swap in a consenting business first | DEC-31 caveat (R10) — needed before stage 1 step 4 (Twilio) |
-| OPEN-20 | 1 | Local model for fact extraction (DEC-38) | `google/gemma-4-12b` with thinking on (already loaded) · `qwen/qwen3.6-35b-a3b` thinking on (stronger, ~27 GB, shares memory with code delegation) · Gemini Flash already in stage 1 (cents per crawl, approx.) | Precision audit on 5 pilot pages — needed before `facts.py` ([07-knowledge-quality.md](07-knowledge-quality.md)) |
-| OPEN-22 | 1 | Role of raw page chunks once facts exist (DEC-38) | Fallback only when no fact scores above a threshold · always 1–2 chunks after the facts · equal ranking with a fact boost · facts only | A/B eval with `RETRIEVAL_MODE` + V16 latency — needed before the retrieval change is final |
+| OPEN-20 | 1 | Local model for fact extraction (DEC-38) | `google/gemma-4-12b` with thinking on (already loaded) · `qwen/qwen3.6-35b-a3b` thinking on (stronger, ~27 GB, shares memory with code delegation) · Gemini Flash already in stage 1 (cents per crawl, approx.) | Precision audit on 5 pilot pages (`run --only facts --dry-run --model <id>`, built 2026-10-19; needs the Mac) — `facts.py` runs meanwhile on `FACTS_LLM_MODEL`/`LLM_MODEL` ([07-knowledge-quality.md](07-knowledge-quality.md)) |
+| OPEN-22 | 1 | Role of raw page chunks once facts exist (DEC-38) | Fallback only when no fact scores above a threshold · always 1–2 chunks after the facts · equal ranking with a fact boost · facts only | A/B eval with `RETRIEVAL_MODE` + V16 latency — needed before the retrieval change is final. Duplicates between a fact and its source chunk: DEC-47 |
 | OPEN-23 | 1 | How a conversation picks its location (DEC-37) | Default location only · location named in the question (tool argument) else default · ask the caller when a location-scoped question is ambiguous · phone number → location (stage 3, OPEN-21) | Needed before location-scoped retrieval and the per-location eval questions |
 | OPEN-02 | 2 | Target country / region | EU (`europe-west3` Frankfurt — next to Neon `aws-eu-central-1`) · US (`us-east4` — next to Neon `aws-us-east-1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
