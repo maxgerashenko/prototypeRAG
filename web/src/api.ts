@@ -8,6 +8,12 @@ export interface Source {
   source: string;
 }
 
+/** One message of the prompt sent to the LLM (app/rag/prompt.py's build_prompt). */
+export interface PromptMessage {
+  role: string;
+  content: string;
+}
+
 export interface ChatRequest {
   business_id: string;
   question: string;
@@ -18,6 +24,7 @@ export interface ChatResponse {
   answer: string;
   conversation_id: string;
   sources: Source[];
+  prompt?: PromptMessage[]; // full prompt, for the debug view
 }
 
 export async function postChat(payload: ChatRequest): Promise<ChatResponse> {
