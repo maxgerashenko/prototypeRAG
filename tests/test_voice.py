@@ -142,7 +142,9 @@ def _call_audio() -> tuple[bytes, float, float]:
 
 
 def test_vad_rejects_unsupported_settings():
-    for kwargs in ({"sample_rate": 22050}, {"frame_ms": 25}, {"aggressiveness": 4}):
+    for kwargs in (
+        {"sample_rate": 22050}, {"frame_ms": 25}, {"aggressiveness": 4}, {"barge_in_aggressiveness": 4},
+    ):
         with pytest.raises(ValueError):
             TurnDetector(**kwargs)
 
@@ -171,6 +173,31 @@ def test_vad_speech_start_carries_preroll():
     frame_bytes = 320
     assert len(start_event.audio) == (300 // 20 + 160 // 20) * frame_bytes
     assert start_event.audio[:2] == b"\0\0"  # pre-roll reaches back into the silence
+
+
+def test_vad_bot_active_delays_speech_start_and_reverts_after():
+    """V9/V10: while the bot is "active", speech_start needs `barge_in_start_ms` of
+    speech instead of `start_ms` -- real speech still gets through, just a bit later."""
+    audio, _, _ = _call_audio()
+
+    normal = _feed_all(TurnDetector(start_ms=160, barge_in_start_ms=300), audio, 320)
+    t_normal = next(t for t, e in normal if e.kind == "speech_start")
+
+    det = TurnDetector(start_ms=160, barge_in_start_ms=300)
+    det.set_bot_active(True)
+    barged_in = _feed_all(det, audio, 320)
+    t_barge_in = next(t for t, e in barged_in if e.kind == "speech_start")
+
+    assert t_barge_in - t_normal == pytest.approx(0.3 - 0.16, abs=0.03)
+
+
+def test_vad_bot_active_false_matches_default_timing():
+    audio, _, _ = _call_audio()
+    det = TurnDetector(start_ms=160, barge_in_start_ms=300)
+    det.set_bot_active(False)  # never turned on: same as not calling it at all
+    events = _feed_all(det, audio, 320)
+    reference = _feed_all(TurnDetector(start_ms=160, barge_in_start_ms=300), audio, 320)
+    assert events == reference
 
 
 def test_vad_odd_chunk_sizes_give_same_events_as_frame_sized_chunks():

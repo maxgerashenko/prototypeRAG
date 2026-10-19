@@ -30,6 +30,15 @@ class Settings(BaseSettings):
     # T2: prime the LLM's prompt cache while the greeting plays. Helps LM Studio; whether
     # Gemini needs or allows it (it costs one extra request per call) is checked in stage 2.
     voice_llm_warmup: bool = True
+    # V3/mid-thought pauses: how long a silence must be before a turn counts as finished.
+    # 700 ms (plan budget was 300-500 ms) trades a little latency on every turn for fewer
+    # turns cut by a pause mid-sentence (plan/03-voice-channel.md "Known problems" V3).
+    vad_end_silence_ms: int = 700
+    # V9/V10: while the bot is speaking, speech_start needs this stricter aggressiveness
+    # and minimum speech length before it fires, so echo/noise doesn't look like a real
+    # barge-in as easily; reverts to the normal VAD settings once speech is confirmed.
+    vad_barge_in_aggressiveness: int = 3
+    vad_barge_in_start_ms: int = 300
 
     # Twilio (modes A/B, plan/03-voice-channel.md). No phone number needed for mode B (DEC-34):
     # the Voice SDK page calls the TwiML App, whose voice URL is <public_base_url>/twilio/voice.
