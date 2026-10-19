@@ -119,7 +119,7 @@ group one thread at a time, or expect merge conflicts.
 | 17 | Containerize (step 7): API `Dockerfile` with Node build stage + Compose api/crawler/migrate | step 7, DEC-41 | `Dockerfile`, `docker-compose.yml`, README | reuse closed PR #21 |
 | 18 | Crawler: PDF menus wired in; honour `Crawl-delay`; tests on 3 more real sites | 01 Tasks | `ingest/discover.py`, `fetch.py`, `run.py`, `tests/` | — |
 | 19 | ✅ (PRs #36, #33; issue #47) Show the full prompt in the chat page / debug endpoint; log every LLM call | 02 Tasks | `api/chat.py`, `web/`, `llm.py` | — |
-| 20 | LM Studio setup notes | 02 Tasks | README | — |
+| 20 | ✅ (issue #48) LM Studio setup notes | 02 Tasks | README | — |
 
 Same-file groups: `voice/session.py` 3, 4, 5, 10 · `voice/tools.py` 5, 7, 9 · `rag/prompt.py`
 7, 8, 15 · `ingest/run.py` 6, 8, 18 · `llm.py` 16, 19 · new migrations 9, 11, 12 (one Alembic
