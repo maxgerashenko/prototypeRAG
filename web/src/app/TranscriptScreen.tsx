@@ -21,7 +21,7 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
     <div className="screen slide" data-screen="transcript">
       <div className="back-row">
         <button className="back-btn" aria-label="Back" onClick={onBack}>
-          <ChevronLeft />
+          <span className="back-circle"><ChevronLeft /></span>
           <span className="ellipsis">{bizName}</span>
         </button>
       </div>

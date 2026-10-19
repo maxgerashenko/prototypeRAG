@@ -19,7 +19,7 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
     <div className="screen slide" data-screen="convos">
       <div className="back-row">
         <button className="back-btn" aria-label="Back to businesses" onClick={onBack}>
-          <ChevronLeft />
+          <span className="back-circle"><ChevronLeft /></span>
           Businesses
         </button>
       </div>
