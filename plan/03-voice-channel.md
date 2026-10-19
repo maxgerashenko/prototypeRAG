@@ -342,6 +342,11 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
     business that's been crawled and indexed
   - [ ] `npm run build` in `web/`, then `uv run uvicorn app.main:app`
   - [ ] Open `/web/` and hold to talk: the reply is heard and the latency line looks sane
+- [ ] **Post-call summary (#43, DEC-24)**: `uv run alembic upgrade head` (0006), make a
+  short Voice SDK call (`/web/call.html`), hang up; the `conversations` row has `summary`,
+  `intent`, `outcome`, `follow_up`, `summarized_at` set (the status callback needs the ngrok
+  URL as the TwiML App's status URL). A second status callback must not call the model again.
+  Also `uv run pytest tests/test_call_summary.py tests/test_twilio.py` (needs pgvector Postgres)
 - [x] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn

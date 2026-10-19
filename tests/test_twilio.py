@@ -193,7 +193,9 @@ def test_stream_url_derived_from_request_without_public_base_url(settings, busin
     assert _stream_params(r.text)[0] == "wss://testserver/voice/ws"
 
 
-def test_status_callback_ends_conversation(settings, business):
+def test_status_callback_ends_conversation(settings, business, monkeypatch):
+    summarized = []
+    monkeypatch.setattr(twilio_routes, "summarize_conversation", lambda bid, cid: summarized.append((bid, cid)))
     call_sid = "CA" + uuid.uuid4().hex
     with tenant_session(business) as s:
         conversation = Conversation(business_id=business, channel="voice", call_sid=call_sid)
@@ -204,9 +206,11 @@ def test_status_callback_ends_conversation(settings, business):
     assert _post(client, "/twilio/status", {"CallSid": call_sid, "CallStatus": "ringing"}).status_code == 204
     with tenant_session(business) as s:
         assert s.get(Conversation, cid).ended_at is None
+    assert summarized == []  # not over yet
     assert _post(client, "/twilio/status", {"CallSid": call_sid, "CallStatus": "completed"}).status_code == 204
     with tenant_session(business) as s:
         assert s.get(Conversation, cid).ended_at is not None
+    assert summarized == [(business, cid)]  # DEC-24: the summary runs in the callback
     # unknown call: nothing to do, still 204 so Twilio doesn't retry
     assert _post(client, "/twilio/status", {"CallSid": "CAnone", "CallStatus": "completed"}).status_code == 204
 
