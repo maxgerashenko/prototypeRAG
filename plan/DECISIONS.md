@@ -120,7 +120,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-41 | Web UI stack | React + TypeScript (Vite multi-page build) in `web/`, built to `web/dist` and served by the one FastAPI service under `/web`; voice app, debug pages and later the owner dashboard | 1 · 2 (image build) | ✅ |
 | DEC-43 | Twilio adapter: business lookup and trust | Voice SDK calls send `business_id` as a custom parameter, phone calls match `To` in `businesses.phone_numbers`; webhooks checked with `X-Twilio-Signature` already in stage 1 (ngrok is public); `/voice/ws` accepts only streams carrying an HMAC from `/twilio/voice`; Voice SDK token served to localhost only; `conversations.call_sid` for the status callback | 1 · 3 (lookups need an RLS-exempt path) | ✅ |
 | DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
-| DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (V9 without headphones) |
+| DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (live Mac mic test) |
 
 ---
 
@@ -754,15 +754,16 @@ Consequences:
 
 ### DEC-44 — Barge-in robustness (V9/V10) and turn-end tuning (stage 1, step 4)
 
-Context: the 2026-10-03 mic test and the 2026-10-18 Mac/Twilio test
-([03-voice-channel.md](03-voice-channel.md) "Known problems", "Test on Mac") found two
-open robustness gaps and one latency/correctness trade still to tune:
+Context: the 2026-10-03 mic test ([03-voice-channel.md](03-voice-channel.md) "Known
+problems") found two open robustness gaps and one latency/correctness trade still to
+tune, none of them live-confirmed yet on the Mac (as of 2026-10-18 only checked by code
+review, per the "Test on Mac" checklist):
 - **V9** — speaker echo could make the VAD hear the bot's own voice as the caller
-  interrupting (not yet reproduced without headphones; the clean speech fixture can't
+  interrupting (not reproduced without headphones; the clean speech fixture can't
   simulate it, only a real mic/speaker setup can).
-- **V10** — a short cough or "mm-hm" during an answer looked like it could stop the bot
-  for good, with no resume (passed in the 2026-10-18 test, but by design margin only:
-  the normal 160 ms minimum speech length is short).
+- **V10** — a short cough or "mm-hm" during an answer could look like it should stop the
+  bot, with no resume, by design margin only: the normal 160 ms minimum speech length is
+  short.
 - Mid-thought pauses ("What if I want to come?" … "Today, night at 9 pm") can end a turn
   before the caller is done, cut by the VAD's `end_silence_ms` silence window.
 
@@ -779,8 +780,9 @@ open robustness gaps and one latency/correctness trade still to tune:
 Consequences:
 - Priority order applied: caller experience (fewer false barge-ins, fewer cut-off turns)
   over the local latency budget, which the table above records as now widened.
-- V9 without headphones (the actual echo case) still needs a live re-test on the Mac —
-  this decision hardens the code ahead of that test, it doesn't close V9.
+- None of this is live-confirmed yet — this decision hardens the code ahead of the Mac
+  mic test (V9 with and without headphones, V10's cough/"mm-hm" case), it doesn't close
+  either item.
 - If 700 ms still isn't enough against real mid-thought pauses, the next step is the
   adaptive option above, not a further blanket increase (diminishing returns on latency
   spent per turn where most turns don't pause mid-sentence).

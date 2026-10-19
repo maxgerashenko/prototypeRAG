@@ -305,10 +305,8 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] Google STT/TTS checked live (ADC set up; results under "Known problems")
 - [x] Mic test end-to-end in the browser with real STT/TTS + LM Studio (results under "Known problems")
 - [x] Twilio webhook + TwiML + media stream WebSocket (`twilio_routes.py`, `ws.py`), signature + stream-token checks (DEC-43), Voice SDK page `web/call.html` + `GET /twilio/token`; tests with fake STT/TTS/LLM (`tests/test_twilio.py`, `web/e2e/call.spec.ts`)
-- [x] Twilio live: a Voice SDK browser call through ngrok (mode B); record latency over Twilio
-  — ✅ 2026-10-18: 10+ real turns over a Voice SDK call (ngrok, real STT/TTS + LM Studio),
-  results under "Test on Mac" below. The trial number (mode A) still needs a rented
-  number (only after a pilot business pays, DEC-34)
+- [ ] Twilio live: a Voice SDK browser call through ngrok (mode B), then the trial number (mode A); record latency over Twilio
+  — setup checked 2026-10-18: Voice SDK token served, `/twilio/voice` and `/twilio/status` reachable through ngrok with the signature check on; no call placed yet
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
@@ -340,9 +338,8 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
   — ✅ 2026-10-18: fails fast with a clear message at startup, no stall per turn
-- [x] **V3** 10+ turns: no "STT final result not in after 2.0s" log line; if it shows,
-  compare the transcript with what was said — ✅ 2026-10-18: 10+ turns over a Twilio
-  Voice SDK call, no timeout line; STT final text 90–180 ms after speech end
+- [ ] **V3** 10+ turns: no "STT final result not in after 2.0s" log line; if it shows,
+  compare the transcript with what was said
 - [x] **V14** Ask for "the address and the website": no markup or full URL read aloud;
   the transcript shows the same plain text — ✅ 2026-10-18: address, website (`abathhouse.com`,
   not the full URL), phone and email all came out without markup
@@ -351,31 +348,29 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   — ✅ 2026-10-18 with `none`: 4.6 s for a profile answer on `/chat`, 1.7 s for the
   `/chat/stream` SSE stream. Thinking-on comparison and the eval re-run not done yet
 - [ ] **V9** VAD mode (`voice-debug.html`) without headphones: does the bot's own voice
-  trigger a barge-in? — ✅ 2026-10-18 with headphones (no false trigger, real barge-ins
-  fired correctly); without headphones (the actual echo case) still not done — needs a
-  physical mic/speaker setup. Code hardened 2026-10-18 (DEC-44, stricter VAD while the
-  bot speaks) ahead of that re-test
-- [x] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
-  — ✅ 2026-10-18: cough didn't stop the bot, "mm-hm" wasn't treated as speech. Code
-  hardened further 2026-10-18 (DEC-44, longer minimum speech length while the bot speaks)
+  trigger a barge-in? — checked by code review only as of 2026-10-18, not run live; code
+  hardened 2026-10-18 (DEC-44, stricter VAD while the bot speaks) ahead of a live mic test,
+  with and without headphones
+- [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
+  — checked by code review only as of 2026-10-18, not run live; code hardened further
+  2026-10-18 (DEC-44, longer minimum speech length while the bot speaks)
 - [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
   work, does the mic stream?
 - [ ] **Call source icons**: `uv run pytest tests/test_conversations.py` (needs Postgres;
   not run in the cloud session; ✅ 2026-10-18 all 9 pass), then make one Twilio call and one `/web/` call: the
   history shows a green phone for the Twilio one and a blue globe for the web one
-- [x] **V17 silence** (`voice-debug.html`, VAD mode): stay quiet after the greeting →
+- [ ] **V17 silence** (`voice-debug.html`, VAD mode): stay quiet after the greeting →
   "Are you still there?" after ~6 s, then the goodbye line, played to the end, then the
   call closes ("call ended by the assistant: silence"). Speak after the re-prompt → answered,
   and the next silence re-prompts again instead of hanging up. Push-to-talk app: no re-prompt
-  — ✅ 2026-10-18 over the Twilio Voice SDK call: `SILENCE_REPROMPT_S=6.0`,
-  `SILENCE_MAX_REPROMPTS=1` behaved as coded (re-prompt, then goodbye + hangup)
-- [x] **V17 goodbye** (`/web/`, push-to-talk): say "Thank you. Bye." → the bot's goodbye
+  — checked by code review only as of 2026-10-18, not run live
+- [ ] **V17 goodbye** (`/web/`, push-to-talk): say "Thank you. Bye." → the bot's goodbye
   plays to the end (not cut by the socket close), then the "Call ended" screen without a
   "closed by the server" notice; "Bye, and what about Sunday?" keeps the call open.
   Over Twilio (`ws.py` closes the Media Stream, which ends the call): check the goodbye
   isn't cut — Twilio may drop buffered audio on close; if so, wait for a `mark` event
-  instead of the estimated playback end — ✅ 2026-10-18: "Thank you. Bye." answered, then
-  hung up, over the Twilio Voice SDK call
+  instead of the estimated playback end — checked by code review only as of 2026-10-18,
+  not run live
 - [x] **Voice session tests that need LM Studio** (embeddings for `run_tool`):
   `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
   In cloud sessions the first two fail with `APIConnectionError` and

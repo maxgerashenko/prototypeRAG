@@ -100,10 +100,10 @@ group one thread at a time, or expect merge conflicts.
 
 | # | Step | Plan ref | Main files | Needs |
 |---|---|---|---|---|
-| 1 | ✅ 2026-10-18 Twilio live: Voice SDK call through ngrok; latency over Twilio. Trial number (mode A) deferred to a paying pilot (DEC-34) | 03 Tasks | none (manual) | Mac, Twilio |
-| 2 | Real call through the React app (`/web/` push-to-talk, not yet done live); "Test on Mac" checks still open: V9 without headphones, V12 Safari/Firefox (V3, V7, V10, V14, V17, V24, V25 done 2026-10-18) | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
+| 1 | Twilio live: Voice SDK call through ngrok, then the trial number; latency over Twilio | 03 Tasks | none (manual) | Mac, Twilio |
+| 2 | Real call through the React app; "Test on Mac" checks still open (V3, V9, V10, V12, V17 — checked by code review only, not run live; V7, V14, V24 and V25 done 2026-10-18) | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
 | 3 | Filler while a tool runs, if V16 latency needs it | 03 Tasks, V16 | `voice/session.py` | — |
-| 4 | ✅ 2026-10-18 (DEC-44) Barge-in robustness (stricter VAD while the bot speaks) + `end_silence_ms` tuned 500→700ms, both now env vars; V9 without headphones still needs a live re-test | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
+| 4 | ✅ code 2026-10-18 (DEC-44) Barge-in robustness (stricter VAD while the bot speaks) + `end_silence_ms` tuned 500→700ms, both now env vars; none of it live-tested yet — still needs the Mac mic test (V9, V10) | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
 | 5 | Call transfer + take-a-message fallback | 03 Tasks | `voice/session.py`, `voice/tools.py`, `actions/` | after 9 |
 | 6 | Decide OPEN-20, then `facts.py` + `merge.py` incl. hours from `site_chrome` (V23) | 07 §5, §9 | `ingest/facts.py`, `merge.py`, `run.py` | LM Studio for OPEN-20 |
 | 7 | Location card → prompt; fact chunks in retrieval, location filter, fact-first tool result (OPEN-23) | 07 §3, §5.5 | `rag/prompt.py`, `rag/retrieve.py`, `rag/index.py`, `voice/tools.py` | after 6 |
