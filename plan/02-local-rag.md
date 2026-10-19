@@ -133,7 +133,7 @@ app/
   config.py             settings from env (pydantic-settings)
   llm.py                OpenAI-compatible chat + embed helpers
   db/                   SQLAlchemy models, Alembic migrations (enables pgvector)
-  api/chat.py           POST /chat, GET /chat/stream (SSE), GET /debug/retrieve
+  api/chat.py           POST /chat, GET /chat/stream (SSE), GET /debug/retrieve, GET /debug/prompt
   api/businesses.py     GET /businesses — voice app picker (DEC-42)
   api/conversations.py  GET /businesses/{id}/conversations[/{cid}] — voice app history (DEC-42)
   rag/
@@ -151,6 +151,7 @@ docker-compose.yml, Dockerfile, .env.example
 
 - `psql` into the database: look at `pages`, `chunks`, vectors, run similarity queries by hand.
 - `GET /debug/retrieve?business_id=..&q=..` returns the retrieved chunks with scores.
+- `GET /debug/prompt?business_id=..&q=..[&conversation_id=..]` returns the full prompt `/chat` would send (system + history + question), without calling the LLM or creating a conversation. `POST /chat` also returns it as `prompt`.
 - Chat page shows the answer **and** the chunks and prompt it was built from.
 - Log every LLM call (prompt, response, tokens, latency) during development.
 
@@ -171,13 +172,17 @@ docker-compose.yml, Dockerfile, .env.example
 - [x] Custom replies CRUD + indexing — `api/custom_replies.py`
 - [x] Eval script: run test questions, check expected facts appear, report score — `rag/eval.py`
 - [ ] Run the eval with Gemini (only env vars changed) and compare to the local model
-- [ ] Show the full prompt in the chat page / a debug endpoint (only sources are shown today)
+- [x] Show the full prompt in the chat page / a debug endpoint — `/debug/prompt`, `POST /chat`'s `prompt`, `web/chat.html`'s collapsible "Prompt" box (text chat only; the voice prompt in `voice/session.py` is not shown)
 - [ ] Measure `/chat` with thinking on vs `reasoning_effort="none"` — gemma-4-12b thinks by default (~8 s, see [03-voice-channel.md](03-voice-channel.md) V24)
   — `/chat` now sends `CHAT_REASONING_EFFORT` (default `none`, 2026-10-05); the measurement is what's left
 - [ ] Find out why "Saturday opening hours" isn't answered on the pilot — data missing or retrieval miss (V23). Cause found (2026-10-04): data missing — hours are in the site footer, which `clean.py` removes; fixed by the organize step ([07-knowledge-quality.md](07-knowledge-quality.md) §4)
 - [ ] Knowledge quality (before step 5): location card + facts in prompt and retrieval, summary in the prompt, extended eval with `expected_in_context` — [07-knowledge-quality.md](07-knowledge-quality.md)
-- [ ] Log every LLM call (prompt size, response, tokens, latency) — needed to explain
-  DEC-32's 10–17 s turns: measure time-to-first-token with streaming, not total time
+- [x] Log every LLM call (prompt size, response, tokens, latency) — needed to explain
+  DEC-32's 10–17 s turns: measure time-to-first-token with streaming, not total time.
+  `app/llm.py` wraps the clients: one INFO line per chat/embed call on logger `app.llm`
+  (model, messages, prompt chars, tokens, `ttft_ms`, `total_ms`, status ok/stopped/cancelled/error);
+  `LOG_LEVEL=DEBUG` adds the full prompt and response. Token counts in LM Studio are a
+  "Test on Mac" check in [03-voice-channel.md](03-voice-channel.md)
 - [x] `/chat/stream` saves the turn when the stream ends; multi-line SSE framing fixed
 - [x] Vector search only uses chunks embedded by the configured `EMBED_MODEL` (safe mid re-index, R6)
 

@@ -76,3 +76,9 @@ export function matchesQuery(b: { name: string; website: string | null; domain?:
   const q = query.trim().toLowerCase();
   return !q || b.name.toLowerCase().includes(q) || hostOf(b).toLowerCase().includes(q);
 }
+
+/** "+1 (555) 000-1234" for a US/Canada E.164 number; anything else as given. */
+export function fmtPhone(e164: string): string {
+  const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164);
+  return m ? `+1 (${m[1]}) ${m[2]}-${m[3]}` : e164;
+}

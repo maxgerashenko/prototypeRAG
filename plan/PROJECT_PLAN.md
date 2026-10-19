@@ -153,6 +153,10 @@ bookings, knowledge-base status, "re-scrape" button, custom replies editor.
 
 Order follows the build order in [DECISIONS.md](DECISIONS.md) section 1.
 
+GitHub milestones mirror this table, named `S<stage> · M<n> <name>` (for example
+`S1 · M4 Phone`); this table stays the source of truth. Issues, labels and blocking:
+DEC-45 in [DECISIONS.md](DECISIONS.md).
+
 | # | Stage | Milestone | Done when |
 |---|---|---|---|
 | M0 | 1 | Foundation | Postgres/pgvector in Docker, migrations, base tables with `business_id`, `tenant_session` |

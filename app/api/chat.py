@@ -1,4 +1,4 @@
-"""POST /chat, GET /chat/stream (SSE), GET /debug/retrieve (plan/02-local-rag.md)."""
+"""POST /chat, GET /chat/stream (SSE), GET /debug/retrieve, GET /debug/prompt (plan/02-local-rag.md)."""
 
 import uuid
 from collections.abc import Generator
@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.db import tenant_session
 from app.db.models import Conversation, Message, message_order
-from app.rag.answer import answer_question, stream_answer
+from app.rag.answer import answer_question, prepare_prompt, stream_answer
 from app.rag.retrieve import retrieve
 
 router = APIRouter()
@@ -26,6 +26,7 @@ class ChatResponse(BaseModel):
     answer: str
     conversation_id: uuid.UUID
     sources: list[dict]
+    prompt: list[dict]  # the exact messages sent to the LLM (system + history + question)
 
 
 def _prepare_conversation_and_history(
@@ -76,6 +77,7 @@ def chat_endpoint(req: ChatRequest) -> ChatResponse:
             {"chunk_id": str(c.chunk_id), "section_heading": c.section_heading, "score": c.score, "source": c.source}
             for c in result.chunks
         ],
+        prompt=result.messages,
     )
 
 
@@ -124,3 +126,19 @@ def debug_retrieve_endpoint(business_id: uuid.UUID, q: str, top_n: int = 5) -> d
             for c in chunks
         ]
     }
+
+
+@router.get("/debug/prompt")
+def debug_prompt_endpoint(
+    business_id: uuid.UUID, q: str, conversation_id: uuid.UUID | None = None, top_n: int = 5
+) -> dict:
+    """The full prompt /chat would send for this question, without calling the LLM.
+
+    With a conversation_id its stored turns are included as history; without one, no
+    conversation is created (read-only, unlike /chat).
+    """
+    history: list[dict] = []
+    if conversation_id is not None:
+        _, history = _prepare_conversation_and_history(business_id, conversation_id)
+    _, _, messages = prepare_prompt(business_id, q, history, top_n)
+    return {"messages": messages}

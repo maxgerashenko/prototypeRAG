@@ -21,6 +21,8 @@ dependencies = [
     "webrtcvad-wheels>=2.0.14.post1",
     "google-cloud-speech>=2.41.0",
     "google-cloud-texttospeech>=2.38.0",
+    "twilio>=9",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]

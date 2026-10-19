@@ -2,25 +2,26 @@
 // /voice/browser WebSocket of app/voice/browser_ws.py, driven from the test.
 
 import type { Page, Request, WebSocketRoute } from "@playwright/test";
-import type { Business, ConversationDetail, ConversationSummary, VoiceEvent } from "../src/api";
+import type { Business, ConversationDetail, ConversationSource, ConversationSummary, VoiceEvent } from "../src/api";
 
 const MIN = 60_000;
 
 export function biz(id: string, name: string, website: string | null, conversation_count = 0, domain: string | null = null): Business {
-  return { id, name, website, domain, conversation_count, default_location: null };
+  return { id, name, website, domain, conversation_count, default_location: null, phone_numbers: [] };
 }
 
 /** A stored conversation, shaped like app/api/conversations.py: messages alternate
  * assistant/user starting with the greeting, 19 s apart (at_s 2, 21, 40, …). */
 export function convo(
   id: string, title: string, lines: string[], startedMsAgo = 60 * MIN, durS = 95, now = Date.now(),
+  source: ConversationSource = "web",
 ): ConversationDetail {
   const messages = lines.map((content, i) => ({
     role: (i % 2 === 0 ? "assistant" : "user") as "assistant" | "user",
     content,
     at_s: 2 + i * 19,
   }));
-  return { id, channel: "voice", title, started_at: new Date(now - startedMsAgo).toISOString(), duration_s: durS, messages };
+  return { id, channel: "voice", source, title, started_at: new Date(now - startedMsAgo).toISOString(), duration_s: durS, messages };
 }
 
 /** List row for a conversation: preview = last message, "You: " first if the caller said it. */
@@ -37,17 +38,30 @@ export interface ApiState {
   /** Make an endpoint fail: "businesses" | "conversations" | "detail". */
   fail: Set<string>;
   requests: string[];
+  /** GET /twilio/number; null = TWILIO_PHONE_NUMBER not set. */
+  mainNumber: string | null;
 }
 
 export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise<ApiState> {
-  const api: ApiState = { businesses: [], conversations: {}, fail: new Set(), requests: [], ...init };
+  const api: ApiState = { businesses: [], conversations: {}, fail: new Set(), requests: [], mainNumber: null, ...init };
   const json = (body: unknown) => ({ contentType: "application/json", body: JSON.stringify(body) });
+  await page.route("**/twilio/number", (route) => route.fulfill(json({ number: api.mainNumber })));
   await page.route(
     (url) => url.pathname.startsWith("/businesses"),
     async (route) => {
       const path = new URL(route.request().url()).pathname;
-      api.requests.push(path);
-      const [, , bizId, , convoId] = path.split("/");
+      const method = route.request().method();
+      api.requests.push(method === "GET" ? path : `${method} ${path}`);
+      const [, , bizId, sub, convoId] = path.split("/");
+      if (sub === "main-number" && api.mainNumber) {
+        // like app/api/businesses.py: the number moves to this business, or comes off it
+        const n = api.mainNumber;
+        api.businesses = api.businesses.map((b) => {
+          const rest = b.phone_numbers.filter((x) => x !== n);
+          return { ...b, phone_numbers: method === "POST" && b.id === bizId ? [...rest, n] : rest };
+        });
+        return route.fulfill(json({ business_id: bizId, number: method === "POST" ? n : null }));
+      }
       const kind = convoId ? "detail" : bizId ? "conversations" : "businesses";
       if (api.fail.has(kind)) return route.fulfill({ status: 500, body: "boom" });
       if (kind === "businesses") return route.fulfill(json(api.businesses));

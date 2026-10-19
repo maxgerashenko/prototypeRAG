@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { postChat, type Source } from "../api";
+import { postChat, type PromptMessage, type Source } from "../api";
 
 type Role = "user" | "assistant" | "error";
 
@@ -8,6 +8,7 @@ interface Message {
   role: Role;
   text: string;
   sources?: Source[];
+  prompt?: PromptMessage[];
 }
 
 function formatSource(src: Source): string {
@@ -16,7 +17,7 @@ function formatSource(src: Source): string {
 }
 
 function MessageView({ message }: { message: Message }) {
-  const { role, text, sources } = message;
+  const { role, text, sources, prompt } = message;
   return (
     <div className={`message ${role}`}>
       {text}
@@ -30,6 +31,19 @@ function MessageView({ message }: { message: Message }) {
               </li>
             ))}
           </ul>
+        </details>
+      )}
+      {prompt && prompt.length > 0 && (
+        <details className="prompt">
+          <summary>
+            Prompt ({prompt.length} messages, {prompt.reduce((n, m) => n + m.content.length, 0)} chars)
+          </summary>
+          {prompt.map((m, i) => (
+            <div key={i} className="prompt-message">
+              <div className="prompt-role">{m.role}</div>
+              <pre className="prompt-content">{m.content}</pre>
+            </div>
+          ))}
         </details>
       )}
     </div>
@@ -50,9 +64,9 @@ export function ChatApp() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  function appendMessage(role: Role, text: string, sources?: Source[]) {
+  function appendMessage(role: Role, text: string, sources?: Source[], prompt?: PromptMessage[]) {
     const id = nextId.current++;
-    setMessages((prev) => [...prev, { id, role, text, sources }]);
+    setMessages((prev) => [...prev, { id, role, text, sources, prompt }]);
   }
 
   async function handleSend() {
@@ -68,7 +82,7 @@ export function ChatApp() {
     try {
       const data = await postChat({ business_id: bid, question: q, conversation_id: conversationId.current });
       conversationId.current = data.conversation_id;
-      appendMessage("assistant", data.answer, data.sources);
+      appendMessage("assistant", data.answer, data.sources, data.prompt);
     } catch (err) {
       appendMessage("error", `Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {

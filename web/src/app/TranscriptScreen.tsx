@@ -1,7 +1,8 @@
 import type { ConversationDetail } from "../api";
 import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
-import { ChevronLeft, PhoneIcon } from "./icons";
+import { ChevronLeft, GlobeIcon } from "./icons";
+import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, plural } from "./format";
 
 interface Props {
@@ -25,7 +26,10 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
         </button>
       </div>
       <div className="tr-head">
-        <h1>{c ? c.title : convo.status === "error" ? "Conversation" : "Loading…"}</h1>
+        <div className="tr-title">
+          {c && <SourceBadge source={c.source} size={20} />}
+          <h1>{c ? c.title : convo.status === "error" ? "Conversation" : "Loading…"}</h1>
+        </div>
         {c && (
           <div className="tr-meta">
             <span>{when}</span>
@@ -55,7 +59,7 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
 
       <div className="footer">
         <button className="btn-pill btn-call" onClick={onContinue}>
-          <PhoneIcon />
+          <GlobeIcon />
           Continue in a new call
         </button>
       </div>
