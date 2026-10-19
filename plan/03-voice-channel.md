@@ -394,6 +394,12 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **Business summary** (plan 07 §6): `uv run python -m app.ingest.run --url https://www.abathhouse.com --only summary --force`,
   then read the `business_summaries` row — no prices/hours/numbers, no customer names,
   guest themes match the site's testimonials; ask a call "what's it like there?"
+- [ ] **Step 7, everything in Compose** (README → "Run in Docker"):
+  `docker compose --profile app up -d --build --wait`, then a real push-to-talk call at
+  `http://localhost:8000/` (reaches LM Studio via `host.docker.internal`, ADC mounted from
+  `~/.config/gcloud`), `/web/chat.html`, and one crawl with `docker compose run --rm crawler`.
+  Built and smoke-tested in a cloud session (migrate, `/health`, `/web/`, crawler `--help`),
+  without LM Studio or ADC
 
 ## Notes
 
