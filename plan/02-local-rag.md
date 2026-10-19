@@ -177,8 +177,12 @@ docker-compose.yml, Dockerfile, .env.example
   — `/chat` now sends `CHAT_REASONING_EFFORT` (default `none`, 2026-10-05); the measurement is what's left
 - [ ] Find out why "Saturday opening hours" isn't answered on the pilot — data missing or retrieval miss (V23). Cause found (2026-10-04): data missing — hours are in the site footer, which `clean.py` removes; fixed by the organize step ([07-knowledge-quality.md](07-knowledge-quality.md) §4)
 - [ ] Knowledge quality (before step 5): location card + facts in prompt and retrieval, summary in the prompt, extended eval with `expected_in_context` — [07-knowledge-quality.md](07-knowledge-quality.md)
-- [ ] Log every LLM call (prompt size, response, tokens, latency) — needed to explain
-  DEC-32's 10–17 s turns: measure time-to-first-token with streaming, not total time
+- [x] Log every LLM call (prompt size, response, tokens, latency) — needed to explain
+  DEC-32's 10–17 s turns: measure time-to-first-token with streaming, not total time.
+  `app/llm.py` wraps the clients: one INFO line per chat/embed call on logger `app.llm`
+  (model, messages, prompt chars, tokens, `ttft_ms`, `total_ms`, status ok/stopped/cancelled/error);
+  `LOG_LEVEL=DEBUG` adds the full prompt and response. Token counts in LM Studio are a
+  "Test on Mac" check in [03-voice-channel.md](03-voice-channel.md)
 - [x] `/chat/stream` saves the turn when the stream ends; multi-line SSE framing fixed
 - [x] Vector search only uses chunks embedded by the configured `EMBED_MODEL` (safe mid re-index, R6)
 

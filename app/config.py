@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     vad_barge_in_aggressiveness: int = 3
     vad_barge_in_start_ms: int = 300
 
+    # level of the `app.*` loggers: INFO logs one line per LLM call (app/llm.py) and the
+    # voice turn timings; DEBUG adds the full LLM prompt and response
+    log_level: str = "INFO"
+
     # Twilio (modes A/B, plan/03-voice-channel.md). No phone number needed for mode B (DEC-34):
     # the Voice SDK page calls the TwiML App, whose voice URL is <public_base_url>/twilio/voice.
     twilio_account_sid: str = ""

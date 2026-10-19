@@ -356,6 +356,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   2026-10-18 (DEC-44, longer minimum speech length while the bot speaks)
 - [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
   work, does the mic stream?
+- [ ] **LLM call log** (`app.llm` lines in the uvicorn output): a `/chat/stream` question
+  and a voice turn each log `llm chat stream … ttft_ms=… prompt_tokens=… completion_tokens=…`.
+  No token counts means LM Studio ignores `stream_options.include_usage`; an error on
+  every stream means it rejects it — then drop the injection in `app/llm.py`
 - [ ] **Call source icons**: `uv run pytest tests/test_conversations.py` (needs Postgres;
   not run in the cloud session; ✅ 2026-10-18 all 9 pass), then make one Twilio call and one `/web/` call: the
   history shows a green phone for the Twilio one and a blue globe for the web one
