@@ -12,6 +12,7 @@ import uuid
 from app.actions.executor import execute
 from app.actions.registry import TOOLS, ActionContext, Tool, register
 from app.db import tenant_session
+from app.rag.location import default_location_id
 from app.rag.prompt import format_chunks
 from app.rag.retrieve import retrieve
 
@@ -23,7 +24,9 @@ SEARCH_TOP_N = 3
 def search_business_info(business_id: uuid.UUID, query: str) -> str:
     """Hybrid retrieval (DEC-12) for one business, formatted like the chat prompt's chunks."""
     with tenant_session(business_id) as session:
-        chunks = retrieve(session, business_id, query, SEARCH_TOP_N)
+        chunks = retrieve(
+            session, business_id, query, SEARCH_TOP_N, location_id=default_location_id(session, business_id)
+        )  # DEC-48
     return format_chunks(chunks)
 
 

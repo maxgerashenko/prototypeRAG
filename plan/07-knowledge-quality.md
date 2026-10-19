@@ -23,7 +23,7 @@ step between crawl and index that is safe to re-run on every re-crawl.
 Decisions: **DEC-37** (business = domain, sub-pages = locations), **DEC-38** (facts
 library), **DEC-39** (business summary from website testimonials/marketing), **DEC-40**
 (organize step) — reasons and options in [DECISIONS.md](DECISIONS.md). Open:
-OPEN-20 … OPEN-23.
+OPEN-20 … OPEN-22 (OPEN-23 became DEC-48).
 
 ---
 
@@ -204,7 +204,7 @@ the statement changes.
   summary's one-liner (§6). For the pilot ≈ 150–250 tokens.
 - **Retrieved:** hybrid search over `chunks` filtered by
   `business_id` and `location_id IS NULL OR location_id = :current_location`
-  (+ explicit location if the question names one, OPEN-23). Boosts: `custom_reply` ×2 >
+  (the conversation's fixed location, DEC-48 -- not guessed from the question). Boosts: `custom_reply` ×2 >
   `fact` ×1.5 > `scraped`. Only `retrievable` pages' chunks.
 - **Tool result** (`search_business_info`): up to ~8 fact statements (≈ 20–40 tokens
   each) + at most 1–2 fallback chunks only if facts don't cover the query (OPEN-22);
@@ -429,7 +429,7 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
   location's) until conversations carry a location
 - [ ] Location card → prompt; re-check V23 (hours now in the data)
 - [ ] Retrieval: fact chunks, location filter, boosts, retrievable pages only; tool
-  result fact-first; optional `location` argument (OPEN-23)
+  result fact-first; (the optional `location` tool argument is dropped, DEC-48)
   - **Built 2026-10-19 (partial):** `ingest/fact_chunks.py` keeps one `kind='fact'` chunk
     (`text = statement`, `location_id` from the fact) per *active* fact, rebuilt at the end
     of the facts step; a changed statement clears the embedding so `rag/index.py` re-embeds
@@ -437,10 +437,11 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
     filter (business-wide + that location) in both vector and keyword search, and the
     DEC-47 rule (a page chunk containing a returned fact's quote is dropped, the next
     candidate takes its place). Tests: `tests/test_fact_chunks.py`.
-  - **Not built:** passing a location from a conversation (OPEN-23: nothing calls
-    `retrieve` with `location_id` yet), fact-first tool result with location tags and the
-    1–2 fallback-chunk cap (OPEN-22), the location card + locations list in the prompt,
-    optional `location` tool argument. `retrievable` is already honoured (non-retrievable
+  - **DEC-48 (built 2026-10-19):** chat, voice prompt and `search_business_info` pass the
+    default location; the prompt has a locations block (this one + others, answer only for
+    this one). `tests/test_location_scope.py`.
+  - **Not built:** an entry point that chooses a location (stage 3, OPEN-21), fact-first tool result with location tags and the
+    1–2 fallback-chunk cap (OPEN-22), the location card (address/phone/hours as a block). `retrievable` is already honoured (non-retrievable
     pages get no chunks). Needs the Mac: embed the fact chunks (`python -m app.rag.index`)
     and re-run the eval (`tests/eval/bathhouse.yaml`) to see V16/V23.
 - [x] `summary.py` + prompt (≤ ~120 tokens), guest themes attributed, no names
@@ -525,4 +526,3 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
 | OPEN-20 | 1 | Local model for fact extraction | `facts.py` |
 | OPEN-21 | 3 | Phone number per location or per business | Assigning numbers at onboarding |
 | OPEN-22 | 1 | Role of raw page chunks once facts exist | Retrieval change; decided by the A/B eval |
-| OPEN-23 | 1 | How a conversation picks its location | Location-scoped retrieval and the per-location eval |

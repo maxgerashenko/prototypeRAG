@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import BusinessProfile, BusinessSummary
 from app.llm import chat, get_chat_client
+from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import build_prompt
 from app.rag.retrieve import RetrievedChunk, retrieve
 
@@ -30,8 +31,12 @@ def prepare_prompt(
     with tenant_session(business_id) as session:
         profile = session.get(BusinessProfile, business_id)
         summary = session.get(BusinessSummary, business_id)
-        chunks = retrieve(session, business_id, question, top_n)
-        messages = build_prompt(profile, chunks, history or [], question, summary)
+        location_id = default_location_id(session, business_id)  # DEC-48
+        chunks = retrieve(session, business_id, question, top_n, location_id=location_id)
+        messages = build_prompt(
+            profile, chunks, history or [], question, summary,
+            locations=format_locations(session, business_id, location_id),
+        )
     return profile, chunks, messages
 
 
