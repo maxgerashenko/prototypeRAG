@@ -346,6 +346,17 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   then read the `business_summaries` row — no prices/hours/numbers, no customer names,
   guest themes match the site's testimonials; ask a call "what's it like there?"
 
+- [ ] **Gemini comparison** (#44, stage-1 step 6; needs a paid Gemini key, R12): set the
+  Gemini block from `.env.example` (chat + embeddings, env vars only), then
+  - [ ] `uv run alembic upgrade head`, re-index (`embed_model` changed, R6); the indexer
+    must not fail on dimension (`EMBED_DIM=768` is sent as `dimensions`)
+  - [ ] Local regression: with LM Studio + nomic, `embed()` still works with the new
+    `dimensions` argument (LM Studio should ignore it) — re-index a few chunks
+  - [ ] Eval: `tests/eval/bathhouse.yaml` with Gemini vs 7/7 for gemma-4-12b / qwen3.6-35b-a3b
+  - [ ] V20: a voice turn and `/chat` with `*_REASONING_EFFORT=none` against the Gemini
+    model — accepted or 400? If rejected, set the value it accepts and note it here
+  - [ ] Booking tests (after M5) against Gemini; record results under "Known problems"
+
 ## Notes
 
 - Phone audio is 8 kHz — test STT on real call audio, not just clean mic audio.

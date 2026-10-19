@@ -170,7 +170,7 @@ docker-compose.yml, Dockerfile, .env.example
 - [x] Debug retrieval endpoint + chat page showing sources — `api/chat.py`'s `/debug/retrieve`, `web/chat.html`
 - [x] Custom replies CRUD + indexing — `api/custom_replies.py`
 - [x] Eval script: run test questions, check expected facts appear, report score — `rag/eval.py`
-- [ ] Run the eval with Gemini (only env vars changed) and compare to the local model
+- [ ] Run the eval with Gemini (only env vars changed) and compare to the local model — `embed()` now requests `EMBED_DIM` via `dimensions`, `.env.example` has the Gemini block (#44); the run itself is on the "Test on Mac" list in [03-voice-channel.md](03-voice-channel.md)
 - [ ] Show the full prompt in the chat page / a debug endpoint (only sources are shown today)
 - [ ] Measure `/chat` with thinking on vs `reasoning_effort="none"` — gemma-4-12b thinks by default (~8 s, see [03-voice-channel.md](03-voice-channel.md) V24)
   — `/chat` now sends `CHAT_REASONING_EFFORT` (default `none`, 2026-10-05); the measurement is what's left
