@@ -136,8 +136,8 @@ Details: [04-actions.md](04-actions.md)
 | Action | Description | Integration |
 |---|---|---|
 | Conversation summary | After each call/chat: summary, intent, caller name/phone, outcome | Stored in DB, shown in owner dashboard, optional email/SMS |
-| Book a table | Check availability, create reservation, confirm by SMS | Own bookings table first; later OpenTable / Google Calendar |
-| Make an appointment | Find free slot, book, confirm | Own bookings table first; later Google Calendar / Cal.com |
+| Book a table | Check availability, create reservation, confirm by SMS | Own bookings table first; Google Calendar for the pilot (DEC-48); later OpenTable |
+| Make an appointment | Find free slot, book, confirm | Own bookings table first; Google Calendar for the pilot (DEC-48); later Cal.com |
 | Take a message | Record request for callback | DB + notification to owner |
 | Transfer call | Hand off to a human | Twilio call transfer |
 

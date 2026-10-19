@@ -124,6 +124,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `blocked` labels (stage = milestone prefix); blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
+| DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
 
 ---
 
@@ -505,7 +506,7 @@ DEC-33 exception first.
 - LLM **tool calling** (same `tools=[...]` for LM Studio and Gemini).
 - Confirmation before any booking is enforced **in code**, not only in the prompt.
 - Caller phone from caller ID; availability re-checked in a DB transaction (R17).
-- Booking backends in order: internal Postgres table → Google Calendar → Cal.com → OpenTable etc.
+- Booking backends in order: internal Postgres table → Google Calendar (pilot, DEC-48) → Cal.com → OpenTable etc.
 - Tools developed with 20–32B local models (DEC-29); final booking tests against Gemini (R1).
 
 ### DEC-19 — Dashboard — **Superseded by DEC-41**
@@ -859,6 +860,26 @@ indexed, so one question can return both ([07-knowledge-quality.md](07-knowledge
 
 Consequences: implemented with the retrieval change (build order step 7). OPEN-22 still
 decides how many fallback chunks follow the facts.
+
+### DEC-48 — Google Calendar as the pilot booking backend (stage 2 pilot, OAuth in stage 3)
+
+Max chose Google Calendar for business actions (2026-10-19). Extends the backend order in
+DEC-18 (internal Postgres → Google Calendar → Cal.com): Google Calendar moves from stage 3
+to the pilot; the internal table is still built first.
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| Backend | **Google Calendar (free/busy + events)** | Free API (DEC-33); owners already use it; the owner sees bookings in their own calendar | One calendar per business; no transaction | ✅ pilot |
+| | Cal.com | Open source, good API | Another service per business | later |
+| | Calendly | Paid API plan | Breaks DEC-33 | ❌ |
+| Pilot auth | **Service account; owner shares the calendar with its email** | No consent screen, no refresh token to store or expire | Manual share step per business; not self-service | ✅ pilot |
+| | Per-business OAuth (`calendar.events`, `calendar.freebusy`) | Self-service onboarding | Testing-mode refresh tokens expire after 7 days; public use needs Google app verification; token storage (R14) | stage 3 (OPEN-12) |
+| Double booking | **Postgres `bookings` row with an exclusion constraint is the lock; re-check `freebusy` right before `events.insert`** | Google has no transaction; dashboard lists bookings without calling Google | Two places hold a booking (linked by `external_ref`) | ✅ |
+| | Google only | One source of truth | Race between two callers | ❌ |
+
+- Event carries name, phone, service; `business_id` and `conversation_id` as private
+  extended properties. Cancel/change finds the event by `external_ref`.
+- Built behind the same `BookingBackend` protocol, so tools and prompts don't change.
 
 ## 4. Still considering (open questions)
 

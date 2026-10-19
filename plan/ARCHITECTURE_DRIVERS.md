@@ -185,8 +185,9 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
 - Why unavoidable: Google Calendar / Cal.com access is granted per business account.
 - Breaks: D4 (simple) — adds token storage, refresh and encryption.
 - Forced choice: store encrypted refresh tokens in Postgres (key in Secret Manager);
-  internal booking table first, integrations later.
-- Status: **Accepted** — stage 3.
+  internal booking table first, integrations later. The pilot skips OAuth: a service
+  account with the calendar shared to it (DEC-48).
+- Status: **Accepted** — OAuth in stage 3.
 
 ### Legal and data protection
 
