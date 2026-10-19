@@ -79,7 +79,7 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
 - Web UI: React + TypeScript (Vite multi-page) in `web/`, built to `web/dist` and served by
   FastAPI under `/web` — no separate frontend service (DEC-41, supersedes DEC-19's HTMX).
   `/web/` is the voice app from the "Voice Chat Bot" design with server push-to-talk (DEC-42);
-  `chat.html` and `voice-debug.html` are debug pages. Frontend tests: `npm test`, `npm run e2e`.
+  `chat.html`, `voice-debug.html` and `call.html` (Twilio Voice SDK, DEC-43) are debug pages. Frontend tests: `npm test`, `npm run e2e`.
 - Cloud Run + Cloud Run Jobs, `min-instances=0` always (DEC-35); Neon free tier, then Neon Launch
   (usage-based). No Cloud SQL.
 - Cost model (DEC-33): only free or pay-per-use services — no monthly fees, minimums or trials

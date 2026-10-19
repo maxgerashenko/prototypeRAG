@@ -43,6 +43,8 @@ uv run python -m app.rag.index --business-id <id>                               
 uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml
 ```
 
+Questions to ask by hand, with expected answers, one file per business: [questions/](questions/).
+
 Then open a page:
 
 | Page | URL (uvicorn, built pages) | Needs |
@@ -50,6 +52,7 @@ Then open a page:
 | **Voice app** (DEC-42): pick a business, read past conversations, call with push-to-talk, continue an earlier call | http://localhost:8000/ (redirects to `/web/`; the old `/web/mic-test.html` does too) | DB; for calls also LM Studio, `gcloud auth application-default login`, Chrome or Safari |
 | Chat test (answers + retrieved sources; paste a `business_id`) | http://localhost:8000/web/chat.html | DB, LM Studio |
 | Voice debug (hands-free: open mic + server VAD, raw event log; paste a `business_id`) | http://localhost:8000/web/voice-debug.html | as for calls, plus headphones |
+| Twilio call (mode B: Voice SDK → TwiML App → `/twilio/voice` → `/voice/ws`, billed per minute) | http://localhost:8000/web/call.html (localhost only) | as for calls, plus `TWILIO_*` + `PUBLIC_BASE_URL` in `.env` and ngrok — setup in [03-voice-channel.md](plan/03-voice-channel.md) |
 
 In the voice app, hold **Hold to talk** (or hold Space) while you speak and release to send;
 pressing while the assistant talks interrupts it. Space also starts a call (selected
@@ -67,8 +70,8 @@ pages haven't been built yet — run `npm run build`.
 cd web
 npm ci              # install exact versions from package-lock.json (first time / after pulling)
 npm run build       # type-check + build to web/dist; uvicorn serves it without a restart
-npm run dev         # hot reload on http://localhost:5173/web/ (also /web/chat.html, /web/voice-debug.html);
-                    # proxies /chat, /debug, /businesses, /health, /dev and the /voice WebSocket to :8000,
+npm run dev         # hot reload on http://localhost:5173/web/ (also /web/chat.html, /web/voice-debug.html, /web/call.html);
+                    # proxies /chat, /debug, /businesses, /twilio, /health, /dev and the /voice WebSocket to :8000,
                     # so keep `uv run uvicorn app.main:app --reload` running alongside
 npm run build -- --watch   # alternative: rebuild on save; with DEV_RELOAD=true in .env the pages
                            # served by uvicorn reload themselves (never during a call)

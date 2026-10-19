@@ -13,6 +13,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@twilio/voice-sdk": "^2.18.5",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

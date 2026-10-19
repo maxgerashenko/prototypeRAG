@@ -165,6 +165,9 @@ export class VoiceCall {
       case "error":
         onLine?.("meta", "Error: " + ev.message);
         break;
+      case "hangup":
+        onLine?.("meta", `[call ended by the assistant: ${ev.reason}]`);
+        break;
       case "conversation_id":
         onLine?.("meta", "conversation " + ev.id);
         break;

@@ -118,7 +118,9 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-39 | Reviews and marketing text | Website testimonials + marketing → a short business summary (description, highlights, guest themes, tone) in the system prompt; never a source of facts; no Google reviews (R9) | 1 | ✅ |
 | DEC-40 | Organize / clean step | New step between crawl and index: crawl priority, site chrome kept once (not thrown away), page type, location, language, duplicates, staleness, junk filter; idempotent by content hash + version; owner-confirmed facts never overwritten | 1 | ✅ |
 | DEC-41 | Web UI stack | React + TypeScript (Vite multi-page build) in `web/`, built to `web/dist` and served by the one FastAPI service under `/web`; voice app, debug pages and later the owner dashboard | 1 · 2 (image build) | ✅ |
+| DEC-43 | Twilio adapter: business lookup and trust | Voice SDK calls send `business_id` as a custom parameter, phone calls match `To` in `businesses.phone_numbers`; webhooks checked with `X-Twilio-Signature` already in stage 1 (ngrok is public); `/voice/ws` accepts only streams carrying an HMAC from `/twilio/voice`; Voice SDK token served to localhost only; `conversations.call_sid` for the status callback | 1 · 3 (lookups need an RLS-exempt path) | ✅ |
 | DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
+| DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (V9 without headphones) |
 
 ---
 
@@ -718,6 +720,30 @@ Consequences:
   backs out or ends the call, Backspace ends a call. Answers show the time to first audio
   ("· 1.4 s", all timings on hover) and "· interrupted" after a barge-in. A call nobody
   spoke in shows "Nothing was said" (not saved for reading). 4404 → "Unknown business".
+
+### DEC-43 — Twilio adapter: business lookup and trust (stage 1, step 4)
+
+Context: step 4's Twilio part (`app/voice/twilio_routes.py`, `app/voice/ws.py`,
+`web/call.html`). Locally the API is reached by Twilio through ngrok, so the webhook and
+the media stream are on a public URL from stage 1 on — before OPEN-19's access control.
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| Which business a call is for | **Voice SDK: `business_id` custom parameter; phone: dialled `To` in `businesses.phone_numbers`** | Same webhook for modes A and B; no number needed for B (DEC-34) | Lookup reads across tenants before the business is known | ✅ |
+| | A TwiML App per business | Nothing in the request to trust | One Twilio resource per business, onboarding step | ❌ |
+| Webhook trust | **Check `X-Twilio-Signature` now (Twilio's `RequestValidator`), fail closed without `TWILIO_AUTH_TOKEN`** | ngrok URL is public; a forged webhook could open calls on any business | `PUBLIC_BASE_URL` must equal the URL Twilio calls (else every call is refused — logged) | ✅ |
+| | Wait for OPEN-19 (stage 2) | — | Public endpoint without a check in stage 1 | ❌ |
+| Media stream trust | **HMAC(auth token, business + CallSid) as a `<Stream>` custom parameter, checked on `start`** | Only streams `/twilio/voice` started can run a call; no extra state | Custom parameters arrive only in the `start` message, so the socket is accepted first | ✅ |
+| | Validate the WebSocket handshake's signature header | No extra parameter | Depends on Twilio signing the upgrade request and on the exact wss URL | ❌ |
+| Voice SDK token (mode B) | **`GET /twilio/token` for loopback clients without `X-Forwarded-For` only** | A token can start billed calls; ngrok requests carry the header | Page must be opened on localhost, not via ngrok | ✅ stage 1 (OPEN-19 replaces it) |
+| End of call when the process dies (V19) | **`conversations.call_sid` (unique), status callback sets `ended_at`** | Also the hook for the summary (DEC-24, step 5) | A migration (0004) | ✅ |
+
+Consequences:
+- Stage 3: the number → business and CallSid → conversation lookups run before a tenant is
+  known — they need an RLS-exempt path (security-definer function or admin role), like
+  `/businesses` ([06-scale.md](06-scale.md) tasks).
+- Twilio's per-call events (transcript, reply text) don't exist on a phone line; the session's
+  events are logged only, and `clear` maps to Twilio's `clear` (barge-in).
 - Fixed at the merge: a question and its answer are saved in one transaction and get the
   same `created_at` (`now()` = transaction start); `ORDER BY created_at, id` then ordered
   them by a random UUID, so a transcript, `continue_from` history or `/chat`'s LLM history
@@ -725,6 +751,39 @@ Consequences:
   `app/db/models.py`, used by every message query).
 - Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
   second business.
+
+### DEC-44 — Barge-in robustness (V9/V10) and turn-end tuning (stage 1, step 4)
+
+Context: the 2026-10-03 mic test and the 2026-10-18 Mac/Twilio test
+([03-voice-channel.md](03-voice-channel.md) "Known problems", "Test on Mac") found two
+open robustness gaps and one latency/correctness trade still to tune:
+- **V9** — speaker echo could make the VAD hear the bot's own voice as the caller
+  interrupting (not yet reproduced without headphones; the clean speech fixture can't
+  simulate it, only a real mic/speaker setup can).
+- **V10** — a short cough or "mm-hm" during an answer looked like it could stop the bot
+  for good, with no resume (passed in the 2026-10-18 test, but by design margin only:
+  the normal 160 ms minimum speech length is short).
+- Mid-thought pauses ("What if I want to come?" … "Today, night at 9 pm") can end a turn
+  before the caller is done, cut by the VAD's `end_silence_ms` silence window.
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| V9/V10 fix | **Stricter VAD while the bot is active** (`TurnDetector.set_bot_active()`): higher `webrtcvad` aggressiveness + a longer minimum speech length before `speech_start` fires, both only while deciding whether to *start* a turn — reverts to the normal settings the instant a turn is confirmed | One mechanism for both; no STT dependency; cheap (`Vad.set_mode()` on the existing instance); doesn't touch end-of-speech detection | A genuine barge-in takes a little longer to register while the bot is speaking (up to `VAD_BARGE_IN_START_MS` instead of the normal start); a quieter real interruption could in theory be missed at the higher aggressiveness | ✅ |
+| | Require STT text before sending `clear` (the original V9 fix idea) | Confirms real words before interrupting | Doesn't actually distinguish echo from a real caller — echo of the bot's own words transcribes just as well as real speech; adds the STT round trip to every barge-in's latency | ❌ |
+| | Leave V10's existing 160 ms minimum as the only gate (no bot-active gate) | Simplest, no change | Same 160 ms whether or not the bot is talking, so the exact case most likely to misfire (echo while the bot speaks) gets no extra protection | ❌ |
+| Turn-end tuning | **Raise `end_silence_ms` 500→700 ms** (plan latency budget widened 300–500 → 300–700 ms) | Fewer turns cut by a mid-thought pause, the caller experience problem the 2026-10-03 test flagged | ~200 ms more latency on every turn | ✅ |
+| | Leave at 500 ms | No extra latency | The mid-thought-pause problem is "by design" (history keeps both parts, DEC-30's shared-tools model doesn't change), but it reads as the bot interrupting the caller | ❌ for now — revisit if 700 ms still cuts turns often in real calls |
+| | Adaptive end-silence (e.g. longer if the partial transcript looks unfinished) | Could fix the pause case without a blanket latency cost | Needs STT interim text mid-turn and a model of "sounds unfinished"; a bigger feature than this step's scope | ❌ for now — reconsider if 700 ms isn't enough |
+| Tunability | **All three (`VAD_END_SILENCE_MS`, `VAD_BARGE_IN_AGGRESSIVENESS`, `VAD_BARGE_IN_START_MS`) are env vars (`.env.example`), not code constants** | Re-tunable from real-call data without a deploy, matching `VOICE_REASONING_EFFORT`'s pattern | One more thing to keep documented | ✅ |
+
+Consequences:
+- Priority order applied: caller experience (fewer false barge-ins, fewer cut-off turns)
+  over the local latency budget, which the table above records as now widened.
+- V9 without headphones (the actual echo case) still needs a live re-test on the Mac —
+  this decision hardens the code ahead of that test, it doesn't close V9.
+- If 700 ms still isn't enough against real mid-thought pauses, the next step is the
+  adaptive option above, not a further blanket increase (diminishing returns on latency
+  spent per turn where most turns don't pause mid-sentence).
 
 ## 4. Still considering (open questions)
 
@@ -743,7 +802,7 @@ Grouped by the stage in which the answer is needed.
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
 | OPEN-08 | 2 | Voice mode in cloud | Pipeline (Google STT → Gemini Flash → Google TTS) · Gemini Live | Stage-2 comparison: latency, quality, cost per minute, session limits |
-| OPEN-19 | 2 | API access control for the pilot | Shared secret header / IAP / Cloud Run IAM for owner routes, Twilio signature check for webhooks; public only: chat widget | Needed before stage 2 step 8 (public Cloud Run URL): today every route trusts the `business_id` in the request, and `/businesses/{id}/custom-replies` lets anyone rewrite what the phone bot says; `/debug/retrieve` dumps chunk text |
+| OPEN-19 | 2 | API access control for the pilot | Shared secret header / IAP / Cloud Run IAM for owner routes; public only: chat widget. Twilio webhooks and `/voice/ws` are already checked since stage 1 (DEC-43) | Needed before stage 2 step 8 (public Cloud Run URL): today every route trusts the `business_id` in the request, and `/businesses/{id}/custom-replies` lets anyone rewrite what the phone bot says; `/debug/retrieve` dumps chunk text |
 | OPEN-09 | 3 | Telephony provider | Twilio · Telnyx · Vonage · Plivo | OPEN-02 (price, number availability) |
 | OPEN-12 | 3 | Owner login for dashboard | Google sign-in · magic link | Before the second business |
 | OPEN-13 | 3 | CI/CD + Terraform timing | When deploys get frequent/risky or >1 person deploys | Stage 2 `deploy.sh` experience |
