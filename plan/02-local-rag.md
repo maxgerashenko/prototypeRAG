@@ -158,7 +158,7 @@ docker-compose.yml, Dockerfile, .env.example
 ## Tasks
 
 - [x] `docker-compose.yml` (pgvector Postgres)
-- [ ] LM Studio setup notes (models, server, `lms` CLI)
+- [x] LM Studio setup notes (models, server, `lms` CLI) — README "LM Studio (stage 1)"
 - [x] Model comparison on the eval: gemma-4-12b vs qwen3.6-35b-a3b, both 7/7 on `tests/eval/bathhouse.yaml` (DEC-32); Gemini Flash comparison still open
 - [x] Config + `llm.py` (OpenAI-compatible client, built in step 2; `chat`/`chat_json`/`embed`)
 - [x] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
