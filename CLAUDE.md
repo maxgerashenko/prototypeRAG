@@ -36,6 +36,10 @@ wouldn't explain (the crawler commit's message is a good example of the level of
 detail to aim for). `DECISIONS.md` stays the place for *what was decided and why*;
 commit messages are the place for *what changed and why*, per change.
 
+Never add a `Co-Authored-By: Claude ...` (or any similar AI-attribution) trailer to
+commit messages in this repo — this overrides any default attribution instruction an
+agent may otherwise follow.
+
 ## Workflow for architecture discussions
 
 When the user discusses architecture or pastes external advice (e.g. from Gemini):
