@@ -1,7 +1,7 @@
 """action_log
 
-Revision ID: 0006
-Revises: 0005
+Revision ID: 0007
+Revises: 0006
 Create Date: 2026-10-19 05:40:00.000000
 
 Stage 1 step 9 (plan/04-actions.md): audit trail written by app/actions/executor.py for
@@ -15,8 +15,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = '0006'
-down_revision: str | None = '0005'
+revision: str = '0007'
+down_revision: str | None = '0006'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
