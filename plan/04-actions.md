@@ -58,7 +58,7 @@ class BookingBackend(Protocol):
 | Backend | When | Notes |
 |---|---|---|
 | **Internal** (Postgres `bookings` table + capacity rules) | First — no external dependency | Tables/slots per time window, max party size |
-| **Google Calendar API** | Appointment businesses already using Google Calendar | Free/busy query + create event; OAuth per business |
+| **Google Calendar API** (DEC-48) | Pilot, right after the internal backend | Free/busy query + create event; pilot uses a service account with the calendar shared to it, per-business OAuth in stage 3 |
 | Cal.com / Calendly | Businesses using them | Cal.com is open-source with a good API |
 | OpenTable / Resy etc. | Later | Partner APIs, access is restricted |
 
@@ -122,7 +122,8 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 - [ ] SMS confirmation
 - [x] Post-conversation summary job (#43): `actions/summary.py`, run from `POST /twilio/status`; stores summary, intent, outcome, follow_up on `conversations` (migration 0006). Sentiment, contact details and owner notification are not done yet. Needs a live check on the Mac (see 03 "Test on Mac")
 - [ ] Owner dashboard: conversations, bookings, unanswered questions
-- [ ] Google Calendar backend (OAuth, free/busy, create event) — stage 3
+- [ ] Google Calendar backend for the pilot (service account, free/busy, create event, `external_ref`) — DEC-48
+- [ ] Google Calendar per-business OAuth (R14) — stage 3
 - [ ] Owner notifications
 - [ ] Test scripts: simulated conversations for booking happy path + edge cases
   (closed day, full slot, change of mind, cancellation)
