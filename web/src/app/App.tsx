@@ -117,6 +117,13 @@ export function App() {
 
   const openConversation = (bizId: string, convoId: string, returnTo: TranscriptRef["returnTo"]) => {
     const req = ++detailReq.current;
+    // Opening a conversation counts as seeing it: drop its NEW mark however the user leaves.
+    setNewIds((prev) => {
+      if (!prev.has(convoId)) return prev;
+      const next = new Set(prev);
+      next.delete(convoId);
+      return next;
+    });
     setTranscript({ bizId, convoId, returnTo });
     setDetail({ status: "loading" });
     setStage("transcript");
