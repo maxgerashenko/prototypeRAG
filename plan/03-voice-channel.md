@@ -223,7 +223,7 @@ Findings:
 | V9 | Speaker echo → VAD hears the bot → false barge-in; browser echo cancellation may not cover WebAudio playback | Potential | Mic test without headphones | Fixed in code 2026-10-18 (DEC-44): raise VAD aggressiveness while bot speaks. Mic test without headphones still open |
 | V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | Fixed in code 2026-10-18 (DEC-44): minimum speech length before barge-in, longer while the bot speaks |
 | V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | Client reports playback end; Twilio `mark` events |
-| V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); untested in Safari | Potential | Open page in Chrome, Safari, Firefox | Capture at native rate, resample server-side |
+| V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); Safari untested | Closed (Safari ✅ 2026-10-19: works, mic streams; Firefox explicitly not supported/tested — not a target browser) | Open page in Chrome, Safari | — |
 | V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Potential | Look at `reply` events of real answers | Abbreviation list; split also on `,`/length cap |
 | V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
 | V15 | Reply-task sends and feed-path sends (`clear`) can interleave on one WebSocket | Potential | Barge-in many times quickly | One send queue per connection |
@@ -356,8 +356,9 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
   — checked by code review only as of 2026-10-18, not run live; code hardened further
   2026-10-18 (DEC-44, longer minimum speech length while the bot speaks)
-- [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
-  work, does the mic stream?
+- [x] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
+  work, does the mic stream? — ✅ 2026-10-19: works in Safari, mic streams fine. Firefox
+  explicitly not tested — not a supported browser for this project
 - [ ] **DEC-46 live phone call in `/web/`**: open `/web/` on localhost, then make a Voice SDK
   call from `/web/call.html` in a second tab (or dial the trial number). The voice app
   should switch to the call by itself, with "Phone" and the call clock at the top; the
