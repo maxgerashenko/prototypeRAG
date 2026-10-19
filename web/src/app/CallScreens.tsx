@@ -41,9 +41,24 @@ interface CallProps {
   onEnd: () => void;
 }
 
-export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd }: CallProps) {
+/** A phone call the system is taking (DEC-46), watched live: no push-to-talk (the caller
+ * talks on the phone line), and Close stops watching without hanging up. */
+interface PhoneProps {
+  biz: Business;
+  call: CallState;
+  caller: string;
+  onClose: () => void;
+}
+
+export function PhoneCallScreen({ biz, call, caller, onClose }: PhoneProps) {
+  return <CallScreen biz={biz} call={call} phone={{ caller, onClose }} onPttDown={() => {}} onPttUp={() => {}} onEnd={onClose} />;
+}
+
+export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd, phone }: CallProps & { phone?: { caller: string; onClose: () => void } }) {
   const now = useNow(call.phase === "live");
   const status = callStatus(call);
+  // on the phone the caller just talks (the server's VAD takes turns), nothing to hold
+  if (phone && status.tone === "idle") status.text = "The caller’s turn";
   const orbVars = { "--bar-speed": status.barSpeed, "--bar-play": status.barsRunning ? "running" : "paused" } as CSSProperties;
 
   const down = (e: PointerEvent<HTMLButtonElement>) => {
@@ -68,11 +83,11 @@ export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd }: CallProps) 
   };
 
   return (
-    <div className="screen" data-screen="call">
+    <div className="screen" data-screen={phone ? "phone-call" : "call"}>
       <div className="call-top">
         <div className="live-pill">
           <div className="live-dot" />
-          <b>Live</b>
+          <b>{phone ? "Phone" : "Live"}</b>
           <span className="mono-font" data-testid="call-timer">{fmtClock(elapsed(call, now))}</span>
         </div>
         <div className="biz-chip">
@@ -96,7 +111,7 @@ export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd }: CallProps) 
 
       <div className="call-log">
         <div className="bubbles">
-          {call.messages.map((m) => <Bubble key={m.id} m={m} />)}
+          {call.messages.map((m) => <Bubble key={m.id} m={m} caller={phone ? "Caller" : undefined} />)}
           {call.botState === "thinking" && !call.talking && (
             <div className="thinking" data-testid="thinking">
               <div />
@@ -112,6 +127,15 @@ export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd }: CallProps) 
         </div>
       </div>
 
+      {phone ? (
+        <div className="call-controls">
+          <div className="phone-caller" data-testid="phone-caller">
+            <PhoneIcon size={18} />
+            <span className="ellipsis">{phone.caller}</span>
+          </div>
+          <button className="btn-pill btn-ghost" onClick={phone.onClose}>Close</button>
+        </div>
+      ) : (
       <div className="call-controls">
         <button className={`ptt${call.talking ? " talking" : ""}`} aria-label="Push to talk — hold to speak"
           aria-pressed={call.talking}
@@ -133,6 +157,7 @@ export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd }: CallProps) 
           <PhoneIcon size={26} />
         </button>
       </div>
+      )}
     </div>
   );
 }

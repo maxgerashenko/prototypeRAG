@@ -155,6 +155,7 @@ app/voice/
 web/index.html       voice app (mode C, push-to-talk, DEC-42) — web/src/app/; audio + socket in web/src/voice/voiceCall.ts
 web/voice-debug.html open-mic debug client with raw event log (mode C, VAD) — web/src/voice-debug/ (DEC-41)
 web/call.html        Twilio Voice SDK call page (mode B) — web/src/call/
+app/voice/call_feed.py  GET /voice/feed (SSE): Twilio calls in progress, shown live in the voice app (DEC-46) — web/src/app/liveCalls.ts
 ```
 
 ## Known problems — test or fix when the environment allows
@@ -307,6 +308,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] Twilio webhook + TwiML + media stream WebSocket (`twilio_routes.py`, `ws.py`), signature + stream-token checks (DEC-43), Voice SDK page `web/call.html` + `GET /twilio/token`; tests with fake STT/TTS/LLM (`tests/test_twilio.py`, `web/e2e/call.spec.ts`)
 - [ ] Twilio live: a Voice SDK browser call through ngrok (mode B), then the trial number (mode A); record latency over Twilio
   — setup checked 2026-10-18: Voice SDK token served, `/twilio/voice` and `/twilio/status` reachable through ngrok with the signature check on; no call placed yet
+- [x] Phone calls shown live in the voice app (DEC-46): `GET /voice/feed` (SSE) fed by `ws.py`, watch-only call screen in `/web/`; tests with a fake Twilio stream (`tests/test_call_feed.py`) and a mocked feed (`web/e2e/live.spec.ts`)
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
@@ -356,6 +358,15 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   2026-10-18 (DEC-44, longer minimum speech length while the bot speaks)
 - [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
   work, does the mic stream?
+- [ ] **DEC-46 live phone call in `/web/`**: open `/web/` on localhost, then make a Voice SDK
+  call from `/web/call.html` in a second tab (or dial the trial number). The voice app
+  should switch to the call by itself, with "Phone" and the call clock at the top; the
+  greeting, the caller's words ("Caller · 0:05") and the answers appear as they're spoken;
+  the status goes "Assistant is speaking" → "The caller's turn" → "Thinking…" in step with
+  what you hear. Check: barge-in marks the answer "interrupted"; Close leaves the call
+  running and the green button with the caller's number (e.g. `+1 222 333 45 12`) brings it back; hiding the tab and coming back catches
+  up; after hang-up the summary shows and "Read this conversation" opens it. Also open
+  `/web/` through the ngrok URL once to see the stream survives the tunnel (keep-alive).
 - [ ] **LLM call log** (`app.llm` lines in the uvicorn output): a `/chat/stream` question
   and a voice turn each log `llm chat stream … ttft_ms=… prompt_tokens=… completion_tokens=…`.
   No token counts means LM Studio ignores `stream_options.include_usage`; an error on

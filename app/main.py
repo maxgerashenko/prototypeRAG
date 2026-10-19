@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.db import engine
 from app.voice import google_auth, tts
 from app.voice.browser_ws import router as voice_browser_router
+from app.voice.call_feed import router as call_feed_router
 from app.voice.twilio_routes import router as twilio_router
 from app.voice.ws import router as twilio_stream_router
 
@@ -45,6 +46,7 @@ app.include_router(custom_replies_router)
 app.include_router(voice_browser_router)
 app.include_router(twilio_router)
 app.include_router(twilio_stream_router)
+app.include_router(call_feed_router)
 app.include_router(businesses_router)
 app.include_router(conversations_router)
 if get_settings().dev_reload:
