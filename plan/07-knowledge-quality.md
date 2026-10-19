@@ -209,6 +209,8 @@ the statement changes.
 - **Tool result** (`search_business_info`): up to ~8 fact statements (≈ 20–40 tokens
   each) + at most 1–2 fallback chunks only if facts don't cover the query (OPEN-22);
   each line tagged with location. Target: < 40 % of today's tool-result tokens (V16, T1b).
+  **Duplicates (DEC-47):** a scraped chunk that contains the `fact_sources.quote` of a
+  returned fact is dropped from the result; other chunks are kept as fallback.
 - `business_profile` stays readable until the facts card passes the eval, then it is
   retired (rows derived from facts, or table dropped in a migration — decided then).
   DEC-11's rule moves from "the profile row is confirmed" to "each fact is confirmed".
