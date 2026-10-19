@@ -182,6 +182,16 @@ saved. Finishing the work and submitting it are two separate steps: say what wou
 committed (files touched, one-line summary) and wait for a yes before running the
 command. This holds every time, not just the first time in a session.
 
+## Issues and PRs (DEC-45)
+
+Work is tracked as GitHub issues, grouped by milestones named `S<stage> · M<n> <name>`;
+labels are `area:*`, `type:*`, `blocked` and `in-progress`. When working on an issue:
+
+- Put `Fixes #n` in the PR body, so GitHub closes the issue when the PR merges.
+- While a PR is open for an issue, give the issue the `in-progress` label and link the PR.
+- When the PR merges, close the issue as completed, remove `in-progress`, and make sure the
+  PR is linked. When a blocker closes, remove `blocked` from the issues it was blocking.
+
 ## Writing style for plan files
 
 - English, concise, tables for comparisons, checklists (`- [ ]`) for tasks.
