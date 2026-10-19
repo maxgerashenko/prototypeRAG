@@ -7,7 +7,7 @@ labels: []
 
 <!--
 Labels: exactly one area:* (where the fix goes, not where the symptom shows),
-one type:* and one stage:*. Add `blocked` while a "Blocked by" issue is open.
+one type:*. Stage = the milestone's `S<n> ·` prefix. Add `blocked` while a "Blocked by" issue is open.
 Milestone: S<stage> · M<n> <name> from plan/PROJECT_PLAN.md.
 -->
 
