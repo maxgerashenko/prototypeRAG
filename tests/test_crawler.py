@@ -22,13 +22,16 @@ from app.ingest.discover import (
     RobotsChecker,
     discover_links,
     discover_pages,
+    discover_pdf_links,
     has_noindex,
     is_blog_path,
+    is_pdf_url,
     is_skippable,
     normalize_url,
     prioritize,
     same_domain,
 )
+from app.ingest.fetch import extract_pdf_text, fetch_document, pdf_title
 from app.ingest.identity import domain_of, site_root
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 
@@ -66,9 +69,32 @@ def test_same_domain_handles_www_without_the_lstrip_bug():
 
 
 def test_is_skippable():
-    assert is_skippable("https://x.com/menu.pdf")
+    assert not is_skippable("https://x.com/menu.pdf")  # PDFs (menus) are crawled now
+    assert is_skippable("https://x.com/logo.png")
     assert is_skippable("https://x.com/account/settings")
     assert not is_skippable("https://x.com/journal/sauna-benefits")
+
+
+def test_pdf_links_are_kept_apart_from_page_links():
+    """The BFS fetches page links to find more links, so PDFs (no links inside) go to
+    discover_pdf_links instead; same-domain rule applies to both."""
+    html = (
+        '<a href="/menu">Menu</a><a href="/files/Bar%20Menu.pdf">PDF</a>'
+        '<a href="https://cdn.other.com/menu.pdf">CDN</a><a href="/logo.png">img</a>'
+    )
+    assert is_pdf_url("https://x.com/files/MENU.PDF") and not is_pdf_url("https://x.com/menu")
+    assert discover_links(html, "https://x.com/") == ["https://x.com/menu"]
+    assert discover_pdf_links(html, "https://x.com/") == ["https://x.com/files/Bar%20Menu.pdf"]
+
+
+def test_crawl_delay_from_robots_txt():
+    assert RobotsChecker("User-agent: *\nCrawl-delay: 4\n").crawl_delay() == 4.0
+    # stdlib drops non-integer values; rounded up instead so it's still honoured
+    assert RobotsChecker("User-agent: *\nCrawl-delay: 2.5\nDisallow: /x\n").crawl_delay() == 3.0
+    assert RobotsChecker("User-agent: *\nRequest-rate: 1/10\n").crawl_delay() == 10.0
+    assert RobotsChecker("User-agent: *\nDisallow: /x\n").crawl_delay() is None
+    # a delay for another bot's group doesn't apply to us ("*")
+    assert RobotsChecker("User-agent: googlebot\nCrawl-delay: 9\n").crawl_delay() is None
 
 
 def test_normalize_url():
@@ -641,7 +667,11 @@ def _page_with_main(template: str, main_html: str) -> str:
 
 
 def _sitemap(paths: list[str]) -> str:
-    urls = "".join(f"<url><loc>{E2E_ROOT}{p}</loc></url>" for p in paths)
+    return _sitemap_for(E2E_ROOT, paths)
+
+
+def _sitemap_for(root: str, paths: list[str]) -> str:
+    urls = "".join(f"<url><loc>{root}{p}</loc></url>" for p in paths)
     return f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>'
 
 
@@ -818,5 +848,132 @@ def test_assign_timezones_uses_profile_address_for_a_default_location_without_on
         assert timezone.assign_timezones(bid) == 1
         with tenant_session(bid) as s:
             assert s.get(Business, bid).timezone == "Europe/Riga"
+    finally:
+        _cleanup_business(bid)
+
+
+# --- PDFs + robots.txt Crawl-delay (plan/01-crawler.md tasks) -------------------------
+
+
+def _text_pdf(lines: list[str], title: str | None = None) -> bytes:
+    """A minimal valid one-page PDF with `lines` as text (no PDF writer in the deps)."""
+    ops = ["BT", "/F1 12 Tf", "14 TL", "72 720 Td"]
+    for line in lines:
+        ops += [f"({line}) Tj", "T*"]
+    stream = "\n".join([*ops, "ET"]).encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    if title:
+        objects.append(f"<< /Title ({title}) >>".encode())
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % i + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    info = f" /Info {len(objects)} 0 R" if title else ""
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R{info} >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+def test_extract_pdf_text_and_title():
+    pdf = _text_pdf(["Bar menu", "Negroni 14", "Spritz 12"], title="Rooftop Bar Menu")
+    text = extract_pdf_text(pdf)
+    assert "Negroni 14" in text and "Spritz 12" in text
+    assert pdf_title(pdf, "https://x.com/files/menu.pdf") == "Rooftop Bar Menu"
+    # no /Title metadata -> the file name, url-decoded
+    assert pdf_title(_text_pdf(["x"]), "https://x.com/files/Bar%20Menu.pdf") == "Bar Menu.pdf"
+    assert extract_pdf_text(b"not a pdf") == ""
+
+
+def test_fetch_document_decides_html_or_pdf_by_the_response(monkeypatch):
+    pdf = _text_pdf(["Massage 60 min 150"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return {
+            "/menu": httpx.Response(200, content=pdf, headers={"content-type": "application/pdf"}),
+            "/octet.pdf": httpx.Response(200, content=pdf, headers={"content-type": "application/octet-stream"}),
+            "/missing.pdf": httpx.Response(200, text="<html>not found</html>", headers={"content-type": "text/html"}),
+            "/big.pdf": httpx.Response(200, content=pdf, headers={"content-type": "application/pdf"}),
+        }[request.url.path]
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert "Massage 60 min 150" in fetch_document("https://x.com/menu", client).pdf_text  # no .pdf in the url
+    assert "Massage 60 min 150" in fetch_document("https://x.com/octet.pdf", client).pdf_text
+    assert fetch_document("https://x.com/missing.pdf", client).html == "<html>not found</html>"
+    monkeypatch.setattr("app.ingest.fetch.MAX_PDF_BYTES", 100)
+    with pytest.raises(ValueError):
+        fetch_document("https://x.com/big.pdf", client)
+
+
+PDF_HOST = "www.crawl-pdf.example.com"  # not a real business's domain
+PDF_ROOT = f"https://{PDF_HOST}/"
+
+
+def test_crawl_business_stores_linked_pdfs_and_honours_crawl_delay(monkeypatch):
+    menu_pdf = _text_pdf(["Treatment menu", "Hot stone massage 60 min 160"], title="Spa Menu")
+    home = (
+        "<html><body><main><h1>Spa</h1><p>Welcome to our spa, open daily.</p>"
+        '<a href="/about">About</a><a href="/files/menu.pdf">Menu</a><a href="/files/scan.pdf">Scan</a>'
+        '<a href="/private/prices.pdf">Hidden</a><a href="https://cdn.other.com/x.pdf">CDN</a>'
+        "</main></body></html>"
+    )
+    about = '<html><body><main><h1>About</h1><p>Family run since 1990.</p><a href="/files/menu.pdf">Menu</a></main></body></html>'
+    site = {
+        "/robots.txt": (200, "User-agent: *\nCrawl-delay: 2\nDisallow: /private/\n", "text/plain"),
+        "/sitemap.xml": (200, _sitemap_for(PDF_ROOT, ["", "about"]), "application/xml"),
+        "/": (200, home, "text/html"),
+        "/about": (200, about, "text/html"),
+        "/files/menu.pdf": (200, menu_pdf, "application/pdf"),
+        "/files/scan.pdf": (200, _text_pdf([]), "application/pdf"),  # no text, like a scanned menu
+    }
+    requested: list[str] = []
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == PDF_HOST, f"crawl left the site: {request.url}"
+        requested.append(request.url.path)
+        status, body, content_type = site.get(request.url.path, (404, "", "text/html"))
+        return httpx.Response(status, content=body if isinstance(body, bytes) else body.encode(), headers={"content-type": content_type})
+
+    def fake_client(delay_seconds: float = 0.5) -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+        client._crawl_delay = delay_seconds
+        return client
+
+    monkeypatch.setattr(run, "make_client", fake_client)
+    monkeypatch.setattr(run.time, "sleep", sleeps.append)
+
+    assert run._business_by_domain("crawl-pdf.example.com") is None  # left over from a failed run?
+    bid = run.resolve_business(PDF_ROOT, None)
+    try:
+        summary = run.crawl_business(bid, PDF_ROOT, extract_profile=False)
+
+        assert summary["pages_crawled"] == 3  # 2 pages + menu.pdf; scan.pdf has no text
+        assert requested.count("/files/menu.pdf") == 1  # linked twice, fetched once
+        assert "/private/prices.pdf" not in requested  # robots.txt Disallow
+        assert sleeps and set(sleeps) == {2.0}  # Crawl-delay: 2 beats the 0.5 s default
+
+        with tenant_session(bid) as s:
+            pages = {p.url: p for p in s.scalars(select(Page).where(Page.business_id == bid))}
+            chunks = list(s.scalars(select(Chunk).where(Chunk.business_id == bid)))
+        menu = pages[f"{PDF_ROOT}files/menu.pdf"]
+        assert menu.title == "Spa Menu"
+        assert "Hot stone massage 60 min 160" in menu.markdown
+        assert menu.retrievable is True
+        assert any("Hot stone massage" in c.text and c.page_id == menu.id for c in chunks)
+        assert f"{PDF_ROOT}files/scan.pdf" not in pages
+
+        # re-crawl: the PDF is kept (it's in the crawl list, not deleted as "unlinked")
+        summary2 = run.crawl_business(bid, PDF_ROOT, extract_profile=False)
+        assert summary2["deleted_pages"] == 0 and summary2["pages_changed"] == 0
     finally:
         _cleanup_business(bid)
