@@ -58,11 +58,12 @@ def chat(messages: list[dict], **kwargs) -> str:
     return response.choices[0].message.content or ""
 
 
-def chat_json(messages: list[dict], schema: dict, schema_name: str = "result") -> dict:
-    """Structured extraction (e.g. business profile, Part 1) via `response_format`."""
+def chat_json(messages: list[dict], schema: dict, schema_name: str = "result", model: str | None = None) -> dict:
+    """Structured extraction (e.g. business profile, Part 1) via `response_format`.
+    `model` overrides `LLM_MODEL` for one call (e.g. `FACTS_LLM_MODEL`, OPEN-20)."""
     client = get_chat_client()
     response = client.chat.completions.create(
-        model=get_settings().llm_model,
+        model=model or get_settings().llm_model,
         messages=messages,
         response_format={
             "type": "json_schema",
