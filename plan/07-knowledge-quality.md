@@ -430,6 +430,19 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
 - [ ] Location card → prompt; re-check V23 (hours now in the data)
 - [ ] Retrieval: fact chunks, location filter, boosts, retrievable pages only; tool
   result fact-first; optional `location` argument (OPEN-23)
+  - **Built 2026-10-19 (partial):** `ingest/fact_chunks.py` keeps one `kind='fact'` chunk
+    (`text = statement`, `location_id` from the fact) per *active* fact, rebuilt at the end
+    of the facts step; a changed statement clears the embedding so `rag/index.py` re-embeds
+    it. `rag/retrieve.py`: fact ×1.5 boost (custom reply ×2), optional `location_id`
+    filter (business-wide + that location) in both vector and keyword search, and the
+    DEC-47 rule (a page chunk containing a returned fact's quote is dropped, the next
+    candidate takes its place). Tests: `tests/test_fact_chunks.py`.
+  - **Not built:** passing a location from a conversation (OPEN-23: nothing calls
+    `retrieve` with `location_id` yet), fact-first tool result with location tags and the
+    1–2 fallback-chunk cap (OPEN-22), the location card + locations list in the prompt,
+    optional `location` tool argument. `retrievable` is already honoured (non-retrievable
+    pages get no chunks). Needs the Mac: embed the fact chunks (`python -m app.rag.index`)
+    and re-run the eval (`tests/eval/bathhouse.yaml`) to see V16/V23.
 - [x] `summary.py` + prompt (≤ ~120 tokens), guest themes attributed, no names
   - Built 2026-10-05 without `facts.py` (it reads pages, not facts). Sources: site root,
     `about`/`location` pages, and any page with `pages.testimonials`; never duplicates,

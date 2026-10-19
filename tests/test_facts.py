@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.db import tenant_session
-from app.db.models import Business, Fact, FactSource, Location, Page
+from app.db.models import Business, Chunk, Fact, FactSource, Location, Page
 from app.ingest import facts as facts_mod
 from app.ingest import run
 from app.ingest.clean import clean_page
@@ -194,6 +194,9 @@ def test_hours_come_from_the_site_chrome_for_all_locations(business_id, chrome_t
         (src,) = s.scalars(select(FactSource).where(FactSource.fact_id == fact.id)).all()
         chrome = s.scalar(select(Page).where(Page.business_id == business_id, Page.page_type == "site_chrome"))
         assert src.page_id == chrome.id and src.page_hash == "c1"
+        # retrievable: one fact chunk with the statement, not yet embedded
+        (chunk,) = s.scalars(select(Chunk).where(Chunk.business_id == business_id, Chunk.kind == "fact")).all()
+        assert chunk.fact_id == fact.id and chunk.text == fact.statement and chunk.embedding is None
 
 
 def test_rerun_on_unchanged_pages_changes_nothing(business_id, chrome_text, model):
