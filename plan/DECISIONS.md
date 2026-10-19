@@ -812,6 +812,8 @@ Rules:
   stay here. Template: `.github/ISSUE_TEMPLATE/task.md`.
 - An issue blocked by one in a *later* milestone means one of the two is in the wrong milestone.
 - Stage 2 and 3 get milestones now and issues when their stage starts.
+- Each stage has one `epic` issue (`Epic: Stage 1 · Local` and so on) with that stage's issues
+  attached as sub-issues, so the stage shows as one block with a progress bar.
 
 ## 4. Still considering (open questions)
 
