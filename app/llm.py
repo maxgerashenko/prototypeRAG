@@ -39,7 +39,9 @@ def get_embed_client() -> OpenAI:
 def embed(texts: list[str]) -> list[list[float]]:
     settings = get_settings()
     client = get_embed_client()
-    response = client.embeddings.create(model=settings.embed_model, input=texts)
+    # ask for EMBED_DIM explicitly: Gemini's default is larger than the column (768) and
+    # its OpenAI-compatible endpoint honours `dimensions`; LM Studio ignores it (nomic is 768)
+    response = client.embeddings.create(model=settings.embed_model, input=texts, dimensions=settings.embed_dim)
     vectors = [d.embedding for d in response.data]
     # the chunks.embedding column is fixed at EMBED_DIM; fail here with a clear message
     # rather than deep inside pgvector (e.g. a cloud model's default size isn't 768)

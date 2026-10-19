@@ -84,11 +84,11 @@ First measurement (stage 1, 2026-10-03, gemma-4-12b in LM Studio, thinking off, 
 STT/TTS — so LLM + tool only): answer from the profile alone ≈ 1.2–1.3 s to the first
 sentence; with a `search_business_info` call ≈ 5 s (1.8 s to emit the tool call, 3.2 s
 to answer over 5 chunks; the search itself ≈ 40 ms). Tool turns are the gap to close —
-filler, fewer/shorter chunks, or a faster model. With thinking on (gemma's default) it
+the T1 ticks (no spoken filler, #40), fewer/shorter chunks, or a faster model. With thinking on (gemma's default) it
 was 8–18 s.
 
 Techniques: stream everything, start TTS on the first complete sentence, keep prompts
-short, short spoken-style answers, play a filler ("one moment…") when a tool call runs.
+short, short spoken-style answers, play quiet ticks (T1) when a tool call runs.
 
 ## Conversation behaviour
 
@@ -278,7 +278,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 
 | # | Problem | Kind | How to test | Fix idea if it fails |
 |---|---|---|---|---|
-| V16 | Turns with `search_business_info` take ≈ 5 s to the first sentence (1.8 s to emit the tool call, 3.2 s over 5 chunks) — budget is 1.5 s | Real | `latency` events | Filler phrase while the tool runs; fewer/shorter chunks; LM Studio prompt caching; faster model; compare Gemini (step 6) |
+| V16 | Turns with `search_business_info` take ≈ 5 s to the first sentence (1.8 s to emit the tool call, 3.2 s over 5 chunks) — budget is 1.5 s | Real | `latency` events | Ticks while the tool runs (T1, done; spoken filler dropped, #40); fewer/shorter chunks; LM Studio prompt caching; faster model; compare Gemini (step 6) |
 | V17 | Silence re-prompt / hang-up — **fixed in code 2026-10-05**: VAD mode only (phone, `voice-debug.html`), not push-to-talk; 6 s quiet after the bot's audio ends → "Are you still there?", 6 s more → goodbye line, `hangup` event, socket closed (1000). A caller whose last sentence is a farewell (`is_farewell()`, English regex, never on a question) is answered, then hung up on. Re-prompt/goodbye go to the transcript, not the LLM history | Fixed in code | "Test on Mac" below | Farewell by LLM tool (`end_call`) if the regex misses too often or for other languages |
 
 ### Needs Twilio / later stages
@@ -318,7 +318,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
-- [ ] Filler while a tool runs, if latency needs it
+- [x] Filler while a tool runs: dropped 2026-10-19 (#40) — the T1 working-sound ticks are enough, no spoken "one moment"
 - [x] Called number / TwiML App → business_id mapping from Postgres (`To` in `businesses.phone_numbers`; Voice SDK `business_id` parameter)
 - [ ] Call transfer + take-a-message fallback
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
@@ -419,6 +419,17 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   `~/.config/gcloud`), `/web/chat.html`, and one crawl with `docker compose run --rm crawler`.
   Built and smoke-tested in a cloud session (migrate, `/health`, `/web/`, crawler `--help`),
   without LM Studio or ADC
+
+- [ ] **Gemini comparison** (#44, stage-1 step 6; needs a paid Gemini key, R12): set the
+  Gemini block from `.env.example` (chat + embeddings, env vars only), then
+  - [ ] `uv run alembic upgrade head`, re-index (`embed_model` changed, R6); the indexer
+    must not fail on dimension (`EMBED_DIM=768` is sent as `dimensions`)
+  - [ ] Local regression: with LM Studio + nomic, `embed()` still works with the new
+    `dimensions` argument (LM Studio should ignore it) — re-index a few chunks
+  - [ ] Eval: `tests/eval/bathhouse.yaml` with Gemini vs 7/7 for gemma-4-12b / qwen3.6-35b-a3b
+  - [ ] V20: a voice turn and `/chat` with `*_REASONING_EFFORT=none` against the Gemini
+    model — accepted or 400? If rejected, set the value it accepts and note it here
+  - [ ] Booking tests (after M5) against Gemini; record results under "Known problems"
 
 ## Notes
 
