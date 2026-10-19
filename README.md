@@ -60,6 +60,65 @@ business, conversation list) or continues the open transcript; Esc goes back or 
 call; Backspace ends a call. Every call someone spoke in is saved and shows up under the
 business with a NEW badge.
 
+### LM Studio (stage 1)
+
+LM Studio runs natively on the Mac (Apple GPU; Docker has no GPU access, DEC-28/DEC-29) and
+serves an OpenAI-compatible API on `http://localhost:1234/v1`. The app talks to it with the
+`openai` client, so the cloud switch to Gemini is env vars only.
+
+Models, split by role so both fit in memory at once (DEC-32, ~39 GB combined on the 64 GB Mac):
+
+| Role | Model id | Used by | Notes |
+|---|---|---|---|
+| Chat / voice | `google/gemma-4-12b` | `.env` `LLM_MODEL` | ~10 GB; thinking is on by default, so `.env` sets `CHAT_REASONING_EFFORT=none` and `VOICE_REASONING_EFFORT=none` |
+| Embeddings | `text-embedding-nomic-embed-text-v1.5` | `.env` `EMBED_MODEL` | 768 dims; keep it loaded next to the chat model |
+| Code drafting (Claude Code delegation only) | `qwen/qwen3.6-35b-a3b`, thinking on | `.claude/tools/delegate_code.py` | ~27-29 GB; not read from `.env`; load it only when delegating |
+
+Setup:
+
+1. Install LM Studio, download the models above from its catalog (names drift, check `lms ls`).
+2. Start the server (LM Studio app, Developer tab, or `lms server start`) and load the models
+   (`lms load <model>`). Load the chat and embedding models together; `/v1/models` also lists
+   models that are downloaded but not loaded, and those fail on demand when memory is full.
+3. Check what is loaded with `lms ps` and copy the ids it prints into `.env` (`LLM_MODEL`,
+   `EMBED_MODEL`). `LLM_API_KEY` and `EMBED_API_KEY` can be any value.
+4. Smoke test: `curl localhost:1234/v1/models`, then `uv run pytest tests/test_rag.py`.
+
+From the Docker image (`--profile app`) the API reaches LM Studio at
+`host.docker.internal:1234` (see "Run in Docker" below); turn on "Serve on Local Network" in
+LM Studio if the container can't connect.
+
+Memory: macOS lets the GPU use roughly 70-75% of unified memory (~45-48 GB) for weights plus
+context, so unload the code-drafting model when you don't need it.
+
+More: [plan/02-local-rag.md](plan/02-local-rag.md) (model choice, memory budget),
+[DEC-32](plan/DECISIONS.md) (the split).
+
+### Run in Docker (stage-1 exit, step 7)
+
+The API and crawler also run from one Docker image (`Dockerfile`: Node stage builds
+`web/dist`, Python stage installs deps with `uv sync --frozen`). Config is env vars only,
+the same ones Cloud Run gets in stage 2; `.env` is read by Compose but never copied into
+the image. Everything outside the `app`/`crawler` profiles is unchanged:
+`docker compose up -d --wait` still starts only Postgres.
+
+```bash
+docker compose --profile app up -d --build --wait   # postgres + migrate (alembic, exits) + api on :8000
+curl localhost:8000/health
+docker compose run --rm crawler --url https://www.abathhouse.com/williamsburg   # same image
+docker compose run --rm api python -m app.rag.index --business-id <id>         # any CLI
+docker compose logs -f api
+docker compose --profile app down                    # stop; the pgdata volume stays
+```
+
+Inside the containers Compose overrides `.env`'s `localhost` values:
+`DATABASE_URL` points at the `postgres` service and `LLM_BASE_URL` / `EMBED_BASE_URL` at
+LM Studio on the Mac via `host.docker.internal:1234` (LM Studio stays native, R7). Google
+STT/TTS use the ADC file from `gcloud auth application-default login`, mounted read-only
+from `~/.config/gcloud`; without it the API starts and logs one warning, only calls fail.
+Don't run the native `uvicorn` at the same time (both use port 8000). The image listens on
+`$PORT` (8000 here, 8080 on Cloud Run).
+
 ### Web pages (React + TypeScript, `web/`)
 
 The pages are a Vite multi-page app (DEC-41); FastAPI serves the built `web/dist` under

@@ -77,16 +77,24 @@ a:hover { color: var(--bot-light); }
   display: flex; align-items: center; justify-content: center; gap: 10px;
   font-size: 16px; font-weight: 700; cursor: pointer; color: var(--ink);
 }
-.btn-call { background: var(--call); }
+.btn-call { background: var(--accent); } /* web call: blue; green is the phone number */
 .btn-accent { background: var(--accent); }
 .btn-ghost { background: transparent; border: 1px solid #2e333e; color: var(--text); font-weight: 600; }
 .btn-pill:disabled { cursor: not-allowed; opacity: .55; }
 .back-row { padding: 44px 12px 4px; display: flex; align-items: center; }
 .back-btn {
-  height: 44px; padding: 0 12px 0 6px; border: 0; border-radius: 22px; background: transparent;
-  color: var(--text); display: flex; align-items: center; gap: 4px; font-size: 15px; font-weight: 600;
+  height: 44px; padding: 0 12px 0 0; border: 0; border-radius: 22px; background: transparent;
+  color: var(--text); display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600;
   cursor: pointer; max-width: 100%;
 }
+.back-circle {
+  flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%; background: transparent;
+  border: 2px solid var(--accent); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .15s, background .15s;
+}
+.back-btn:hover .back-circle { background: var(--tint); }
+.back-btn:active .back-circle { transform: scale(.94); }
 .badge-new {
   flex-shrink: 0; font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 8px;
   background: var(--accent); color: var(--ink);
@@ -109,6 +117,9 @@ a:hover { color: var(--bot-light); }
 }
 .sel-head h1 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 800; letter-spacing: -.02em; }
 .sel-head p { margin: 0; font-size: 15px; line-height: 1.45; color: var(--muted); }
+.sel-head p strong { color: var(--text); }
+.num-link { color: var(--call); text-decoration: none; white-space: nowrap; }
+.num-link:hover { color: var(--call); text-decoration: underline; }
 .search-wrap { padding: 0 20px 14px; }
 .search {
   display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px; border-radius: 14px;
@@ -126,6 +137,8 @@ a:hover { color: var(--bot-light); }
   transition: border-color .25s ease, background .25s ease, box-shadow .25s ease;
 }
 .biz-card.on { border-color: var(--accent); background: var(--tint); box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+/* numbers that reach this business (the main Twilio number moves to the picked one) */
+.biz-num { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--call); min-width: 0; }
 .biz-pick {
   width: 100%; min-height: 72px; padding: 12px 14px; border: 0; background: transparent;
   display: flex; align-items: center; gap: 14px; text-align: left; cursor: pointer; color: inherit;
@@ -184,14 +197,14 @@ a:hover { color: var(--bot-light); }
 .spacer { flex-shrink: 0; height: 320px; }
 .call-wrap { position: relative; }
 .halo {
-  position: absolute; inset: 0; border-radius: 30px; border: 2px solid var(--call);
+  position: absolute; inset: 0; border-radius: 30px; border: 2px solid var(--accent);
   animation: vw-halo 2s ease-out infinite; pointer-events: none;
 }
 .call-btn {
   position: relative; width: 100%; height: 60px; border-radius: 30px; border: 0; display: flex;
   align-items: center; justify-content: center; gap: 10px; padding: 0 20px; font-size: 17px; font-weight: 800;
   transition: background .25s ease, color .25s ease, transform .15s ease;
-  background: var(--call); color: var(--ink); cursor: pointer;
+  background: var(--accent); color: var(--ink); cursor: pointer;
 }
 .call-btn:disabled { background: var(--bubble); color: #6e7582; cursor: not-allowed; }
 .call-btn:not(:disabled):active { transform: scale(.98); }
@@ -394,3 +407,16 @@ a:hover { color: var(--bot-light); }
   color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .end-btn svg { transform: rotate(135deg); }
+
+/* ---------- phone calls watched live (DEC-46) ---------- */
+.phone-caller {
+  flex: 1; min-width: 0; height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 6px;
+  color: var(--muted); font-size: 15px; font-weight: 600;
+}
+.phone-caller svg { color: var(--call); flex-shrink: 0; }
+.call-controls .btn-pill { width: auto; padding: 0 28px; flex-shrink: 0; }
+.phone-live { position: absolute; left: 16px; right: 16px; bottom: 104px; z-index: 5; }
+.phone-live .call-btn { box-shadow: 0 6px 24px #0008; }
+.phone-live-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.15; }
+.phone-live-text .mono-font { font-size: 17px; font-weight: 800; letter-spacing: .02em; }
+.phone-live-text small { font-size: 12px; font-weight: 700; opacity: .75; max-width: 100%; }

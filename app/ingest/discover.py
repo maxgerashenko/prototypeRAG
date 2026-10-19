@@ -1,10 +1,11 @@
-"""Page discovery: sitemap parsing, link extraction, robots.txt (plan/01-crawler.md step 1;
-priority order + noindex: plan/07-knowledge-quality.md §4 K1).
+"""Page discovery: sitemap parsing, link extraction, robots.txt incl. Crawl-delay
+(plan/01-crawler.md step 1; priority order + noindex: plan/07-knowledge-quality.md §4 K1).
 
 No network calls here — this module only parses strings it's given; `run.py` does the
 fetching and drives the breadth-first expansion when no sitemap is available.
 """
 
+import math
 import re
 import xml.etree.ElementTree as ET
 from urllib.parse import urldefrag, urljoin, urlparse
@@ -13,7 +14,8 @@ from urllib.robotparser import RobotFileParser
 from bs4 import BeautifulSoup
 
 _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-_SKIP_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".svg", ".pdf", ".css", ".js", ".ico", ".woff", ".woff2")
+# .pdf is not here: PDFs (menus, price lists) are crawled -- see is_pdf_url
+_SKIP_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".svg", ".css", ".js", ".ico", ".woff", ".woff2")
 _SKIP_PATH_SUBSTRINGS = ("/cart", "/checkout", "/login", "/account", "/search")
 # Same prefixes app/ingest/organize.py's classify_page_type uses for page_type='blog' --
 # duplicated rather than imported (discover.py has no other dependency on organize.py,
@@ -55,6 +57,12 @@ def is_skippable(url: str) -> bool:
     return any(s in path for s in _SKIP_PATH_SUBSTRINGS)
 
 
+def is_pdf_url(url: str) -> bool:
+    """True for a link to a .pdf file (menu, price list). Only the extension is known
+    before fetching; `fetch.fetch_document` decides by the response itself."""
+    return urlparse(url).path.lower().endswith(".pdf")
+
+
 def normalize_url(url: str) -> str:
     """Drop fragment and query, lowercase the netloc, strip a trailing slash. For deduping."""
     url, _ = urldefrag(url)
@@ -65,8 +73,8 @@ def normalize_url(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc.lower()}{path}"
 
 
-def discover_links(html: str, base_url: str) -> list[str]:
-    """Internal, non-skippable links found in `html`, resolved absolute and deduped."""
+def _internal_links(html: str, base_url: str) -> list[str]:
+    """Same-domain, non-skippable links in `html`, resolved absolute, normalized, deduped."""
     soup = BeautifulSoup(html, "html.parser")
     seen: set[str] = set()
     urls: list[str] = []
@@ -79,6 +87,18 @@ def discover_links(html: str, base_url: str) -> list[str]:
             seen.add(normalized)
             urls.append(normalized)
     return urls
+
+
+def discover_links(html: str, base_url: str) -> list[str]:
+    """Internal page links in `html` (no PDFs: the BFS fetches these to find more links,
+    and a PDF has none -- PDFs come from `discover_pdf_links`)."""
+    return [u for u in _internal_links(html, base_url) if not is_pdf_url(u)]
+
+
+def discover_pdf_links(html: str, base_url: str) -> list[str]:
+    """Internal links to PDFs in `html`. Same-domain only, like every other link: a PDF
+    on a CDN host (e.g. Squarespace's static1.squarespace.com) is not picked up yet."""
+    return [u for u in _internal_links(html, base_url) if is_pdf_url(u)]
 
 
 def is_blog_path(url: str) -> bool:
@@ -128,16 +148,36 @@ def prioritize(urls: list[str], start_url: str, blog_cap: int = DEFAULT_BLOG_CAP
     return [start_url, *depth1, *deeper, *blog[:blog_cap]]
 
 
+# stdlib robotparser only reads whole-number Crawl-delay values and silently drops
+# "Crawl-delay: 2.5" -- rounded up here instead, so a fractional delay is still honoured
+_FRACTIONAL_CRAWL_DELAY_RE = re.compile(r"^(\s*crawl-delay\s*:\s*)(\d*\.\d+)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _round_up_crawl_delays(robots_txt: str) -> str:
+    return _FRACTIONAL_CRAWL_DELAY_RE.sub(lambda m: f"{m.group(1)}{math.ceil(float(m.group(2)))}", robots_txt)
+
+
 class RobotsChecker:
     """Wraps stdlib robotparser over an already-fetched robots.txt body."""
 
     def __init__(self, robots_txt: str, user_agent: str = "*"):
         self.user_agent = user_agent
         self._parser = RobotFileParser()
-        self._parser.parse(robots_txt.splitlines())
+        self._parser.parse(_round_up_crawl_delays(robots_txt).splitlines())
 
     def can_fetch(self, url: str) -> bool:
         return self._parser.can_fetch(self.user_agent, url)
+
+    def crawl_delay(self) -> float | None:
+        """Seconds to wait between requests per robots.txt, or None if it sets none.
+        `Crawl-delay: N` wins; else `Request-rate: R/S` gives S/R seconds."""
+        delay = self._parser.crawl_delay(self.user_agent)
+        if delay is not None:
+            return float(delay)
+        rate = self._parser.request_rate(self.user_agent)
+        if rate is not None and rate.requests > 0:
+            return rate.seconds / rate.requests
+        return None
 
 
 def discover_pages(

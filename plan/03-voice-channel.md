@@ -74,7 +74,7 @@ can be swapped.
 
 | Stage | Budget |
 |---|---|
-| End-of-speech detection (VAD) | 300–500 ms |
+| End-of-speech detection (VAD) | 300–700 ms (DEC-44: widened from 300–500 ms) |
 | STT final text | 200–300 ms |
 | Retrieval | < 100 ms |
 | LLM first sentence | 300–500 ms |
@@ -155,6 +155,7 @@ app/voice/
 web/index.html       voice app (mode C, push-to-talk, DEC-42) — web/src/app/; audio + socket in web/src/voice/voiceCall.ts
 web/voice-debug.html open-mic debug client with raw event log (mode C, VAD) — web/src/voice-debug/ (DEC-41)
 web/call.html        Twilio Voice SDK call page (mode B) — web/src/call/
+app/voice/call_feed.py  GET /voice/feed (SSE): Twilio calls in progress, shown live in the voice app (DEC-46) — web/src/app/liveCalls.ts
 ```
 
 ## Known problems — test or fix when the environment allows
@@ -219,10 +220,10 @@ Findings:
 
 | # | Problem | Kind | How to test | Fix idea if it fails |
 |---|---|---|---|---|
-| V9 | Speaker echo → VAD hears the bot → false barge-in; browser echo cancellation may not cover WebAudio playback | Potential | Mic test without headphones | Require STT text before `clear`; raise VAD aggressiveness while bot speaks |
-| V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | Minimum speech length / confirmed words before barge-in |
+| V9 | Speaker echo → VAD hears the bot → false barge-in; browser echo cancellation may not cover WebAudio playback | Potential | Mic test without headphones | Fixed in code 2026-10-18 (DEC-44): raise VAD aggressiveness while bot speaks. Mic test without headphones still open |
+| V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | DEC-44 fix (minimum speech length before barge-in) insufficient — ❌ still reproduces live 2026-10-19 (real call): saying "hmm" or coughing stopped the bot's voice. Needs stronger hardening (longer `VAD_BARGE_IN_START_MS`, or an energy/pitch check beyond webrtcvad aggressiveness) |
 | V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | Client reports playback end; Twilio `mark` events |
-| V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); untested in Safari | Potential | Open page in Chrome, Safari, Firefox | Capture at native rate, resample server-side |
+| V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); Safari untested | Closed (Safari ✅ 2026-10-19: works, mic streams; Firefox explicitly not supported/tested — not a target browser) | Open page in Chrome, Safari | — |
 | V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Potential | Look at `reply` events of real answers | Abbreviation list; split also on `,`/length cap |
 | V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
 | V15 | Reply-task sends and feed-path sends (`clear`) can interleave on one WebSocket | Potential | Barge-in many times quickly | One send queue per connection |
@@ -244,6 +245,34 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
   to the transport in one synchronous call, so two sends can't interleave mid-message, and
   `_on_speech_start` awaits the cancelled reply task before sending `clear`, so no audio
   of that reply follows it. The Twilio adapter must keep that order (cancel, then `clear`).
+
+**Fixed or closed in code 2026-10-18** (step 4, DEC-44; unit tests with the real VAD on
+the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to do):
+
+- **V9 ✅ code** `TurnDetector.set_bot_active()` (`vad.py`), called from every `feed()`
+  with whether the bot is currently speaking/playing audio (`CallSession._bot_active()`):
+  while active, `speech_start` uses `VAD_BARGE_IN_AGGRESSIVENESS` (default 3, stricter
+  than the normal 2) instead of requiring STT text before `clear` — simpler, and STT text
+  alone doesn't tell real speech from echo of the bot's *own* words, which transcribes
+  just as well as a real caller. Reverts to the normal aggressiveness the instant a turn
+  is confirmed, so it doesn't affect end-of-speech detection. Still needs a mic test
+  without headphones (real echo, not the clean fixture) to confirm it actually helps.
+- **V10 ✅ code, ❌ live** Same mechanism, the duration half: while the bot is active,
+  `speech_start` also needs `VAD_BARGE_IN_START_MS` (default 300 ms) of continuous speech
+  instead of the normal 160 ms, so a short cough or "mm-hm" needs to last noticeably
+  longer before it's treated as a barge-in. Both default to env vars (`.env.example`) so
+  they can be tuned without a code change. **Live-checked 2026-10-19 (real call, issue
+  #84): still reproduces** — a cough/"mm-hm" stopped the bot. 300 ms at the strictest
+  webrtcvad aggressiveness (3) isn't enough to reject a real cough/voiced filler; webrtcvad
+  classifies frames on spectral shape, not "is this a word," so a loud or sustained
+  cough/"mmm" can look like speech for well over 300 ms. Next: try a longer
+  `VAD_BARGE_IN_START_MS`, or a check beyond webrtcvad (e.g. energy/duration heuristic, or
+  requiring partial STT text before committing to `clear`).
+- **V3 end_silence_ms tuned** `VAD_END_SILENCE_MS` default raised 500 → 700 ms (budget
+  widened to 300–700 ms, DEC-44) after the 2026-10-03 mic test ("What if I want to
+  come?" … "Today, night at 9 pm" — a mid-thought pause ended the turn early). Trades
+  ~200 ms of latency on every turn for fewer turns cut mid-sentence; also an env var now,
+  not a code constant, so it can be re-tuned from real-call data without a deploy.
 
 ### Latency (LM Studio, measured with fake STT/TTS — see "Latency budget")
 
@@ -270,7 +299,7 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
 | V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Fixed in code (2026-10-05): crawler sets it per location from the address; re-crawl the pilot to apply | [01-crawler.md](01-crawler.md) tasks |
 | V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real (cause unknown) | `/debug/retrieve`, eval set |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had — **fixed 2026-10-05**: `CHAT_REASONING_EFFORT` (default `none`); measuring is still open | Potential | [02-local-rag.md](02-local-rag.md) tasks |
-| V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Real | Delete when convenient |
+| V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Done 2026-10-18: 14 voice conversations from 2026-10-05 and their 108 messages deleted; 10 later ones kept | Delete when convenient |
 
 ## Tasks
 
@@ -284,6 +313,8 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
 - [x] Mic test end-to-end in the browser with real STT/TTS + LM Studio (results under "Known problems")
 - [x] Twilio webhook + TwiML + media stream WebSocket (`twilio_routes.py`, `ws.py`), signature + stream-token checks (DEC-43), Voice SDK page `web/call.html` + `GET /twilio/token`; tests with fake STT/TTS/LLM (`tests/test_twilio.py`, `web/e2e/call.spec.ts`)
 - [ ] Twilio live: a Voice SDK browser call through ngrok (mode B), then the trial number (mode A); record latency over Twilio
+  — setup checked 2026-10-18: Voice SDK token served, `/twilio/voice` and `/twilio/status` reachable through ngrok with the signature check on; no call placed yet
+- [x] Phone calls shown live in the voice app (DEC-46): `GET /voice/feed` (SSE) fed by `ws.py`, watch-only call screen in `/web/`; tests with a fake Twilio stream (`tests/test_call_feed.py`) and a mocked feed (`web/e2e/live.spec.ts`)
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
@@ -311,40 +342,72 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
     business that's been crawled and indexed
   - [ ] `npm run build` in `web/`, then `uv run uvicorn app.main:app`
   - [ ] Open `/web/` and hold to talk: the reply is heard and the latency line looks sane
-- [ ] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
+- [x] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
+  — ✅ 2026-10-18: fails fast with a clear message at startup, no stall per turn
 - [ ] **V3** 10+ turns: no "STT final result not in after 2.0s" log line; if it shows,
   compare the transcript with what was said
-- [ ] **V14** Ask for "the address and the website": no markup or full URL read aloud;
-  the transcript shows the same plain text
-- [ ] **V24** Time `/chat` (and `/chat/stream` first token) with `CHAT_REASONING_EFFORT=none`
+- [x] **V14** Ask for "the address and the website": no markup or full URL read aloud;
+  the transcript shows the same plain text — ✅ 2026-10-18: address, website (`abathhouse.com`,
+  not the full URL), phone and email all came out without markup
+- [x] **V24** Time `/chat` (and `/chat/stream` first token) with `CHAT_REASONING_EFFORT=none`
   vs thinking on; also re-run the eval set — same task in [02-local-rag.md](02-local-rag.md)
+  — ✅ 2026-10-18 with `none`: 4.6 s for a profile answer on `/chat`, 1.7 s for the
+  `/chat/stream` SSE stream. Thinking-on comparison and the eval re-run not done yet
 - [ ] **V9** VAD mode (`voice-debug.html`) without headphones: does the bot's own voice
-  trigger a barge-in?
-- [ ] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
-- [ ] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
-  work, does the mic stream?
+  trigger a barge-in? — checked by code review only as of 2026-10-18, not run live; code
+  hardened 2026-10-18 (DEC-44, stricter VAD while the bot speaks) ahead of a live mic test,
+  with and without headphones
+- [x] **V10** Cough or say "mm-hm" during an answer (VAD mode): how often does it stop the bot?
+  — ❌ 2026-10-19, real call (issue #84): saying "hmm" or coughing stopped the bot's voice.
+  The DEC-44 hardening (longer minimum speech length while the bot speaks) did not fix it
+  live — needs further work, see "Known problems" V10
+- [x] **V12** Open `/web/` in Safari and Firefox: does `AudioContext({sampleRate: 16000})`
+  work, does the mic stream? — ✅ 2026-10-19: works in Safari, mic streams fine. Firefox
+  explicitly not tested — not a supported browser for this project
+- [ ] **DEC-46 live phone call in `/web/`**: open `/web/` on localhost, then make a Voice SDK
+  call from `/web/call.html` in a second tab (or dial the trial number). The voice app
+  should switch to the call by itself, with "Phone" and the call clock at the top; the
+  greeting, the caller's words ("Caller · 0:05") and the answers appear as they're spoken;
+  the status goes "Assistant is speaking" → "The caller's turn" → "Thinking…" in step with
+  what you hear. Check: barge-in marks the answer "interrupted"; Close leaves the call
+  running and the green button with the caller's number (e.g. `+1 222 333 45 12`) brings it back; hiding the tab and coming back catches
+  up; after hang-up the summary shows and "Read this conversation" opens it. Also open
+  `/web/` through the ngrok URL once to see the stream survives the tunnel (keep-alive).
+- [ ] **LLM call log** (`app.llm` lines in the uvicorn output): a `/chat/stream` question
+  and a voice turn each log `llm chat stream … ttft_ms=… prompt_tokens=… completion_tokens=…`.
+  No token counts means LM Studio ignores `stream_options.include_usage`; an error on
+  every stream means it rejects it — then drop the injection in `app/llm.py`
 - [ ] **Call source icons**: `uv run pytest tests/test_conversations.py` (needs Postgres;
-  not run in the cloud session), then make one Twilio call and one `/web/` call: the
+  not run in the cloud session; ✅ 2026-10-18 all 9 pass), then make one Twilio call and one `/web/` call: the
   history shows a green phone for the Twilio one and a blue globe for the web one
 - [ ] **V17 silence** (`voice-debug.html`, VAD mode): stay quiet after the greeting →
   "Are you still there?" after ~6 s, then the goodbye line, played to the end, then the
   call closes ("call ended by the assistant: silence"). Speak after the re-prompt → answered,
   and the next silence re-prompts again instead of hanging up. Push-to-talk app: no re-prompt
+  — checked by code review only as of 2026-10-18, not run live
 - [ ] **V17 goodbye** (`/web/`, push-to-talk): say "Thank you. Bye." → the bot's goodbye
   plays to the end (not cut by the socket close), then the "Call ended" screen without a
   "closed by the server" notice; "Bye, and what about Sunday?" keeps the call open.
   Over Twilio (`ws.py` closes the Media Stream, which ends the call): check the goodbye
   isn't cut — Twilio may drop buffered audio on close; if so, wait for a `mark` event
-  instead of the estimated playback end
-- [ ] **Voice session tests that need LM Studio** (embeddings for `run_tool`):
+  instead of the estimated playback end — checked by code review only as of 2026-10-18,
+  not run live
+- [x] **Voice session tests that need LM Studio** (embeddings for `run_tool`):
   `uv run pytest tests/test_voice_session.py -k "full_turn_with_tool_call or manual_turns_ignore_vad or barge_in_mid_reply"`.
   In cloud sessions the first two fail with `APIConnectionError` and
   `test_barge_in_mid_reply_keeps_only_what_was_spoken` hangs (same on main)
+  — ✅ 2026-10-18: all 3 pass on the Mac
 - [ ] **Business summary** (plan 07 §6): `uv run python -m app.ingest.run --url https://www.abathhouse.com --only summary --force`,
   then read the `business_summaries` row — no prices/hours/numbers, no customer names,
   guest themes match the site's testimonials; ask a call "what's it like there?"
+- [ ] **Step 7, everything in Compose** (README → "Run in Docker"):
+  `docker compose --profile app up -d --build --wait`, then a real push-to-talk call at
+  `http://localhost:8000/` (reaches LM Studio via `host.docker.internal`, ADC mounted from
+  `~/.config/gcloud`), `/web/chat.html`, and one crawl with `docker compose run --rm crawler`.
+  Built and smoke-tested in a cloud session (migrate, `/health`, `/web/`, crawler `--help`),
+  without LM Studio or ADC
 
 - [ ] **Gemini comparison** (#44, stage-1 step 6; needs a paid Gemini key, R12): set the
   Gemini block from `.env.example` (chat + embeddings, env vars only), then

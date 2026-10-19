@@ -78,7 +78,7 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 5. Actions: tool calling, internal bookings, summaries, minimal dashboard (no login) —
    [04-actions.md](04-actions.md).
 6. Gemini comparison: switch `LLM_*` / `EMBED_*` env vars, re-run eval + booking tests.
-7. Containerize: API `Dockerfile` (+ `Dockerfile.crawler` only if Crawl4AI was added,
+7. 🔄 Containerize (`Dockerfile`, Compose `migrate`/`api`/`crawler` services under the `app`/`crawler` profiles — built; full run against LM Studio + ADC pending on the Mac): API `Dockerfile` (+ `Dockerfile.crawler` only if Crawl4AI was added,
    DEC-36); run everything via Compose with the same env vars — proves stage 2 readiness.
 
 **Stage 1 tuning — after step 7, before stage 2.** Fixes found while building, done as
@@ -101,9 +101,9 @@ group one thread at a time, or expect merge conflicts.
 | # | Step | Plan ref | Main files | Needs |
 |---|---|---|---|---|
 | 1 | Twilio live: Voice SDK call through ngrok, then the trial number; latency over Twilio | 03 Tasks | none (manual) | Mac, Twilio |
-| 2 | Real call through the React app; "Test on Mac" checks (V3, V7, V9, V10, V12, V14, V17, V24); delete V25 test conversations | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
+| 2 | Real call through the React app; "Test on Mac" checks still open (V3, V9, V10, V12, V17 — checked by code review only, not run live; V7, V14, V24 and V25 done 2026-10-18) | 03 "Test on Mac" | none (manual) | Mac (PR #19) |
 | 3 | Filler while a tool runs, if V16 latency needs it | 03 Tasks, V16 | `voice/session.py` | — |
-| 4 | Barge-in robustness if V9/V10 fail; VAD `end_silence_ms` tuning | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
+| 4 | ✅ code 2026-10-18 (DEC-44) Barge-in robustness (stricter VAD while the bot speaks) + `end_silence_ms` tuned 500→700ms, both now env vars; none of it live-tested yet — still needs the Mac mic test (V9, V10) | 03 V3, V9, V10 | `voice/session.py`, `vad.py` | after 2 |
 | 5 | Call transfer + take-a-message fallback | 03 Tasks | `voice/session.py`, `voice/tools.py`, `actions/` | after 9 |
 | 6 | Decide OPEN-20, then `facts.py` + `merge.py` incl. hours from `site_chrome` (V23) | 07 §5, §9 | `ingest/facts.py`, `merge.py`, `run.py` | LM Studio for OPEN-20 |
 | 7 | Location card → prompt; fact chunks in retrieval, location filter, fact-first tool result (OPEN-23) | 07 §3, §5.5 | `rag/prompt.py`, `rag/retrieve.py`, `rag/index.py`, `voice/tools.py` | after 6 |
@@ -118,8 +118,8 @@ group one thread at a time, or expect merge conflicts.
 | 16 | Gemini comparison (step 6): request `EMBED_DIM` from the embeddings endpoint, eval + booking tests, V20 | step 6, 02 Tasks | `llm.py`, `.env.example` | Gemini key; reuse closed PR #20 |
 | 17 | Containerize (step 7): API `Dockerfile` with Node build stage + Compose api/crawler/migrate | step 7, DEC-41 | `Dockerfile`, `docker-compose.yml`, README | reuse closed PR #21 |
 | 18 | Crawler: PDF menus wired in; honour `Crawl-delay`; tests on 3 more real sites | 01 Tasks | `ingest/discover.py`, `fetch.py`, `run.py`, `tests/` | — |
-| 19 | Show the full prompt in the chat page / debug endpoint; log every LLM call | 02 Tasks | `api/chat.py`, `web/`, `llm.py` | — |
-| 20 | LM Studio setup notes | 02 Tasks | README | — |
+| 19 | ✅ (PRs #36, #33; issue #47) Show the full prompt in the chat page / debug endpoint; log every LLM call | 02 Tasks | `api/chat.py`, `web/`, `llm.py` | — |
+| 20 | ✅ (issue #48) LM Studio setup notes | 02 Tasks | README | — |
 
 Same-file groups: `voice/session.py` 3, 4, 5, 10 · `voice/tools.py` 5, 7, 9 · `rag/prompt.py`
 7, 8, 15 · `ingest/run.py` 6, 8, 18 · `llm.py` 16, 19 · new migrations 9, 11, 12 (one Alembic
@@ -269,9 +269,9 @@ app/
 web/                React + TypeScript pages (Vite, DEC-41): voice app at /web/ (DEC-42), chat and
                     voice-debug pages, later the dashboard; `npm run build` → web/dist,
                     served by FastAPI under /web; tests: `npm test` (Vitest), `npm run e2e` (Playwright)
-docker-compose.yml  stage 1: postgres only · stage-1 exit: + api + crawler
+docker-compose.yml  postgres by default · `--profile app`: + migrate + api · `crawler` profile: one-off crawls
 Dockerfile          API image (Node build stage for web/dist, DEC-41)
-Dockerfile.crawler  crawler image with Crawl4AI + headless browser (R8) — once needed (DEC-36)
+Dockerfile.crawler  not yet: the crawler runs from the API image until Crawl4AI is needed (R8, DEC-36)
 .env.example
 ```
 

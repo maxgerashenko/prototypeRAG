@@ -8,6 +8,7 @@ interface Step {
   conv?: string;
   sources?: unknown[];
   noSources?: boolean;
+  prompt?: unknown[];
   status?: number;
   abort?: boolean;
   delay?: number;
@@ -33,6 +34,7 @@ async function setup(page: Page, steps: Step[] = []) {
       body: JSON.stringify({
         answer: step.answer, conversation_id: step.conv ?? "conv-1",
         ...(step.noSources ? {} : { sources: step.sources ?? [] }),
+        ...(step.prompt ? { prompt: step.prompt } : {}),
       }),
     });
   });
@@ -118,6 +120,25 @@ test("no sources box when sources are missing or empty", async ({ page }) => {
   await ask(page, "y");
   await expect(page.locator(".message.assistant")).toHaveCount(2);
   await expect(page.locator("details")).toHaveCount(0);
+});
+
+test("full prompt box: every message with its role, collapsed by default", async ({ page }) => {
+  const prompt = [
+    { role: "system", content: "Answer only from...\n\nName: Cafe\n\n[1] Hours\nOpen 9-5" },
+    { role: "user", content: "hi" },
+    { role: "assistant", content: "hello" },
+    { role: "user", content: "When open?" },
+  ];
+  await setup(page, [{ answer: "9-5", sources: SOURCES, prompt }]);
+  await page.fill("#business_id", "b1");
+  await ask(page, "When open?");
+  const details = page.locator(".message.assistant details.prompt");
+  const chars = prompt.reduce((n, m) => n + m.content.length, 0);
+  await expect(details.locator("summary")).toHaveText(`Prompt (4 messages, ${chars} chars)`);
+  await expect(details).not.toHaveAttribute("open");
+  await details.locator("summary").click();
+  await expect(details.locator(".prompt-role")).toHaveText(["system", "user", "assistant", "user"]);
+  await expect(details.locator(".prompt-content").first()).toHaveText(prompt[0].content); // newlines kept (pre)
 });
 
 test("HTTP and network errors; the conversation id survives them", async ({ page }) => {

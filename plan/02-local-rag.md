@@ -133,7 +133,7 @@ app/
   config.py             settings from env (pydantic-settings)
   llm.py                OpenAI-compatible chat + embed helpers
   db/                   SQLAlchemy models, Alembic migrations (enables pgvector)
-  api/chat.py           POST /chat, GET /chat/stream (SSE), GET /debug/retrieve
+  api/chat.py           POST /chat, GET /chat/stream (SSE), GET /debug/retrieve, GET /debug/prompt
   api/businesses.py     GET /businesses — voice app picker (DEC-42)
   api/conversations.py  GET /businesses/{id}/conversations[/{cid}] — voice app history (DEC-42)
   rag/
@@ -151,13 +151,14 @@ docker-compose.yml, Dockerfile, .env.example
 
 - `psql` into the database: look at `pages`, `chunks`, vectors, run similarity queries by hand.
 - `GET /debug/retrieve?business_id=..&q=..` returns the retrieved chunks with scores.
+- `GET /debug/prompt?business_id=..&q=..[&conversation_id=..]` returns the full prompt `/chat` would send (system + history + question), without calling the LLM or creating a conversation. `POST /chat` also returns it as `prompt`.
 - Chat page shows the answer **and** the chunks and prompt it was built from.
 - Log every LLM call (prompt, response, tokens, latency) during development.
 
 ## Tasks
 
 - [x] `docker-compose.yml` (pgvector Postgres)
-- [ ] LM Studio setup notes (models, server, `lms` CLI)
+- [x] LM Studio setup notes (models, server, `lms` CLI) — README "LM Studio (stage 1)"
 - [x] Model comparison on the eval: gemma-4-12b vs qwen3.6-35b-a3b, both 7/7 on `tests/eval/bathhouse.yaml` (DEC-32); Gemini Flash comparison still open
 - [x] Config + `llm.py` (OpenAI-compatible client, built in step 2; `chat`/`chat_json`/`embed`)
 - [x] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
@@ -171,13 +172,33 @@ docker-compose.yml, Dockerfile, .env.example
 - [x] Custom replies CRUD + indexing — `api/custom_replies.py`
 - [x] Eval script: run test questions, check expected facts appear, report score — `rag/eval.py`
 - [ ] Run the eval with Gemini (only env vars changed) and compare to the local model — `embed()` now requests `EMBED_DIM` via `dimensions`, `.env.example` has the Gemini block (#44); the run itself is on the "Test on Mac" list in [03-voice-channel.md](03-voice-channel.md)
-- [ ] Show the full prompt in the chat page / a debug endpoint (only sources are shown today)
-- [ ] Measure `/chat` with thinking on vs `reasoning_effort="none"` — gemma-4-12b thinks by default (~8 s, see [03-voice-channel.md](03-voice-channel.md) V24)
-  — `/chat` now sends `CHAT_REASONING_EFFORT` (default `none`, 2026-10-05); the measurement is what's left
+- [x] Show the full prompt in the chat page / a debug endpoint — `/debug/prompt`, `POST /chat`'s `prompt`, `web/chat.html`'s collapsible "Prompt" box (text chat only; the voice prompt in `voice/session.py` is not shown)
+- [x] Measure `/chat` with thinking on vs `reasoning_effort="none"` — gemma-4-12b thinks by default (~8 s, see [03-voice-channel.md](03-voice-channel.md) V24)
+  — `/chat` now sends `CHAT_REASONING_EFFORT` (default `none`, 2026-10-05). Measured
+  2026-10-19 (pilot business, profile-only question "What time does the rooftop pool
+  close?", warm LM Studio, 5 samples each): `none` — `/chat` total 1.1–1.3 s,
+  `/chat/stream` TTFT 0.6–0.8 s; `high` — `/chat` total 9.6–12.6 s, `/chat/stream` TTFT
+  8.9–10.8 s (≈700–900 reasoning chars before the ≈50-char visible answer). Confirms the
+  ~8 s DEC-29 estimate; `none` stays the default. Re-ran the eval set after reverting to
+  `none`: 75.0% pass rate (12/16 graded), 50.0% retrieval hit@k — failures are address/
+  phone/email/hours context misses (V23) and one over-confident answer, unrelated to
+  reasoning effort. One cold first call after a server (re)start took 34 s even with
+  `none` (33995 ms vs 1.1–1.3 s warm) — new task below, not measured further here.
+- [ ] Explain the ~34 s cold first `/chat` call after a server (re)start (`reasoning_effort="none"`,
+  same prompt that takes 1.1–1.3 s warm) — seen 2026-10-19 restarting for the V24
+  measurement above, with `qwen/qwen3.6-35b-a3b` (29 GB) also resident in LM Studio
+  alongside `gemma-4-12b`. Likely the same class of problem as voice's T2 prompt-cache
+  warmup ([03-voice-channel.md](03-voice-channel.md)) and V6 (not yet applied to `/chat`) —
+  confirm cause (LM Studio cold compute graph vs memory pressure from both models loaded)
+  and whether `/chat` needs its own warmup call
 - [ ] Find out why "Saturday opening hours" isn't answered on the pilot — data missing or retrieval miss (V23). Cause found (2026-10-04): data missing — hours are in the site footer, which `clean.py` removes; fixed by the organize step ([07-knowledge-quality.md](07-knowledge-quality.md) §4)
 - [ ] Knowledge quality (before step 5): location card + facts in prompt and retrieval, summary in the prompt, extended eval with `expected_in_context` — [07-knowledge-quality.md](07-knowledge-quality.md)
-- [ ] Log every LLM call (prompt size, response, tokens, latency) — needed to explain
-  DEC-32's 10–17 s turns: measure time-to-first-token with streaming, not total time
+- [x] Log every LLM call (prompt size, response, tokens, latency) — needed to explain
+  DEC-32's 10–17 s turns: measure time-to-first-token with streaming, not total time.
+  `app/llm.py` wraps the clients: one INFO line per chat/embed call on logger `app.llm`
+  (model, messages, prompt chars, tokens, `ttft_ms`, `total_ms`, status ok/stopped/cancelled/error);
+  `LOG_LEVEL=DEBUG` adds the full prompt and response. Token counts in LM Studio are a
+  "Test on Mac" check in [03-voice-channel.md](03-voice-channel.md)
 - [x] `/chat/stream` saves the turn when the stream ends; multi-line SSE framing fixed
 - [x] Vector search only uses chunks embedded by the configured `EMBED_MODEL` (safe mid re-index, R6)
 

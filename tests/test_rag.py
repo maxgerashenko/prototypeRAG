@@ -63,10 +63,51 @@ def test_chat_answers_send_reasoning_effort(monkeypatch):
     monkeypatch.setattr(answer, "get_chat_client", lambda: fake_client)
 
     bid = uuid.uuid4()  # no rows needed: profile None, retrieval faked
-    assert answer.answer_question(bid, "hours?").answer == "ok"
+    result = answer.answer_question(bid, "hours?")
+    assert result.answer == "ok"
+    assert [m["role"] for m in result.messages] == ["system", "user"]  # the prompt, for the debug view
     assert list(answer.stream_answer(bid, "hours?")) == ["ok"]
     effort = get_settings().chat_reasoning_effort  # "none" unless .env overrides it
     assert [kw["reasoning_effort"] for kw in sent] == [effort, effort]
+
+
+def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
+    """The debug view's prompt is the exact prompt sent to the LLM: system (rules +
+    profile + chunks) + history + question. /debug/prompt builds it without the LLM
+    and without creating a conversation."""
+    from fastapi.testclient import TestClient
+
+    from app.db.models import Conversation, Message
+    from app.main import app
+    from app.rag import answer
+
+    chunk = RetrievedChunk(chunk_id=uuid.uuid4(), text="We open at 9.", section_heading="Hours",
+                           kind="scraped", score=0.9, source="both")
+    monkeypatch.setattr(answer, "retrieve", lambda *a: [chunk])
+    sent: list[list[dict]] = []
+    monkeypatch.setattr(answer, "chat", lambda messages, **kw: sent.append(messages) or "At 9.")
+    with tenant_session(business_id) as s:
+        s.add(BusinessProfile(business_id=business_id, name="Cafe Uno"))
+
+    client = TestClient(app)
+    r = client.post("/chat", json={"business_id": str(business_id), "question": "When do you open?"}).json()
+    assert r["prompt"] == sent[0]
+    system = r["prompt"][0]
+    assert system["role"] == "system" and "Name: Cafe Uno" in system["content"] and "[1] Hours\nWe open at 9." in system["content"]
+    assert r["prompt"][-1] == {"role": "user", "content": "When do you open?"}
+
+    d = client.get("/debug/prompt", params={"business_id": str(business_id), "q": "And close?",
+                                            "conversation_id": r["conversation_id"]}).json()
+    assert [(m["role"], m["content"]) for m in d["messages"][1:]] == [
+        ("user", "When do you open?"), ("assistant", "At 9."), ("user", "And close?")]
+    assert d["messages"][0] == system
+    assert len(sent) == 1  # no LLM call
+
+    client.get("/debug/prompt", params={"business_id": str(business_id), "q": "x"})
+    with tenant_session(business_id) as s:
+        assert len(s.scalars(select(Conversation.id).where(Conversation.business_id == business_id)).all()) == 1
+    assert client.get("/debug/prompt", params={"business_id": str(business_id), "q": "x",
+                                               "conversation_id": str(uuid.uuid4())}).status_code == 404
 
 
 # --- reciprocal_rank_fusion (pure math, no DB/network) -------------------------------

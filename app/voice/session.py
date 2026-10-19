@@ -8,7 +8,7 @@ transport is used.
 
 Turns are detected by the VAD (phone, hands-free) or marked by the client
 (`turn_detection="manual"`, push-to-talk: `start_turn()`/`end_turn()`), which also
-skips the VAD's 500 ms end-of-speech wait.
+skips the VAD's end-of-speech wait (`VAD_END_SILENCE_MS`, default 700 ms).
 
 Per turn: VAD (`vad.py`) marks speech start/end → audio streams into Google STT while
 the caller speaks → on speech end the final transcript goes to the LLM with the shared
@@ -18,6 +18,9 @@ sentence, each sentence synthesized by Google TTS and sent as soon as it's ready
 Barge-in: caller speech while the bot is replying or its audio is still playing cancels
 the reply task and sends `clear`. Playback time is estimated from audio duration sent,
 because audio goes out faster than real time and the transport plays it from a buffer.
+Every `feed()` tells the VAD whether the bot is active (`set_bot_active`, V9/V10): while
+it is, `speech_start` needs a stricter aggressiveness and a longer minimum speech length
+before it fires, so speaker echo or a cough/"mm-hm" doesn't trigger a false barge-in.
 
 Silence (V17, VAD mode only -- the phone case; push-to-talk callers aren't expected to
 talk at any moment): ~6 s with nothing from the caller after the bot finished speaking
@@ -184,7 +187,13 @@ class CallSession:
         self._hang_up = hang_up
         self._topic: str | None = None
 
-        self._vad = TurnDetector(sample_rate=sample_rate)
+        settings = get_settings()
+        self._vad = TurnDetector(
+            sample_rate=sample_rate,
+            end_silence_ms=settings.vad_end_silence_ms,
+            barge_in_aggressiveness=settings.vad_barge_in_aggressiveness,
+            barge_in_start_ms=settings.vad_barge_in_start_ms,
+        )
         self._turn: TurnTranscriber | None = None
         self._reply_task: asyncio.Task | None = None
         self._warmup_task: asyncio.Task | None = None
@@ -243,6 +252,9 @@ class CallSession:
             if self._turn is not None:
                 self._turn.push(pcm)
             return
+        # V9/V10: stricter speech_start while the bot is speaking, so echo/noise needs
+        # more to look like real speech before it's treated as a barge-in
+        self._vad.set_bot_active(self._bot_active())
         # speech_start carries the pre-roll + triggering frames, speech the frames after
         # them, split per frame so audio after the trigger in the same chunk isn't lost
         for event in self._vad.feed(pcm):

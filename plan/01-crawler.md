@@ -121,12 +121,12 @@ while the crawler is httpx-only it can run from the API image. Stage 2: Cloud Ru
 - [x] Change detection for re-crawls — `store.py` (`content_hash` on upsert; full chunk replace per page)
 - [x] Unit tests on saved HTML fixtures (no network in tests) — `tests/test_crawler.py`
 - [ ] Unit tests on 3 different real sites (only the pilot business so far)
-- [ ] PDF menus: `fetch.extract_pdf_text` exists but isn't wired in — `discover.is_skippable` drops `.pdf` links
-- [ ] Honour `Crawl-delay` from robots.txt (fixed 0.5 s delay today)
+- [x] (2026-10-05) PDF menus: same-site PDFs linked from crawled pages (and any listed in the sitemap) are fetched and stored as pages — `fetch.fetch_document` decides HTML vs PDF by Content-Type, `extract_pdf_text` gives the text, title from the PDF's `/Title` or file name. At most 10 linked PDFs per crawl on top of `max_pages`, 20 MB max each; scanned PDFs with no text are skipped (no OCR). PDFs on another host (e.g. a Squarespace CDN) are not picked up yet. Unit-tested on generated PDFs; **not yet run on a real site's PDF**
+- [x] (2026-10-05) Honour `Crawl-delay` (or `Request-rate`) from robots.txt for the `*` group: raises the 0.5 s default, never lowers it; fractional values rounded up (stdlib ignores them). The delay now also follows failed requests and the robots/sitemap fetch
 - [x] (2026-10-04, done early) Profile `name` stored as the literal "business_name" and `businesses.name` left "(pending)" on the pilot — voice greets with it (found in step 4, [03-voice-channel.md](03-voice-channel.md) V21). Fixed: placeholder echoes (`"business_name"`, the field's own name, "null", "n/a", "unknown") become null in `profile.py`; `run.py` replaces the "(pending)" name with the extracted name, else the start page title's head. Pilot row corrected by hand
 - [x] (Stage 1 tuning T3) Set `businesses.timezone` — stayed `UTC`, so "are you open now" was wrong (V22). Done (2026-10-05) as part of the knowledge-quality block (DEC-37, [07-knowledge-quality.md](07-knowledge-quality.md) §3): `timezone.py` asks the LLM for each location's IANA zone from its address (default location falls back to the profile address), validates it with `zoneinfo`, fills only empty `locations.timezone` (owner corrections stick), and copies the default location's to `businesses.timezone`. Unit-tested with a stubbed LLM; **not yet run against the live local model or the pilot**
 - [ ] Knowledge quality (before step 5): crawl priority + blog cap, keep site chrome (footer) for extraction, organize step, facts, summary — [07-knowledge-quality.md](07-knowledge-quality.md) §9
-- [ ] Stage-1 exit: `Dockerfile.crawler` — only if Crawl4AI was added by then (DEC-36)
+- [x] Stage-1 exit: crawler in Docker — Crawl4AI wasn't added (DEC-36), so no `Dockerfile.crawler`: it runs from the API image as the Compose `crawler` service (`docker compose run --rm crawler --url …`); a separate image only once Crawl4AI is needed
 
 ## Risks / notes
 
