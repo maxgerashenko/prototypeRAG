@@ -2,7 +2,7 @@
 
 Child tables reference their parent by `(business_id, id)`, so a row can never point at
 another business's row — the database rejects cross-tenant links even before RLS.
-Action tables (bookings, ...) are added in step 5 (plan/04-actions.md).
+Action tables (bookings, ...) are added in step 5 (plan/04-actions.md); `action_log` is first.
 """
 
 import uuid
@@ -360,6 +360,31 @@ class Message(Base):
     conversation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _now()
+
+
+class ActionLog(Base):
+    """Audit trail of side-effect tool calls (app/actions/executor.py), incl. refused ones."""
+
+    __tablename__ = "action_log"
+    __table_args__ = (
+        CheckConstraint("status IN ('ok', 'error', 'needs_confirmation')", name="status"),
+        # composite FK is MATCH SIMPLE: with conversation_id NULL (chat without a saved
+        # conversation) the constraint is not checked
+        ForeignKeyConstraint(
+            ["business_id", "conversation_id"],
+            ["conversations.business_id", "conversations.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    business_id: Mapped[uuid.UUID] = _business_id()
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    tool: Mapped[str] = mapped_column(Text, nullable=False)
+    arguments: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    result: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = _now()
 
 

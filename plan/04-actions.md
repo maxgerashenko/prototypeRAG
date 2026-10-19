@@ -116,7 +116,7 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 
 ## Tasks
 
-- [ ] Tool registry + executor with confirmation guard and action log
+- [x] Tool registry + executor with confirmation guard and action log (#42; `action_log` for side-effect calls only, per-business enabled-tools setting comes with the first booking tool)
 - [ ] Tool-calling loop in the RAG pipeline (text chat first, then voice)
 - [ ] Internal booking backend + rules
 - [ ] SMS confirmation
