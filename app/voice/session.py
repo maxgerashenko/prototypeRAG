@@ -452,7 +452,7 @@ class CallSession:
                 ],
             })
             for c in calls.values():
-                result = await asyncio.to_thread(run_tool, self.business_id, c["name"], c["arguments"])
+                result = await asyncio.to_thread(run_tool, self.business_id, c["name"], c["arguments"], self.conversation_id)
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
             timings.setdefault("tool_end_ms", _ms(speech_end))
         await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, play_ends, speech_end, timings)
