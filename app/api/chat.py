@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.db import tenant_session
 from app.db.models import Conversation, Message, message_order
 from app.rag.answer import answer_question, prepare_prompt, stream_answer
+from app.rag.location import default_location_id
 from app.rag.retrieve import retrieve
 
 router = APIRouter()
@@ -118,7 +119,7 @@ def _save_turn(business_id: uuid.UUID, conversation_id: uuid.UUID, question: str
 def debug_retrieve_endpoint(business_id: uuid.UUID, q: str, top_n: int = 5) -> dict:
     """Inspect retrieval quality independently of generation (manual testing, plan's own note)."""
     with tenant_session(business_id) as session:
-        chunks = retrieve(session, business_id, q, top_n)
+        chunks = retrieve(session, business_id, q, top_n, location_id=default_location_id(session, business_id))
     return {
         "chunks": [
             {"chunk_id": str(c.chunk_id), "section_heading": c.section_heading, "text": c.text,

@@ -125,6 +125,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
+| DEC-49 | A conversation is about one location (resolves OPEN-23) | To the caller each location is its own business: retrieval and the prompt use that location's facts/chunks plus business-wide ones (`location_id IS NULL`: what the business is, policies, that other locations exist); the other locations are listed (name, address) but never answered for. The location is fixed by the entry point, not guessed per question; until one can choose (phone number -> location, OPEN-21, stage 3) it is the default location. Storage stays DEC-37 (one business, `location_id` scoping) | 1 · 3 (number -> location) | ✅ (user decision 2026-10-19) |
 
 ---
 
@@ -861,6 +862,30 @@ indexed, so one question can return both ([07-knowledge-quality.md](07-knowledge
 Consequences: implemented with the retrieval change (build order step 7). OPEN-22 still
 decides how many fallback chunks follow the facts.
 
+### DEC-49 — A conversation is about one location (stage 1; entry-point choice stage 3)
+
+Context: the pilot is one business with four locations; address, hours, prices and
+services differ per location (DEC-37). Mixing them in one answer ("open until 11:30" for
+the wrong place) is a correctness error. Max (2026-10-19): "consider each location as
+separate business and keep general information in all locations — what the business is
+about, does it have other locations". This resolves OPEN-23.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Fixed location per conversation, set by the entry point; default location until an entry point can choose.** Retrieval = that location + business-wide (`location_id IS NULL`); prompt names this location and lists the others | Never mixes locations; business-wide facts (about, policies, "we also have X") stay shared, not copied; no storage change; caller experience matches "call this branch" | Until number -> location exists, every call is about the default location; a question about another location gets "it exists, here is its address", not its hours | ✅ |
+| Real separate business per location (own `business_id`) | Strongest isolation | Already rejected in DEC-37: shared facts duplicated, one crawl split into N tenants, breaks "one number per business" assumptions | ❌ |
+| Location named in the question else default | Works with one entry point | Guessing per question: a mention ("is Flatiron open?") would silently switch scope; extra failure mode for little gain | ❌ |
+| Ask the caller every time | Most accurate | An extra turn on every location-specific question | ❌ (maybe stage 3 when no number is known) |
+
+Consequences:
+- `app/rag/location.py`: `default_location_id`, `format_locations` (prompt block). Chat
+  (`rag/answer.py`), the voice system prompt and `search_business_info` pass the default
+  location to `retrieve(..., location_id=...)`.
+- Extraction marks hours/addresses per location and "what the business is" as `all`
+  (business-wide) — [07-knowledge-quality.md](07-knowledge-quality.md) §5.3.
+- Stage 3: the called number (or app selection) sets the conversation's location; then a
+  `conversations.location_id` column carries it (OPEN-21).
+
 ### DEC-48 — Google Calendar as the pilot booking backend (stage 2 pilot, OAuth in stage 3)
 
 Max chose Google Calendar for business actions (2026-10-19). Extends the backend order in
@@ -893,7 +918,6 @@ Grouped by the stage in which the answer is needed.
 | OPEN-18 | 1 | Phone/booking tests with the pilot (DEC-31) | Browser test calls by the developer only (Voice SDK, DEC-34), with the pilot's data as a fixture · swap in a consenting business first | DEC-31 caveat (R10) — needed before stage 1 step 4 (Twilio) |
 | OPEN-20 | 1 | Local model for fact extraction (DEC-38) | `google/gemma-4-12b` with thinking on (already loaded) · `qwen/qwen3.6-35b-a3b` thinking on (stronger, ~27 GB, shares memory with code delegation) · Gemini Flash already in stage 1 (cents per crawl, approx.) | Precision audit on 5 pilot pages (`run --only facts --dry-run --model <id>`, built 2026-10-19; needs the Mac) — `facts.py` runs meanwhile on `FACTS_LLM_MODEL`/`LLM_MODEL` ([07-knowledge-quality.md](07-knowledge-quality.md)) |
 | OPEN-22 | 1 | Role of raw page chunks once facts exist (DEC-38) | Fallback only when no fact scores above a threshold · always 1–2 chunks after the facts · equal ranking with a fact boost · facts only | A/B eval with `RETRIEVAL_MODE` + V16 latency — needed before the retrieval change is final. Duplicates between a fact and its source chunk: DEC-47 |
-| OPEN-23 | 1 | How a conversation picks its location (DEC-37) | Default location only · location named in the question (tool argument) else default · ask the caller when a location-scoped question is ambiguous · phone number → location (stage 3, OPEN-21) | Needed before location-scoped retrieval and the per-location eval questions |
 | OPEN-02 | 2 | Target country / region | EU (`europe-west3` Frankfurt — next to Neon `aws-eu-central-1`) · US (`us-east4` — next to Neon `aws-us-east-1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |

@@ -89,8 +89,9 @@ def build_prompt(
     history: list[dict],
     question: str,
     summary: BusinessSummary | None = None,
+    locations: str = "",
 ) -> list[dict]:
-    """System message (rules + profile + summary + chunks) + history + the new question."""
-    sections = [SYSTEM_PROMPT, format_profile(profile), format_summary(summary), format_chunks(chunks)]
+    """System message (rules + profile + locations + summary + chunks) + history + the new question."""
+    sections = [SYSTEM_PROMPT, format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
     system_content = "\n\n".join(s for s in sections if s)
     return [{"role": "system", "content": system_content}, *history, {"role": "user", "content": question}]

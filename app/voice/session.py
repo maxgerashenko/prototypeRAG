@@ -49,6 +49,7 @@ from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
 from app.ingest.profile import is_placeholder_name
 from app.llm import get_async_chat_client
+from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import format_profile, format_summary
 from app.voice import tts
 from app.voice.audio import working_sound
@@ -608,6 +609,10 @@ class CallSession:
             self._system_prompt = (
                 f"{VOICE_SYSTEM_PROMPT}\n\nCurrent local time at the business: {now}\n\n{format_profile(profile)}"
             )
+            if locations_text := format_locations(
+                session, self.business_id, default_location_id(session, self.business_id)
+            ):
+                self._system_prompt += f"\n\n{locations_text}"  # DEC-49
             if summary_text := format_summary(session.get(BusinessSummary, self.business_id)):
                 self._system_prompt += f"\n\n{summary_text}"
             # A3 (plan/07-knowledge-quality.md §3): business.name is now the brand
