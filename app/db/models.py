@@ -331,7 +331,7 @@ class Conversation(Base):
     __table_args__ = (
         CheckConstraint("channel IN ('chat', 'voice')", name="channel"),
         CheckConstraint(
-            "outcome IN ('answered', 'booked', 'message', 'transferred', 'unresolved')", name="outcome"
+            "outcome IN ('info_request', 'booked', 'message', 'transferred', 'unresolved')", name="outcome"
         ),
         UniqueConstraint("business_id", "id"),
     )
