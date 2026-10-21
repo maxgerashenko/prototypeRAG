@@ -51,7 +51,7 @@ def test_chat_answers_send_reasoning_effort(monkeypatch):
     from app.config import get_settings
     from app.rag import answer
 
-    monkeypatch.setattr(answer, "retrieve", lambda *a: [])
+    monkeypatch.setattr(answer, "retrieve", lambda *a, **kw: [])
     sent: list[dict] = []
     monkeypatch.setattr(answer, "chat", lambda messages, **kw: sent.append(kw) or "ok")
 
@@ -83,7 +83,7 @@ def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
 
     chunk = RetrievedChunk(chunk_id=uuid.uuid4(), text="We open at 9.", section_heading="Hours",
                            kind="scraped", score=0.9, source="both")
-    monkeypatch.setattr(answer, "retrieve", lambda *a: [chunk])
+    monkeypatch.setattr(answer, "retrieve", lambda *a, **kw: [chunk])
     sent: list[list[dict]] = []
     monkeypatch.setattr(answer, "chat", lambda messages, **kw: sent.append(messages) or "At 9.")
     with tenant_session(business_id) as s:

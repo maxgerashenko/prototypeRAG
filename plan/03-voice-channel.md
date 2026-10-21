@@ -297,7 +297,9 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 |---|---|---|---|
 | V21 | Greeting says "you've reached business_name" — profile `name` holds the placeholder; `businesses.name` is "(pending)" | Real | [01-crawler.md](01-crawler.md) tasks |
 | V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Fixed in code (2026-10-05): crawler sets it per location from the address; re-crawl the pilot to apply | [01-crawler.md](01-crawler.md) tasks |
-| V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real (cause unknown) | `/debug/retrieve`, eval set |
+| V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real — cause found 2026-10-21: retrieval misses them (V28); `business_profile.opening_hours` is NULL and the pilot has 0 facts, so nothing else covers hours | `/debug/retrieve`, eval set; #41 (hours fact) |
+| V28 | Hours asked as "Till what time are you working?" (phone, 2026-10-21) → answered with the Rooftop Pool's hours. The chunk "Bathhouse locations are open daily from 9am to midnight" ranks #5 for that wording (#1 for "opening hours"), and voice search passes only the top 3 (`SEARCH_TOP_N`) | Real | #108; fill `opening_hours` (#41), try `SEARCH_TOP_N=5` against latency |
+| V29 | Voice answers name internals and over-generalize: "I don't have information about specific sound sessions in the profile"; pool hours given as the answer to the business's hours. Guided sauna sessions (Aufguss) are in the data — "sound" is likely STT mishearing "sauna" (V27) | Real | #109; prompt rule (no "profile"/"search", say which area hours belong to), STT phrase hints |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had — **fixed 2026-10-05**: `CHAT_REASONING_EFFORT` (default `none`); measuring is still open | Potential | [02-local-rag.md](02-local-rag.md) tasks |
 | V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Done 2026-10-18: 14 voice conversations from 2026-10-05 and their 108 messages deleted; 10 later ones kept | Delete when convenient |
 
@@ -314,6 +316,11 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] Twilio webhook + TwiML + media stream WebSocket (`twilio_routes.py`, `ws.py`), signature + stream-token checks (DEC-43), Voice SDK page `web/call.html` + `GET /twilio/token`; tests with fake STT/TTS/LLM (`tests/test_twilio.py`, `web/e2e/call.spec.ts`)
 - [ ] Twilio live: a Voice SDK browser call through ngrok (mode B), then the trial number (mode A); record latency over Twilio
   — setup checked 2026-10-18: Voice SDK token served, `/twilio/voice` and `/twilio/status` reachable through ngrok with the signature check on; no call placed yet
+  — mode A ✅ 2026-10-21: a 51 s call to the trial number (+13322337120) end to end: greeting, 3 turns,
+  hung up after "Bye.", summary stored. Earlier calls (2026-10-19/20) ended busy/no-answer with
+  Twilio error 11200 (HTTP 404) only because ngrok wasn't running — start `ngrok http 8000
+  --url=<PUBLIC_BASE_URL>` before calling. Answer quality: V28, V29. Mode B and latency over
+  Twilio (uvicorn `voice turn` log lines) still open
 - [x] Phone calls shown live in the voice app (DEC-46): `GET /voice/feed` (SSE) fed by `ws.py`, watch-only call screen in `/web/`; tests with a fake Twilio stream (`tests/test_call_feed.py`) and a mocked feed (`web/e2e/live.spec.ts`)
 - [x] VAD (`TurnDetector`, tested on real speech)
 - [x] Turn-taking, barge-in in the call loop (playback end estimated from audio duration sent)
@@ -322,7 +329,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] Called number / TwiML App → business_id mapping from Postgres (`To` in `businesses.phone_numbers`; Voice SDK `business_id` parameter)
 - [ ] Call transfer + take-a-message fallback
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
-- [ ] Summary runs in the Twilio status callback (DEC-24) — callback built (`POST /twilio/status`, sets `ended_at`), summary itself is step 5
+- [x] Summary runs in the Twilio status callback (DEC-24) — callback built (`POST /twilio/status`, sets `ended_at`); summary checked live 2026-10-21 (see "Post-call summary" below)
 - [x] Measure latency per stage and log it per turn (`latency` event + log: stt, tool, first sentence, first audio)
 - [x] Record real latency numbers against the budget above (first mic test; repeat over Twilio)
 - [x] `search_business_info` tool + shared tool definitions (used by both modes)
@@ -348,11 +355,15 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
     business that's been crawled and indexed
   - [ ] `npm run build` in `web/`, then `uv run uvicorn app.main:app`
   - [ ] Open `/web/` and hold to talk: the reply is heard and the latency line looks sane
-- [ ] **Post-call summary (#43, DEC-24)**: `uv run alembic upgrade head` (0006), make a
+- [x] **Post-call summary (#43, DEC-24)**: `uv run alembic upgrade head` (0006), make a
   short Voice SDK call (`/web/call.html`), hang up; the `conversations` row has `summary`,
   `intent`, `outcome`, `follow_up`, `summarized_at` set (the status callback needs the ngrok
   URL as the TwiML App's status URL). A second status callback must not call the model again.
   Also `uv run pytest tests/test_call_summary.py tests/test_twilio.py` (needs pgvector Postgres)
+  — ✅ 2026-10-21 (trial-number call, not Voice SDK): all five columns set 4 s after hang-up
+  (`outcome=unresolved`, `follow_up=true`, intent and summary match the call); both test files
+  pass. The local DB was still at 0005 — 34 tests failed and 8 errored until `alembic upgrade head`. A second
+  callback was not re-sent live (covered by the unit tests)
 - [x] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
