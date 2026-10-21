@@ -689,7 +689,7 @@ def test_businesses_endpoint_uses_real_name_over_placeholder(business):
     rows = TestClient(app).get("/businesses").json()
     assert {
         "id": str(business), "name": "Zebra Spa", "website": None, "domain": None,
-        "conversation_count": 0, "default_location": None,
+        "conversation_count": 0, "default_location": None, "phone_numbers": [],
     } in rows
 
 

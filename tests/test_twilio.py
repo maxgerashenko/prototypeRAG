@@ -296,12 +296,18 @@ def _start(business_id, call_sid, token):
         "customParameters": {"business_id": str(business_id), "caller": "+15559998888", "token": token}}}
 
 
+def greeting_long_synthesize(text: str, sample_rate: int) -> bytes:
+    """3 s greeting, so the caller can talk over it; a 50 ms answer plays out before the
+    hang-up, so it is saved whole (B2 saves only the sentences the caller heard)."""
+    return (fake_synthesize if text.startswith("Hi,") else short_synthesize)(text, sample_rate)
+
+
 def test_media_stream_full_call(settings, business, monkeypatch):
     monkeypatch.setattr(session_mod, "get_async_chat_client", lambda: AnswerLLM())
     monkeypatch.setattr(ws_mod, "CallSession", functools.partial(
-        CallSession, transcriber_factory=FakeTranscriber, synthesize=fake_synthesize))
+        CallSession, transcriber_factory=FakeTranscriber, synthesize=greeting_long_synthesize))
     call_sid = "CA" + uuid.uuid4().hex
-    frames_per_sentence = 8000 * 3 // 160  # fake TTS: 3 s per sentence, 20 ms frames
+    frames_per_sentence = 8000 * 3 // 160  # greeting: 3 s, 20 ms frames
 
     async def scenario():
         sock = FakeSocket()
@@ -319,7 +325,8 @@ def test_media_stream_full_call(settings, business, monkeypatch):
         await _until(lambda: any(m["event"] == "clear" for m in sock.sent))
         clear_at = next(i for i, m in enumerate(sock.sent) if m["event"] == "clear")
         assert sock.sent[clear_at] == {"event": "clear", "streamSid": "MZ1"}
-        await _until(lambda: len([m for m in sock.sent[clear_at:] if m["event"] == "media"]) >= 2 * frames_per_sentence)
+        await _until(lambda: len([m for m in sock.sent[clear_at:] if m["event"] == "media"]) >= 2)
+        await asyncio.sleep(0.5)  # both 50 ms sentences sent and played out
 
         sock.put({"event": "stop", "streamSid": "MZ1", "stop": {"callSid": call_sid}})
         await asyncio.wait_for(handler, 5)
