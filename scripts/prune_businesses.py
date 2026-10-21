@@ -9,11 +9,14 @@ Run from the repo root against the dev DB:
 
 import argparse
 import sys
+from pathlib import Path
 
-from sqlalchemy import delete, select
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # so `app` imports when run as a script
 
-from app.db import SessionLocal
-from app.db.models import Business
+from sqlalchemy import delete, select  # noqa: E402
+
+from app.db.session import SessionLocal  # noqa: E402
+from app.db.models import Business  # noqa: E402
 
 
 def main() -> None:
