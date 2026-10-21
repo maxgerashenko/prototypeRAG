@@ -6,7 +6,7 @@ crawled ones do) are deleted when the session ends."""
 import pytest
 from sqlalchemy import delete, select
 
-from app.db import SessionLocal
+from app.db.session import SessionLocal
 from app.db.models import Business
 
 
