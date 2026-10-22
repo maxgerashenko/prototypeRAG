@@ -99,6 +99,25 @@ _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 # was spoken as two sentences with a pause. Lower-case, compared with the word before the
 # break. Not "etc." / "no.": those end sentences often enough that a split is the safer guess.
 _ABBREVIATIONS = {"a.m.", "p.m.", "dr.", "st.", "e.g.", "i.e.", "mr.", "mrs.", "ms.", "vs."}
+# V13: a long reply without sentence punctuation would only be spoken at the end. Past
+# _MAX_CHUNK buffered chars, cut at the last clause break (", " "; " ": ") that leaves a chunk
+# of at least _MIN_CHUNK chars, else at the last space.
+_CLAUSE_END = re.compile(r"[,;:]\s+")
+_MAX_CHUNK = 120
+_MIN_CHUNK = 30
+
+
+def _cut_long_tail(tail: str) -> tuple[list[str], str]:
+    chunks = []
+    while len(tail) > _MAX_CHUNK:
+        window = tail[:_MAX_CHUNK + 1]
+        cuts = [m.end() for m in _CLAUSE_END.finditer(window) if m.start() + 1 >= _MIN_CHUNK]
+        cut = cuts[-1] if cuts else window.rfind(" ") + 1
+        if cut < _MIN_CHUNK:
+            break
+        chunks.append(tail[:cut].strip())
+        tail = tail[cut:]
+    return chunks, tail
 
 
 def split_sentences(buffer: str) -> tuple[list[str], str]:
@@ -111,7 +130,8 @@ def split_sentences(buffer: str) -> tuple[list[str], str]:
         if sentence := buffer[start:m.start()].strip():
             sentences.append(sentence)
         start = m.end()
-    return sentences, buffer[start:]
+    chunks, tail = _cut_long_tail(buffer[start:])
+    return sentences + chunks, tail
 
 
 # V14: the prompt asks for plain speech, but the model still slips into markdown now and
