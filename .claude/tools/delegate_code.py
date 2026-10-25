@@ -25,6 +25,8 @@ import sys
 
 from openai import OpenAI
 
+import pixel
+
 BASE_URL = "http://localhost:1234/v1"
 DEFAULT_MODEL = "qwen/qwen3.6-35b-a3b"
 
@@ -63,11 +65,12 @@ def main() -> None:
     model = args[1] if len(args) > 1 else DEFAULT_MODEL
 
     client = OpenAI(base_url=BASE_URL, api_key="lm-studio")
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "system", "content": SYSTEM_WEB if web else SYSTEM}, {"role": "user", "content": spec}],
-        temperature=0,
-    )
+    with pixel.agent(model, f"draft {'page' if web else 'module'} from {args[0]}"):
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": SYSTEM_WEB if web else SYSTEM}, {"role": "user", "content": spec}],
+            temperature=0,
+        )
     print(resp.choices[0].message.content)
 
 

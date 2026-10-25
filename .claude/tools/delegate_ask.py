@@ -19,6 +19,8 @@ import json
 import sys
 import urllib.request
 
+import pixel
+
 BASE_URL = "http://localhost:1234/v1"
 DEFAULT_MODEL = "google/gemma-4-12b"  # chat model, normally loaded (DEC-32); check `lms ps`
 MAX_CHARS = 60_000  # keeps prompt processing to seconds; longer input is cut with a note
@@ -74,7 +76,7 @@ def main() -> None:
         f"{BASE_URL}/chat/completions", data=body,
         headers={"Content-Type": "application/json"}, method="POST",
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with pixel.agent(model, question), urllib.request.urlopen(req, timeout=120) as resp:
         data = json.load(resp)
     print((data["choices"][0]["message"]["content"] or "").strip())
 

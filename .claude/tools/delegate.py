@@ -16,6 +16,8 @@ import json
 import sys
 import urllib.request
 
+import pixel
+
 BASE_URL = "http://localhost:1234/v1"
 DEFAULT_MODEL = "google/gemma-4-12b"  # the chat model, normally loaded (DEC-32); override with
                                        # argv[2] if a different one is actually loaded (`lms ps`)
@@ -59,7 +61,8 @@ def main() -> None:
         f"{BASE_URL}/chat/completions", data=body,
         headers={"Content-Type": "application/json"}, method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with pixel.agent(model, f"draft command: {task}"), \
+            urllib.request.urlopen(req, timeout=60) as resp:
         data = json.load(resp)
     print(data["choices"][0]["message"]["content"].strip())
 
