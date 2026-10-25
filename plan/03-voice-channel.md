@@ -346,6 +346,9 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   `+` line true to its quote, nothing missed, rejections sensible; the site-chrome page
   must yield the "7 days a week 8am to 11:30pm" hours fact. Pick the model → `FACTS_LLM_MODEL`
   in `.env`, then run without `--dry-run` and check `--report conflicts`.
+- [ ] **Hands-free calls on mobile** (#114): on a phone the voice app uses `mode: "vad"` (mic always
+  open, server VAD) instead of push-to-talk; desktop keeps push-to-talk. Watch echo on the phone
+  speaker (#83) and the VAD-only silence re-prompt (V17)
 - [ ] **Real call through the React app** (`/web/`, push-to-talk): STT/TTS + LM Studio end
   to end — the open task above. Steps:
   - [ ] `gcloud auth application-default login` (Speech-to-Text and Text-to-Speech
