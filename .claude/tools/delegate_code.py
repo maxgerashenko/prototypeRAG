@@ -14,6 +14,7 @@ Usage:
     uv run python .claude/tools/delegate_code.py <spec_file> [model-id] [--web]
 
 `--web` drafts one self-contained HTML page (inline CSS/JS) instead of a Python module.
+`--ts` drafts one TypeScript/React source file for web/ (the spec carries the current file).
 
 Prints the drafted module's source to stdout (code only, no fences — though the model
 doesn't always honor that; Claude strips fences before writing the file). The
@@ -54,10 +55,22 @@ Rules:
   where the logic isn't obvious.
 """
 
+SYSTEM_TS = """You write one TypeScript source file for the prototypeRAG web app (React 18 +
+TypeScript, Vite, Vitest), in web/src/.
+
+Rules:
+- Output ONLY the complete file content. No markdown fences, no commentary before or after.
+- Match the existing style in the spec exactly: naming, comment density, formatting,
+  double quotes, 2-space indent. When the spec includes the current file, return the
+  whole new file and change nothing the spec doesn't ask for.
+- No new dependencies. Strict TypeScript (no `any`).
+"""
+
 
 def main() -> None:
-    args = [a for a in sys.argv[1:] if a != "--web"]
+    args = [a for a in sys.argv[1:] if a not in ("--web", "--ts")]
     web = "--web" in sys.argv
+    ts = "--ts" in sys.argv
     if not args:
         print("usage: delegate_code.py <spec_file> [model-id] [--web]", file=sys.stderr)
         raise SystemExit(2)
@@ -65,10 +78,10 @@ def main() -> None:
     model = args[1] if len(args) > 1 else DEFAULT_MODEL
 
     client = OpenAI(base_url=BASE_URL, api_key="lm-studio")
-    with pixel.agent(model, f"draft {'page' if web else 'module'} from {args[0]}"):
+    with pixel.agent(model, f"draft {'ts file' if ts else 'page' if web else 'module'} from {args[0]}"):
         resp = client.chat.completions.create(
             model=model,
-            messages=[{"role": "system", "content": SYSTEM_WEB if web else SYSTEM}, {"role": "user", "content": spec}],
+            messages=[{"role": "system", "content": SYSTEM_TS if ts else SYSTEM_WEB if web else SYSTEM}, {"role": "user", "content": spec}],
             temperature=0,
         )
     print(resp.choices[0].message.content)
