@@ -184,3 +184,18 @@ def test_continue_from_history_puts_question_before_answer(tied_turn):
 
     s = run_async(run())
     assert [m["content"] for m in s._history[:2]] == ["When are you open?", "From 10am."]
+
+
+def test_summary_fields_null_until_summarized_then_returned(two_businesses):
+    a, b, convs = two_businesses
+    client = TestClient(app)
+    row = client.get(f"/businesses/{a}/conversations").json()[0]
+    assert (row["summary"], row["intent"], row["outcome"], row["follow_up"]) == (None, None, None, None)
+    with tenant_session(a) as s:
+        c = s.get(Conversation, convs["talked"])
+        c.summary, c.intent, c.outcome, c.follow_up = "Asked about saunas; booked for Friday.", "booking", "booked", True
+    row = client.get(f"/businesses/{a}/conversations").json()[0]
+    d = client.get(f"/businesses/{a}/conversations/{convs['talked']}").json()
+    for r in (row, d):
+        assert r["summary"] == "Asked about saunas; booked for Friday."
+        assert r["intent"] == "booking" and r["outcome"] == "booked" and r["follow_up"] is True

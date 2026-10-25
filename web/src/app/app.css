@@ -421,3 +421,14 @@ a:hover { color: var(--bot-light); }
 .phone-live-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.15; }
 .phone-live-text .mono-font { font-size: 17px; font-weight: 800; letter-spacing: .02em; }
 .phone-live-text small { font-size: 12px; font-weight: 700; opacity: .75; max-width: 100%; }
+.convo-summary { font-size: 14px; line-height: 1.4; color: var(--text); text-align: left; }
+.convo-tags, .tr-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tr-summary { margin: 0 20px 8px; padding: 12px 14px; border-radius: 12px; background: var(--tint); }
+.tr-summary p { flex-basis: 100%; margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: var(--text); }
+.badge-outcome, .badge-follow {
+  font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 8px;
+  background: var(--tint); color: var(--text); border: 1px solid var(--accent);
+}
+.badge-outcome.outcome-booked { background: var(--accent); color: var(--ink); }
+.badge-outcome.outcome-unresolved { border-color: #5c2328; color: #ffc9cc; background: #2a1517; }
+.badge-follow { border-color: #8a6d1f; color: #ffe08a; background: #2b2410; }

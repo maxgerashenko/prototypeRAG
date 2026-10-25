@@ -2,6 +2,7 @@ import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
 import { ChatIcon, ChevronLeft, ClockIcon, GlobeIcon } from "./icons";
 import { SourceBadge } from "./SourceIcon";
+import { OutcomeBadge } from "./OutcomeBadge";
 import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
 
 interface Props {
@@ -57,7 +58,10 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
                 <div className="convo-title ellipsis">{c.title}</div>
                 {isNew && <span className="badge-new">NEW</span>}
               </div>
-              <div className="convo-preview">{previewText(c.preview)}</div>
+              {c.summary ? <div className="convo-summary">{c.summary}</div> : <div className="convo-preview">{previewText(c.preview)}</div>}
+              {(c.outcome || c.follow_up) && (
+                <div className="convo-tags"><OutcomeBadge outcome={c.outcome} followUp={c.follow_up} /></div>
+              )}
               <div className="convo-meta">
                 <span>{fmtWhen(c.started_at)}</span>
                 <span><ClockIcon />{fmtClock(c.duration_s)}</span>

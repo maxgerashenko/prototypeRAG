@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatsLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText, fmtPhone } from "./format";
+import { chatsLabel, outcomeLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText, fmtPhone } from "./format";
 
 // dates are built in local time, so the tests pass in any time zone
 const local = (y: number, mo: number, d: number, h: number, mi: number, s = 0) =>
@@ -91,4 +91,17 @@ describe("fmtPhone", () => {
     expect(fmtPhone("+15550001234")).toBe("+1 (555) 000-1234");
     expect(fmtPhone("+447700900123")).toBe("+447700900123");
   });
+});
+
+describe("outcomeLabel", () => {
+  it.each([
+    ["booked", "Booked"],
+    ["info_request", "Info request"],
+    ["message", "Message"],
+    ["transferred", "Transferred"],
+    ["unresolved", "Unresolved"],
+    ["weird", "weird"],
+    [null, null],
+    ["", null],
+  ])("%s -> %s", (o, out) => expect(outcomeLabel(o)).toBe(out));
 });

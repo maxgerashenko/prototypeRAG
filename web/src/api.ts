@@ -91,8 +91,18 @@ export interface Business {
 /** "twilio": came through Twilio (a phone call or a Voice SDK call); "web": the browser voice app or chat page. */
 export type ConversationSource = "twilio" | "web";
 
+/** Post-call summary (app/actions/summary.py); all null until the call is summarized (chats never are). */
+export type CallOutcome = "booked" | "info_request" | "message" | "transferred" | "unresolved";
+
+export interface CallSummaryFields {
+  summary: string | null;
+  intent: string | null;
+  outcome: CallOutcome | null;
+  follow_up: boolean | null;
+}
+
 /** Calls nobody spoke in are not listed. `preview` already starts with "You: " when the caller spoke last. */
-export interface ConversationSummary {
+export interface ConversationSummary extends CallSummaryFields {
   id: string;
   channel: "chat" | "voice";
   source: ConversationSource;
@@ -109,7 +119,7 @@ export interface StoredMessage {
   at_s: number; // seconds since the conversation started
 }
 
-export interface ConversationDetail {
+export interface ConversationDetail extends CallSummaryFields {
   id: string;
   channel: "chat" | "voice";
   source: ConversationSource;

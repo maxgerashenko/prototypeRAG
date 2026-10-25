@@ -296,6 +296,28 @@ test.describe("2 · a business's previous conversations", () => {
     await expect(page.locator("[data-screen=convos]")).toBeVisible(); // returns where it came from
   });
 
+  test("summarized call shows summary, outcome badge and follow-up mark; others stay as before", async ({ page }) => {
+    const init = data();
+    const done = {
+      ...convo("f8", "Sauna booking", [greet, "Can I book Friday?", "Booked."]),
+      summary: "Caller booked the sauna for Friday evening.", intent: "booking", outcome: "booked" as const, follow_up: true,
+    };
+    init.conversations!.b3 = [done, ...florist.slice(1)];
+    await openApp(page, init);
+    await pick(page, "Bloom & Stem");
+    await page.getByRole("button", { name: /See all/ }).click();
+    const cards = page.locator(".convo-card");
+    await expect(cards.first().locator(".convo-summary")).toHaveText("Caller booked the sauna for Friday evening.");
+    await expect(cards.first().locator(".badge-outcome")).toHaveText("Booked");
+    await expect(cards.first().locator(".badge-follow")).toBeVisible();
+    await expect(cards.nth(1).locator(".convo-preview")).toBeVisible();
+    await expect(cards.nth(1).locator(".badge-outcome")).toHaveCount(0);
+    await cards.first().click();
+    const tr = page.locator("[data-screen=transcript] .tr-summary");
+    await expect(tr).toContainText("Caller booked the sauna for Friday evening.");
+    await expect(tr.locator(".badge-outcome")).toHaveText("Booked");
+  });
+
   test("call source: green phone for Twilio calls, blue globe for web calls", async ({ page }) => {
     const init = data();
     init.conversations!.b1.push(convo("c4", "Parking", [greet, "Where can I park?"], 50 * 24 * 60 * MIN));

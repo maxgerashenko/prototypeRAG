@@ -2,6 +2,7 @@ import type { ConversationDetail } from "../api";
 import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
 import { ChevronLeft, GlobeIcon } from "./icons";
+import { OutcomeBadge } from "./OutcomeBadge";
 import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, plural } from "./format";
 
@@ -40,6 +41,13 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
           </div>
         )}
       </div>
+
+      {c && (c.summary || c.outcome || c.follow_up) && (
+        <div className="tr-summary">
+          <OutcomeBadge outcome={c.outcome} followUp={c.follow_up} />
+          {c.summary && <p>{c.summary}</p>}
+        </div>
+      )}
 
       <div className="scroll">
         <div className="bubbles">
