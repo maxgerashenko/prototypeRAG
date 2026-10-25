@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Ask the local LM Studio chat model (gemma) to turn an architect plan into a plan file.
 
-Part of the project workflow in CLAUDE.md -> "Planning a feature". Agent_opus_ARCHITECT
+Part of the project workflow in CLAUDE.md -> "Building a feature". Agent_opus_ARCHITECT
 returns a feature plan; this script has gemma lay it out as `plan/feature-<slug>.md` in the
 style of an existing plan file and, optionally, list the GitHub issues as `gh` commands.
 Mechanical formatting only: gemma must not add, drop or reorder steps, change an executor
-tag (QWEN / CLAUDE / USER), or touch a spec.
+tag (QWEN / SONNET / CLAUDE / USER), or touch a spec.
 
 Usage:
     python3 .claude/tools/delegate_doc.py plan <architect_plan.md> [--style plan/03-voice-channel.md] [--model ID]
@@ -30,13 +30,13 @@ SYSTEM_PLAN = """You lay out a feature plan as a plan file for the prototypeRAG 
 
 Rules:
 - Output ONLY the markdown of the file. No fences around it, no commentary.
-- Keep every step, executor tag (QWEN / CLAUDE / USER), spec, check, risk and issue from the
+- Keep every step, executor tag (QWEN / SONNET / CLAUDE / USER), spec, check, risk and issue from the
   input, in the same order and with the same wording. Do not add, drop, merge or invent any.
 - Style: English, concise, tables for comparisons, `- [ ]` checklists for tasks, as in the
   style example. Start with the title line and a one-line summary; keep the section order of
   the input; relative links like [DECISIONS.md](DECISIONS.md) for other plan files.
 - Put a `- [ ]` checkbox in front of each step so progress can be ticked off later.
-- Specs for qwen go in fenced blocks under their step heading, unchanged.
+- Specs (for qwen or for Sonnet) go in fenced blocks under their step heading, unchanged.
 """
 
 SYSTEM_ISSUES = """You turn the "Issues" section of a feature plan into GitHub CLI commands.
