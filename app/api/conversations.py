@@ -19,7 +19,22 @@ router = APIRouter()
 
 Source = Literal["twilio", "web"]
 
-class ConversationSummary(BaseModel):
+class CallSummaryFields(BaseModel):
+    """Post-call summary columns (app/actions/summary.py); all None until the call is summarized."""
+    summary: str | None = None
+    intent: str | None = None
+    outcome: str | None = None
+    follow_up: bool | None = None
+
+def summary_fields(conversation: Conversation) -> dict:
+    return {
+        "summary": conversation.summary,
+        "intent": conversation.intent,
+        "outcome": conversation.outcome,
+        "follow_up": conversation.follow_up,
+    }
+
+class ConversationSummary(CallSummaryFields):
     id: uuid.UUID
     channel: str
     source: Source
@@ -34,7 +49,7 @@ class MessageOut(BaseModel):
     content: str
     at_s: int
 
-class ConversationDetail(BaseModel):
+class ConversationDetail(CallSummaryFields):
     id: uuid.UUID
     channel: str
     source: Source
@@ -108,7 +123,8 @@ def list_conversations(business_id: uuid.UUID, limit: int = Query(50, ge=1, le=2
                 preview=make_preview(c_msgs),
                 started_at=c.started_at,
                 duration_s=duration_s(c, c_msgs),
-                message_count=len(c_msgs)
+                message_count=len(c_msgs),
+                **summary_fields(c),
             ))
             if len(results) >= limit:
                 break
@@ -142,5 +158,6 @@ def get_conversation_detail(business_id: uuid.UUID, conversation_id: uuid.UUID) 
             title=make_title(msgs),
             started_at=conv.started_at,
             duration_s=duration_s(conv, msgs),
-            messages=message_outs
+            messages=message_outs,
+            **summary_fields(conv),
         )

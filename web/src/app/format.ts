@@ -82,3 +82,17 @@ export function fmtPhone(e164: string): string {
   const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164);
   return m ? `+1 (${m[1]}) ${m[2]}-${m[3]}` : e164;
 }
+
+const OUTCOME_LABELS: Record<string, string> = {
+  booked: "Booked",
+  info_request: "Info request",
+  message: "Message",
+  transferred: "Transferred",
+  unresolved: "Unresolved",
+};
+
+/** Badge text for a call outcome; null when there is none. Unknown values are shown as sent. */
+export function outcomeLabel(outcome: string | null | undefined): string | null {
+  if (!outcome) return null;
+  return OUTCOME_LABELS[outcome] ?? outcome;
+}
