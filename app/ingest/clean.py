@@ -118,7 +118,10 @@ def clean_page(html: str) -> CleanedPage:
     chrome_blocks = _extract_chrome_tags(soup)
     strip_boilerplate(soup)
 
-    container = soup.find("main") or soup.find("article") or soup.body or soup
+    # <main> wins; a lone <article> is the page body, but several of them (Elementor wraps
+    # each section in one) are just parts of it, so then the whole <body> is the container.
+    articles = soup.find_all("article")
+    container = soup.find("main") or (articles[0] if len(articles) == 1 else None) or soup.body or soup
     main_markdown = md(str(container), heading_style="ATX", strip=["img"])
     main_markdown = re.sub(r"\n{3,}", "\n\n", main_markdown).strip()
 

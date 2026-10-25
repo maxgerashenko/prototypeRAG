@@ -132,11 +132,6 @@ def test_ipx_homepage_keeps_pricing_section():
     assert "indoorpickleballx.com/membership-brooklyn" in page.chrome_markdown
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="K-bug: clean_page takes the first <article> when a page has no <main>; Elementor "
-    "pages have several, so ~95% of the homepage text (hero, amenities, 13 courts, 24/7) is lost",
-)
 def test_ipx_homepage_main_content_is_not_cut_to_the_first_article():
     page = clean_page(read("ipx_brooklyn.html"))
     assert "Cushioned Courts" in page.main_markdown
