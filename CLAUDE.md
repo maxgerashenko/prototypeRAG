@@ -21,8 +21,8 @@ Stage 1 build is in progress — see the build order in `DECISIONS.md` for what 
 | `ARCHITECTURE_DRIVERS.md` | Drivers D1–D7 (principles + priority), wants W1–W9, restrictions R1–R21 that force deviations | A hard limit is found that bends a driver |
 | `DECISIONS.md` | Priorities, build order, decision summary DEC-xx, options tables, open questions OPEN-xx, facts behind decisions | Any decision is made, changed or opened |
 | `01-crawler.md` … `04-actions.md` | Detailed plan per feature part (built in stage 1): goal, done-when, tech, code layout, tasks | Details of that part change |
-| `05-cloud-migration.md` | Stage 2: move to Google Cloud with one pilot business | Cloud setup changes |
-| `06-scale.md` | Stage 3: many businesses — isolation, onboarding, reliability, cost, ops | Scale topics change |
+| `05-cloud-migration.md` | Stage 3: move to Google Cloud with one pilot business | Cloud setup changes |
+| `06-scale.md` | Stage 2: many businesses (multi-business, M6; cost/load M8 stays stage 3) — isolation, onboarding, reliability, cost, ops | Scale topics change |
 | `07-knowledge-quality.md` | Business = domain with locations, organize/clean step, facts library, business summary (built in stage 1, before step 5) | Fact/summary/organize design changes |
 
 `README.md` links to all plan files — keep it in sync when files are added or renamed.

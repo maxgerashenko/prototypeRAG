@@ -122,6 +122,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
 | DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (live Mac mic test) |
 | DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `blocked` labels (stage = milestone prefix); blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
+| DEC-50 | Stage order: multi-business before cloud (supersedes DEC-27's order) | Stage 2 = multi-business (milestone `S2 · M6 Multi-business`), stage 3 = cloud (`S3 · M7 Cloud`); `S3 · M8 Profitable scale` unchanged | 1 · 2 · 3 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
@@ -818,6 +819,20 @@ Rules:
 - An issue blocked by one in a *later* milestone means one of the two is in the wrong milestone.
 - Stage 2 and 3 get milestones now and issues when their stage starts.
 - Milestones play the epic role (grouped work with a progress bar); stage is the `S<n> ·` prefix of the milestone name. No stage labels and no separate epic issues.
+
+### DEC-50 — Stage order: multi-business before cloud (stage 2 and 3 swap)
+
+Supersedes the order in DEC-27 (stage 1 local → cloud → scale). Requested by Max 2026-10-21.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| **Stage 2 = multi-business (RLS, onboarding), stage 3 = cloud** | Isolation and onboarding proven locally, where they are cheap to test; cloud then hosts a design that is already multi-tenant | Cloud-only learning (cold starts, WebSockets, IAM) comes later; cloud-only findings may bend the multi-business design | ✅ |
+| Keep stage 2 = cloud, stage 3 = multi-business (DEC-27) | Cloud surprises found early | One-business cloud pilot first | ❌ superseded |
+
+Consequences: GitHub milestones renamed `S2 · M6 Multi-business` (was S3 · M7) and `S3 · M7 Cloud`
+(was S2 · M6); issues stay with their milestone. Plan-file *headings and milestone table* are
+updated; other "stage 2/3" mentions inside the part files (05, 06, DEVELOPMENT_PLAN, DRIVERS
+tables) still use the old numbering until each part is picked up — follow-up.
 
 ### DEC-46 — Phone calls shown live in the voice app (stage 1)
 

@@ -1,4 +1,4 @@
-# Part 5 — Stage 2: Move to Google Cloud (one business)
+# Part 5 — Stage 3: Move to Google Cloud (one business)
 
 **Goal:** understand cloud infrastructure by running the stage-1 system on Google Cloud
 for **one pilot business**, with managed services only and **$0 idle cost** (DEC-33).
@@ -14,7 +14,7 @@ with env-var config only ([DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)).
 - Measured numbers exist: cold start time, per-turn latency, cost per call minute.
 
 Scaling to many businesses, load tests, CI/CD and Terraform
-are **stage 3** → [06-scale.md](06-scale.md).
+are **stage 2 (multi-business, before cloud) and later** → [06-scale.md](06-scale.md).
 
 ---
 
