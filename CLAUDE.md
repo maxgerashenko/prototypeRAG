@@ -158,6 +158,14 @@ not a one-off.
   the full new file; review it as a diff. Prints the source only (the model's `reasoning_content` isn't surfaced by this
   script; read it directly via the `openai` client if you want to inspect it for a
   specific draft).
+- **When qwen finishes a draft, run the `sonnet5.5_REVIEW` subagent** (`.claude/agents/`,
+  Sonnet 5.5, read-only): give it the spec file and the paths qwen wrote or changed; it
+  answers `ACCEPT` / `ACCEPT WITH FIXES` / `REJECT` with `file:line` findings. The main
+  session reads its findings, decides which are right, and sends those back to qwen as a
+  new spec (current file + the finding) to implement — then reviews the result and still
+  makes the final call. Findings are not hand-fixed unless qwen got them wrong twice. The
+  review is a second pair of eyes, not a replacement for the checks below. Write its task
+  summary like any delegated task.
 - **Still review and test every draft against something real** before accepting it —
   fixtures, a live DB, or the actual target site, matching the workflow used in stage 1
   step 2. A good reasoning trace lowers the bug rate; it doesn't replace verification.
