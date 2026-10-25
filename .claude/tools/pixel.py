@@ -43,7 +43,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 def _label(model: str) -> str:
     if model.startswith("agent:"):  # a project subagent, see _project_agents()
-        return "Agent_" + model[len("agent:"):]
+        name = model[len("agent:"):]
+        return name if name.startswith("Agent_") else "Agent_" + name
     family = re.match(r"[a-z]+", model.split("/")[-1].lower())
     return "Local_" + (family.group(0) if family else model.split("/")[-1]).upper()
 
