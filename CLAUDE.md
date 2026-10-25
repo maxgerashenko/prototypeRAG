@@ -138,6 +138,10 @@ hooks in `.claude/settings.json` (which already match every project agent) make 
 No other wiring is needed; the agent also appears in the Agent tool after a restart or
 `/agents`.
 
+The Pixel Agents office itself (layout, areas, which label sits in which area) lives in
+`~/.pixel-agents/`, outside git. After changing it run `python3 .claude/tools/pixel_office.py
+save` and commit `.claude/pixel-agents/`; `... restore` puts it back on a new machine.
+
 ## Delegating whole-file code drafts
 
 A bigger scope than the command delegation above: drafting a whole Python module from
