@@ -11,7 +11,9 @@ a Claude session does:
 - `agent(model, task)` around a delegate call: PreToolUse ("<model>: <task>") on entry,
   so the character works; Stop on exit, so it goes idle again; then `sync()`, so a model
   loaded or unloaded meanwhile shows up or leaves. Parallel calls on one model share its
-  character; it goes idle when the first of them ends.
+  character; it goes idle only when the last of them ends. Each running call leaves a
+  file named after its pid in the model's `.calls/` folder, which is how a call in another
+  process (or a `sync()`) knows the character is still working.
 
 Best effort only: if Pixel Agents or `lms` isn't installed or no server is up, nothing
 happens and the delegate call works as before.
@@ -51,6 +53,25 @@ def _send(model: str, event: str, **fields) -> None:
         pass
 
 
+def _busy(model: str) -> bool:
+    """True while any delegate call (in any process) is running on this model's character."""
+    calls = os.path.join(_session(model)["cwd"], ".calls")
+    try:
+        names = os.listdir(calls)
+    except OSError:
+        return False
+    busy = False
+    for name in names:
+        try:
+            os.kill(int(name), 0)
+            busy = True
+        except ProcessLookupError:
+            os.remove(os.path.join(calls, name))  # that call died without cleaning up
+        except Exception:
+            busy = busy or name.isdigit()
+    return busy
+
+
 def _lms(cmd: str) -> list[dict]:
     try:
         out = subprocess.run(["lms", cmd, "--json"], capture_output=True, text=True, timeout=10)
@@ -64,6 +85,8 @@ def sync() -> None:
         return
     loaded = {m["identifier"] for m in _lms("ps") if m.get("type") == "llm"}
     for model in loaded:
+        if _busy(model):  # a Stop now would show a working model as idle
+            continue
         _send(model, "SessionStart", source="startup")
         _send(model, "Stop")
     # several downloaded models share a label (qwen3.6, qwen3-coder, ...): only end the
@@ -82,10 +105,21 @@ def agent(model: str, task: str):
     _send(model, "SessionStart", source="resume")
     _send(model, "PreToolUse", tool_name="Bash",
           tool_input={"command": f"{model.split('/')[-1]}: {task[:80]}"})
+    mine = os.path.join(_session(model)["cwd"], ".calls", str(os.getpid()))
+    try:
+        os.makedirs(os.path.dirname(mine), exist_ok=True)
+        open(mine, "w").close()
+    except OSError:
+        pass
     try:
         yield
     finally:
-        _send(model, "Stop")
+        try:
+            os.remove(mine)
+        except OSError:
+            pass
+        if not _busy(model):  # a parallel call on this model keeps it working
+            _send(model, "Stop")
         sync()
 
 
