@@ -9,21 +9,55 @@ Supports `mode=vad` (default) or `mode=ptt` (push-to-talk via `ptt_start`/`ptt_e
 Supports `continue_from=<conversation id>` to resume an earlier conversation.
 When the session hangs up (V17: silence, or the caller said goodbye) it sends a `hangup`
 event and the socket is closed with code 1000.
+V19: `ended_at` is set when the socket closes, even if closing the session is cancelled (server
+shutdown); if the process is killed outright, `end_orphaned_browser_conversations()` closes the
+leftovers on the next startup.
 """
 
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlalchemy import func, select
 
+from app.db import tenant_session
+from app.db.models import Conversation, Message
+from app.db.session import SessionLocal
 from app.voice.session import CallSession
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
 BROWSER_SAMPLE_RATE = 16000
+
+
+def _mark_ended(business_id: uuid.UUID, conversation_id: uuid.UUID, ended_at: datetime | None = None) -> None:
+    with tenant_session(business_id) as db:
+        conversation = db.get(Conversation, conversation_id)
+        if conversation is not None and conversation.ended_at is None:
+            conversation.ended_at = ended_at or datetime.now().astimezone()
+
+
+def end_orphaned_browser_conversations() -> int:
+    """Startup sweep (V19): browser calls whose process died without closing them. Run before
+    serving, so every open `channel='voice'` conversation without a `call_sid` (Twilio ones get
+    theirs from the status callback) is a leftover. `ended_at` = the last message, else the start."""
+    with SessionLocal() as db:
+        last_message = (
+            select(func.max(Message.created_at))
+            .where(Message.conversation_id == Conversation.id).scalar_subquery()
+        )
+        rows = db.execute(
+            select(Conversation.business_id, Conversation.id, func.coalesce(last_message, Conversation.started_at))
+            .where(Conversation.channel == "voice", Conversation.call_sid.is_(None),
+                   Conversation.ended_at.is_(None))
+        ).all()
+    for business_id, conversation_id, ended_at in rows:
+        _mark_ended(business_id, conversation_id, ended_at)
+    return len(rows)
 
 
 @router.websocket("/voice/browser")
@@ -78,4 +112,10 @@ async def browser_voice(
     except WebSocketDisconnect:
         pass
     finally:
-        await session.close()
+        try:
+            await session.close()
+        finally:
+            # session.close() may be cancelled before it gets to `ended_at` (server shutdown);
+            # a short synchronous write is still allowed to finish here
+            if session.conversation_id is not None:
+                _mark_ended(business_id, session.conversation_id)
