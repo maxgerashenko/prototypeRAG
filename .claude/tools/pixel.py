@@ -172,7 +172,7 @@ def _subagent(action: str) -> None:
     key = f"agent:{name}"
     if action == "start":
         _send(key, "SessionStart", source="resume")
-        _send(key, "PreToolUse", tool_name="Bash", tool_input={"command": f"{name}: reviewing"})
+        _send(key, "PreToolUse", tool_name="Bash", tool_input={"command": f"{name}: working"})
     else:
         _send(key, "Stop")
 
