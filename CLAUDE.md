@@ -129,6 +129,15 @@ commit-message writing, and editing code.
 5. Not for: large inputs that need full understanding (input is cut at 60k characters),
    or anything where a wrong answer would be silent and costly — do those yourself.
 
+## Adding a subagent
+
+Create it as usual: `.claude/agents/<name>.md` (frontmatter `name`, `description`, `model`,
+`tools`). Then make it visible in Pixel Agents: run `python3 .claude/tools/pixel.py sync` —
+it adds a standing `Agent_<name>` character, idle until the SubagentStart/SubagentStop
+hooks in `.claude/settings.json` (which already match every project agent) make it work.
+No other wiring is needed; the agent also appears in the Agent tool after a restart or
+`/agents`.
+
 ## Delegating whole-file code drafts
 
 A bigger scope than the command delegation above: drafting a whole Python module from
