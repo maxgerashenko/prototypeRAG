@@ -13,6 +13,12 @@ from pypdf import PdfReader
 USER_AGENT = "prototypeRAG-crawler/0.1 (+https://github.com/placeholder; learning project, see robots.txt)"
 # a menu or price list is well under this; bigger PDFs are brochures/scans not worth the download
 MAX_PDF_BYTES = 20_000_000
+# Some hosts (e.g. bhbarbershop.com's hcdn) return 403 to httpx's default `Accept: */*` -- this is not browser impersonation, the User-Agent stays ours.
+CRAWL_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 def fetch_text(url: str, client: httpx.Client, timeout: float = 15.0) -> str:
@@ -107,9 +113,11 @@ def pdf_title(pdf_bytes: bytes, url: str) -> str:
     return unquote(urlparse(url).path.rsplit("/", 1)[-1]) or url
 
 
-def make_client(delay_seconds: float = 0.5) -> httpx.Client:
+def make_client(delay_seconds: float = 0.5, transport: httpx.BaseTransport | None = None) -> httpx.Client:
     """One client for a whole crawl. `run.py` reads `_crawl_delay` and sleeps between
-    fetches; `crawl_business` raises it to robots.txt's Crawl-delay when that is longer."""
-    client = httpx.Client(follow_redirects=True, timeout=15.0)
+    fetches; `crawl_business` raises it to robots.txt's Crawl-delay when that is longer.
+    The client sends CRAWL_HEADERS on every request (per-request headers are merged on
+    top); `transport` is for tests."""
+    client = httpx.Client(follow_redirects=True, timeout=15.0, headers=CRAWL_HEADERS, transport=transport)
     client._crawl_delay = delay_seconds
     return client
