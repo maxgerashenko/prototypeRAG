@@ -39,6 +39,8 @@ interface CallProps {
   onPttDown: () => void;
   onPttUp: () => void;
   onEnd: () => void;
+  /** Mobile browser: the server's VAD takes turns, so there is no push-to-talk button. */
+  handsFree?: boolean;
 }
 
 /** A phone call the system is taking (DEC-46), watched live: no push-to-talk (the caller
@@ -54,11 +56,12 @@ export function PhoneCallScreen({ biz, call, caller, onClose }: PhoneProps) {
   return <CallScreen biz={biz} call={call} phone={{ caller, onClose }} onPttDown={() => {}} onPttUp={() => {}} onEnd={onClose} />;
 }
 
-export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd, phone }: CallProps & { phone?: { caller: string; onClose: () => void } }) {
+export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd, phone, handsFree }: CallProps & { phone?: { caller: string; onClose: () => void } }) {
   const now = useNow(call.phase === "live");
   const status = callStatus(call);
-  // on the phone the caller just talks (the server's VAD takes turns), nothing to hold
+  // on the phone (and in a mobile browser, #114) the caller just talks (the server's VAD takes turns), nothing to hold; keeps a hint if present
   if (phone && status.tone === "idle") status.text = "The caller’s turn";
+  else if (handsFree && status.tone === "idle" && !call.hint) status.text = "Just talk — I’m listening";
   const orbVars = { "--bar-speed": status.barSpeed, "--bar-play": status.barsRunning ? "running" : "paused" } as CSSProperties;
 
   const down = (e: PointerEvent<HTMLButtonElement>) => {
@@ -135,6 +138,13 @@ export function CallScreen({ biz, call, onPttDown, onPttUp, onEnd, phone }: Call
           </div>
           <button className="btn-pill btn-ghost" onClick={phone.onClose}>Close</button>
         </div>
+      ) : handsFree ? (
+      <div className="call-controls call-controls-handsfree">
+        <button className="end-btn end-btn-wide" aria-label="End call" onClick={onEnd}>
+          <PhoneIcon size={24} />
+          <span>End call</span>
+        </button>
+      </div>
       ) : (
       <div className="call-controls">
         <button className={`ptt${call.talking ? " talking" : ""}`} aria-label="Push to talk — hold to speak"

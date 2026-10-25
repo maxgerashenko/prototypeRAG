@@ -806,3 +806,44 @@ test.describe("6 · call ended", () => {
     await expect(page.locator("[data-screen=ended]")).toContainText("The call was closed by the server: internal error");
   });
 });
+
+// #114: a phone or tablet browser (Safari, Chrome) has nothing to hold -- the call is hands-free
+// (the mic always streams, the server's VAD takes turns) and the Hold to talk button is gone
+test.describe("7 · hands-free call on a mobile browser", () => {
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+  });
+
+  test("no push-to-talk button: End call only, status says to just talk", async ({ page }) => {
+    await openApp(page);
+    await startCall(page);
+    await expect(ptt(page)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "End call" })).toBeVisible();
+    // the End call pill takes the whole row, as Hold to talk does on desktop
+    const box = await page.getByRole("button", { name: "End call" }).boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThan(300);
+    await expect(status(page)).toHaveText("Just talk — I’m listening");
+  });
+
+  test("opens the socket without mode=ptt (server VAD)", async ({ page }) => {
+    await openApp(page);
+    await startCall(page, "Bloom & Stem");
+    const params = new URL(voice.url()).searchParams;
+    expect(params.get("business_id")).toBe("b3");
+    expect(params.get("mode")).toBeNull();
+  });
+
+  test("Space does nothing and End call hangs up", async ({ page }) => {
+    await openApp(page);
+    await startCall(page);
+    await page.keyboard.down(" ");
+    await page.keyboard.up(" ");
+    expect(voice.texts.filter((t) => t.type === "ptt_start")).toHaveLength(0);
+    await expect(page.getByTestId("listening")).toHaveCount(0);
+    await page.getByRole("button", { name: "End call" }).click();
+    await expect(page.locator("[data-screen=ended]")).toBeVisible();
+  });
+});

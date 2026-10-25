@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { isMobileBrowser } from "./mobile";
 import { VoiceCall } from "../voice/voiceCall";
 import { NO_SPEECH_MS, callReducer, initialCallState, type CallState } from "./callState";
 
@@ -10,15 +11,18 @@ export interface VoiceCallApi {
   hangUp: () => void;
   pttDown: () => void;
   pttUp: () => void;
+  /** True on a mobile browser: no push-to-talk, the server's VAD takes turns. */
+  handsFree: boolean;
 }
 
-/** One live call at a time, server push-to-talk (DEC-42). */
+/** One live call at a time, server push-to-talk (DEC-42); hands-free on mobile browsers (#114). */
 export function useVoiceCall(): VoiceCallApi {
   const [state, dispatch] = useReducer(callReducer, initialCallState);
   const call = useRef<VoiceCall | null>(null);
   const noSpeechTimer = useRef<number | undefined>(undefined);
   const talking = useRef(false);
   const live = useRef(false); // push-to-talk only once the server confirmed the call
+  const [handsFree] = useState(isMobileBrowser);
   useEffect(() => {
     live.current = state.phase === "live";
   }, [state.phase]);
@@ -50,7 +54,7 @@ export function useVoiceCall(): VoiceCallApi {
           dispatch({ type: "hangup", now: Date.now() });
         },
       },
-      { mode: "ptt", continueFrom },
+      { mode: handsFree ? "vad" : "ptt", continueFrom },
     );
     call.current = c;
     try {
@@ -59,7 +63,7 @@ export function useVoiceCall(): VoiceCallApi {
       c.stop(); // releases the mic if it was granted before the failure
       throw err;
     }
-  }, []);
+  }, [handsFree]);
 
   const hangUp = useCallback(() => {
     const c = call.current;
@@ -69,21 +73,23 @@ export function useVoiceCall(): VoiceCallApi {
   }, []);
 
   const pttDown = useCallback(() => {
+    if (handsFree) return;
     if (!call.current || !live.current || talking.current) return;
     talking.current = true;
     clearNoSpeech();
     call.current.setTalking(true);
     dispatch({ type: "pttDown" });
-  }, []);
+  }, [handsFree]);
 
   const pttUp = useCallback(() => {
+    if (handsFree) return;
     if (!talking.current) return;
     talking.current = false;
     call.current?.setTalking(false);
     dispatch({ type: "pttUp" });
     clearNoSpeech();
     noSpeechTimer.current = window.setTimeout(() => dispatch({ type: "noSpeech" }), NO_SPEECH_MS);
-  }, []);
+  }, [handsFree]);
 
   // leaving the page mid-call hangs up
   useEffect(
@@ -94,5 +100,5 @@ export function useVoiceCall(): VoiceCallApi {
     [],
   );
 
-  return { state, start, hangUp, pttDown, pttUp };
+  return { state, handsFree, start, hangUp, pttDown, pttUp };
 }
