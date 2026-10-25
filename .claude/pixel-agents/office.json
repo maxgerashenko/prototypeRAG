@@ -12,6 +12,12 @@
       ],
       "prototypeRAG": [
         "MISSION CONTROL"
+      ],
+      "Agent_opus_ARCHITECT": [
+        "PLAN"
+      ],
+      "Agent_sonnet5.5_CODE": [
+        "PLAN"
       ]
     },
     "showAreas": true,
