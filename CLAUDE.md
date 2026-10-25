@@ -188,6 +188,12 @@ saved. Finishing the work and submitting it are two separate steps: say what wou
 committed (files touched, one-line summary) and wait for a yes before running the
 command. This holds every time, not just the first time in a session.
 
+## Claude config changes go straight to `main`
+
+Changes that only touch Claude Code's own config (`.claude/` — settings, hooks, agents,
+tools — and `CLAUDE.md`) don't need a branch or PR: pull `main`, commit there. The
+"ask before submitting" rule above still applies to the commit itself.
+
 ## Issues and PRs (DEC-45)
 
 Work is tracked as GitHub issues, grouped by milestones named `S<stage> · M<n> <name>`;

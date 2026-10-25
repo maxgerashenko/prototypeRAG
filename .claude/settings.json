@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lsof -nP -iTCP:3100 -sTCP:LISTEN >/dev/null 2>&1 || { PATH=\"/opt/homebrew/bin:$PATH\" nohup pixel-agents --host 0.0.0.0 --port 3100 --no-terminal >\"${TMPDIR:-/tmp}/pixel-agents.log\" 2>&1 </dev/null & disown; } 2>/dev/null; exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
