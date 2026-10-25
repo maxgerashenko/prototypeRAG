@@ -28,8 +28,8 @@ from app.db.models import Business, BusinessProfile, Location, Page
 from app.db.session import SessionLocal
 from app.ingest.chunk import chunk_markdown
 from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
-from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex
-from app.ingest.fetch import fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client
+from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, parse_sitemap_index
+from app.ingest.fetch import fetch_child_sitemaps, fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client
 from app.ingest.fact_chunks import sync_fact_chunks
 from app.ingest.facts import extract_page_facts, pages_to_extract
 from app.ingest.identity import domain_of, site_root
@@ -262,9 +262,17 @@ def crawl_business(
             # raises our own delay, never lowers it below delay_seconds
             client._crawl_delay = robots_delay
             print(f"robots.txt Crawl-delay: {robots_delay:g} s between requests")
+        child_sitemaps: list[str] = []
+        children = parse_sitemap_index(sitemap_xml) if sitemap_xml else []
+        if children:  # sitemap index (Yoast/WordPress): follow it one level, same delay + robots
+            child_sitemaps = fetch_child_sitemaps(
+                children, client, robots_checker.can_fetch if robots_checker else lambda url: True, base_url
+            )
         time.sleep(client._crawl_delay)  # after the robots.txt + sitemap requests
 
-        sitemap_urls = discover_pages(start_url, sitemap_xml, robots_txt, max_pages, max_depth)
+        sitemap_urls = discover_pages(
+            start_url, sitemap_xml, robots_txt, max_pages, max_depth, child_sitemaps=child_sitemaps
+        )
         if len(sitemap_urls) > 1:
             urls_to_crawl, fetched = sitemap_urls, {}
         else:

@@ -4,11 +4,15 @@ server-rendered; Crawl4AI/headless rendering is added when a JS-heavy site is hi
 
 import io
 import re
+import time
 from dataclasses import dataclass
+from collections.abc import Callable
 from urllib.parse import unquote, urlparse
 
 import httpx
 from pypdf import PdfReader
+
+from app.ingest.discover import same_domain
 
 USER_AGENT = "prototypeRAG-crawler/0.1 (+https://github.com/placeholder; learning project, see robots.txt)"
 # a menu or price list is well under this; bigger PDFs are brochures/scans not worth the download
@@ -79,6 +83,35 @@ def fetch_sitemap(base_url: str, client: httpx.Client) -> str | None:
     except httpx.HTTPError:
         return None
     return response.text if response.status_code == 200 else None
+
+
+# a big WordPress site lists a dozen or so child sitemaps; more than this is not a small
+# business's site and would cost a crawl-delay each
+MAX_CHILD_SITEMAPS = 20
+
+
+def fetch_child_sitemaps(
+    child_urls: list[str],
+    client: httpx.Client,
+    can_fetch: Callable[[str], bool] = lambda url: True,
+    base_url: str | None = None,
+) -> list[str]:
+    """Bodies of the child sitemaps of a sitemap index, one level only (a child that is
+    itself an index is not followed). Each fetch waits the crawl delay first and skips
+    URLs robots.txt disallows (`can_fetch`) or, when `base_url` is given, on another
+    domain. A failed child is skipped -- never raises."""
+    bodies: list[str] = []
+    for url in child_urls[:MAX_CHILD_SITEMAPS]:
+        if not can_fetch(url) or (base_url and not same_domain(url, base_url)):
+            continue
+        time.sleep(client._crawl_delay)
+        try:
+            response = client.get(url, headers={"User-Agent": USER_AGENT})
+        except httpx.HTTPError:
+            continue
+        if response.status_code == 200:
+            bodies.append(response.text)
+    return bodies
 
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:

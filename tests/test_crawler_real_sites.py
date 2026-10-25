@@ -8,12 +8,15 @@ fixtures on 2026-10-19 so tests never touch the network. Each site is a differen
 """
 
 from pathlib import Path
+from urllib.parse import urlparse
 
+import httpx
 import pytest
 
 from app.ingest.chunk import chunk_markdown
+from app.ingest.fetch import fetch_child_sitemaps
 from app.ingest.clean import clean_page, extract_html_lang, extract_og_site_name, extract_title
-from app.ingest.discover import RobotsChecker, discover_links, discover_pages, has_noindex, is_blog_path, parse_sitemap
+from app.ingest.discover import RobotsChecker, discover_links, discover_pages, has_noindex, is_blog_path, parse_sitemap, parse_sitemap_index
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -46,15 +49,63 @@ def test_open_robots_allow_everything(name: str):
     assert RobotsChecker(read(f"{name}_robots.txt")).can_fetch("https://example.com/anything")
 
 
+def _child_sitemap(*paths: str, host: str) -> str:
+    entries = "".join(f"<url><loc>https://{host}{p}</loc></url>" for p in paths)
+    return f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>'
+
+
 @pytest.mark.parametrize("name,start", [("ipx", IPX_URL), ("bhbarbershop", BH_URL)])
-def test_wordpress_sitemap_index_is_not_a_page_list(name: str, start: str):
+def test_wordpress_sitemap_index_is_followed_one_level(name: str, start: str):
     """Yoast's /sitemap.xml is a sitemap *index* (links to post-sitemap.xml etc.). It has
-    no <url> entries, so discovery falls back to the start page + link BFS -- and must not
-    queue the child .xml sitemaps as pages."""
+    no <url> entries itself: parse_sitemap is [], the children are listed by
+    parse_sitemap_index, and their page URLs (not the .xml files) are discovered."""
     xml = read(f"{name}_sitemap_index.xml")
     assert "<sitemapindex" in xml
     assert parse_sitemap(xml) == []
-    assert discover_pages(start, xml, read(f"{name}_robots.txt")) == [start]
+    children = parse_sitemap_index(xml)
+    assert any(c.endswith("/page-sitemap.xml") for c in children)
+    assert all(c.endswith(".xml") for c in children)
+
+    host = urlparse(start).netloc
+    page_sitemap = _child_sitemap("/", "/pricing", "/contact", host=host)
+    post_sitemap = _child_sitemap("/news/opening", host=host)
+    pages = discover_pages(start, xml, read(f"{name}_robots.txt"), child_sitemaps=[post_sitemap, page_sitemap])
+    assert pages[0] == start
+    assert f"https://{host}/pricing" in pages and f"https://{host}/news/opening" in pages
+    assert not any(u.endswith(".xml") for u in pages)
+    assert len(pages) == len(set(pages))
+
+
+def test_sitemap_index_without_children_still_falls_back_to_start():
+    xml = read("ipx_sitemap_index.xml")
+    assert discover_pages(IPX_URL, xml, read("ipx_robots.txt")) == [IPX_URL]
+
+
+def test_fetch_child_sitemaps_honours_robots_domain_and_delay(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr("app.ingest.fetch.time.sleep", sleeps.append)
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(404 if "gone" in request.url.path else 200, text="<urlset/>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client._crawl_delay = 2.0
+    bodies = fetch_child_sitemaps(
+        [
+            "https://x.com/page-sitemap.xml",
+            "https://x.com/private-sitemap.xml",
+            "https://other.com/page-sitemap.xml",
+            "https://x.com/gone-sitemap.xml",
+        ],
+        client,
+        can_fetch=lambda u: "private" not in u,
+        base_url="https://x.com",
+    )
+    assert bodies == ["<urlset/>"]
+    assert seen == ["https://x.com/page-sitemap.xml", "https://x.com/gone-sitemap.xml"]
+    assert sleeps == [2.0, 2.0]
 
 
 def test_gnocco_sitemap_is_discovered_with_homepage_first():
