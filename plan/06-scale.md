@@ -1,10 +1,11 @@
-# Part 6 — Stage 3: Scale to many businesses (safety, reliability, price)
+# Part 6 — Stage 2 (multi-business) and stage 3 (cost, load): Scale to many businesses (safety, reliability, price)
 
 **Goal:** serve many businesses from one deployment — no data leaks between them, calls
 that stay fast under load, and a known cost per business that is below what we charge.
 
-**Starts when:** stage 2 exit criteria are met ([05-cloud-migration.md](05-cloud-migration.md))
-and a second business is about to be onboarded.
+**Starts when:** stage 1 is done (DEC-50: multi-business now comes before cloud, so it
+runs locally; the cloud exit criteria in [05-cloud-migration.md](05-cloud-migration.md)
+move after it) and a second business is about to be onboarded.
 
 **Done when:**
 - New businesses are onboarded without code changes; tenant isolation tests pass.

@@ -18,12 +18,12 @@ Detailed plan per part:
 [2 Local RAG](02-local-rag.md) ·
 [3 Voice channel](03-voice-channel.md) ·
 [4 Actions](04-actions.md) ·
-[5 Cloud — stage 2](05-cloud-migration.md) ·
-[6 Scale — stage 3](06-scale.md)
+[5 Cloud — stage 3](05-cloud-migration.md) ·
+[6 Scale — stage 2 multi-business, stage 3 cost/load](06-scale.md)
 
-Built in three learning stages — **1 Local** (understand the principles) → **2 Cloud**
-(understand the infrastructure, one business) → **3 Scale** (many businesses, price and
-reliability). See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+Built in three learning stages — **1 Local** (understand the principles) → **2 Multi-business**
+(many businesses on one local deployment: isolation, onboarding) → **3 Cloud** (understand the
+infrastructure, then price and reliability). Order changed in DEC-50. See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
 
 ```
             ┌────────────── Part 1: Ingestion ──────────────┐
@@ -168,6 +168,6 @@ DEC-45 in [DECISIONS.md](DECISIONS.md).
 | M5 | 1 | Actions | Booking + conversation summary working end-to-end |
 | M5b | 1 | Gemini check | Eval + booking tests pass with Gemini (env vars only), still local |
 | M5c | 1 | Containerized | App + crawler run from Docker images with env-var config only |
-| M6 | 2 | Cloud | Pilot business live on Cloud Run + Neon + Gemini, `deploy.sh`, latency/cost measured — [05](05-cloud-migration.md) |
-| M7 | 3 | Multi-business | RLS enforced; second business onboarded with no code changes — [06](06-scale.md) |
+| M6 | 2 | Multi-business | RLS enforced; second business onboarded with no code changes — [06](06-scale.md) |
+| M7 | 3 | Cloud | Pilot business live on Cloud Run + Neon + Gemini, `deploy.sh`, latency/cost measured — [05](05-cloud-migration.md) |
 | M8 | 3 | Profitable scale | Cost per business measured and below price; latency holds under load test |
