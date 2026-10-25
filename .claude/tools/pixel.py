@@ -2,7 +2,8 @@
 
 Pixel Agents builds its characters from Claude Code hook events, and its hook script
 forwards any event JSON on stdin to every live Pixel Agents server. Each loaded LLM gets
-one fixed session id, so it sits in the office like a Claude session does:
+one fixed session id and a label (Local_QWEN, Local_GEMMA), so it sits in the office like
+a Claude session does:
 
 - `sync()` (also `python3 pixel.py sync`, run by the SessionStart hook): every loaded
   LLM gets SessionStart + Stop (present, idle); every downloaded but unloaded model gets
@@ -18,20 +19,32 @@ happens and the delegate call works as before.
 import contextlib
 import json
 import os
+import re
 import subprocess
 import sys
 
 HOOK = os.path.expanduser("~/.pixel-agents/hooks/claude-hook.js")
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Pixel Agents labels a hooks-only character with the basename of its cwd, so each model
+# reports a folder of its own: "Local_QWEN", "Local_GEMMA". The folder just has to exist.
+# Only adopted while Settings -> Watch All Sessions is on (folders outside the project
+# are otherwise ignored).
+OFFICE = os.path.expanduser("~/.pixel-agents/office")
+
+
+def _label(model: str) -> str:
+    family = re.match(r"[a-z]+", model.split("/")[-1].lower())
+    return "Local_" + (family.group(0) if family else model.split("/")[-1]).upper()
 
 
 def _session(model: str) -> dict:
-    # cwd = repo root, so the character counts as part of this workspace
-    return {"session_id": f"local-{model.split('/')[-1]}", "cwd": REPO}
+    label = _label(model)
+    return {"session_id": f"local-{label}", "cwd": os.path.join(OFFICE, label)}
 
 
 def _send(model: str, event: str, **fields) -> None:
     try:
+        if event != "SessionEnd":  # models that are only leaving don't need a folder
+            os.makedirs(_session(model)["cwd"], exist_ok=True)
         subprocess.run(["node", HOOK], text=True, capture_output=True, timeout=3,
                        input=json.dumps({**_session(model), "hook_event_name": event, **fields}))
     except Exception:
@@ -53,8 +66,11 @@ def sync() -> None:
     for model in loaded:
         _send(model, "SessionStart", source="startup")
         _send(model, "Stop")
+    # several downloaded models share a label (qwen3.6, qwen3-coder, ...): only end the
+    # labels with nothing loaded, or an unloaded sibling would remove the loaded one
+    loaded_labels = {_label(m) for m in loaded}
     for m in _lms("ls"):
-        if m.get("modelKey") not in loaded:
+        if _label(m["modelKey"]) not in loaded_labels:
             _send(m["modelKey"], "SessionEnd", reason="other")
 
 
