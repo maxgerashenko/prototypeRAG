@@ -224,7 +224,7 @@ Findings:
 | V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | DEC-44 fix (minimum speech length before barge-in) insufficient — ❌ still reproduces live 2026-10-19 (real call): saying "hmm" or coughing stopped the bot's voice. Needs stronger hardening (longer `VAD_BARGE_IN_START_MS`, or an energy/pitch check beyond webrtcvad aggressiveness) |
 | V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | Client reports playback end; Twilio `mark` events |
 | V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); Safari untested | Closed (Safari ✅ 2026-10-19: works, mic streams; Firefox explicitly not supported/tested — not a target browser) | Open page in Chrome, Safari | — |
-| V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Potential | Look at `reply` events of real answers | Abbreviation list; split also on `,`/length cap |
+| V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Fixed in code (#77), unconfirmed on real replies | Look at `reply` events of real answers | Abbreviation list; text past 120 chars is cut at the last `,;:` (min 30 chars) or space |
 | V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
 | V15 | Reply-task sends and feed-path sends (`clear`) can interleave on one WebSocket | Potential | Barge-in many times quickly | One send queue per connection |
 
