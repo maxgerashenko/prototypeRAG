@@ -1,0 +1,34 @@
+{
+  "standalone": {
+    "areaMappings": {
+      "Local_QWEN": [
+        "CODE"
+      ],
+      "Local_GEMMA": [
+        "CODE"
+      ],
+      "Agent_sonnet5.5_REVIEW": [
+        "PLAN"
+      ],
+      "prototypeRAG": [
+        "MISSION CONTROL"
+      ],
+      "Agent_opus_ARCHITECT": [
+        "PLAN"
+      ],
+      "Agent_sonnet5.5_CODE": [
+        "PLAN"
+      ]
+    },
+    "showAreas": true,
+    "alwaysShowLabels": true,
+    "watchAllSessions": true,
+    "showHostDirectories": true
+  },
+  "directories": [
+    {
+      "name": "Claude_main",
+      "path": "/Users/max/Documents/GitHub/prototypeRAG"
+    }
+  ]
+}

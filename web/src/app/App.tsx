@@ -309,8 +309,8 @@ export function App() {
       {stage === "connecting" && <ConnectingScreen biz={fallbackBiz(callBizId)} onCancel={cancelCall} />}
 
       {stage === "call" && (
-        <CallScreen biz={fallbackBiz(callBizId)} call={call} onPttDown={voice.pttDown} onPttUp={voice.pttUp}
-          onEnd={voice.hangUp} />
+        <CallScreen biz={fallbackBiz(callBizId)} call={call} handsFree={voice.handsFree} onPttDown={voice.pttDown}
+          onPttUp={voice.pttUp} onEnd={voice.hangUp} />
       )}
 
       {stage === "phone" && phone && (

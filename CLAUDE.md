@@ -24,6 +24,7 @@ Stage 1 build is in progress — see the build order in `DECISIONS.md` for what 
 | `05-cloud-migration.md` | Stage 2: move to Google Cloud with one pilot business | Cloud setup changes |
 | `06-scale.md` | Stage 3: many businesses — isolation, onboarding, reliability, cost, ops | Scale topics change |
 | `07-knowledge-quality.md` | Business = domain with locations, organize/clean step, facts library, business summary (built in stage 1, before step 5) | Fact/summary/organize design changes |
+| `feature-<slug>.md` | One feature's implementation plan from `Agent_opus_ARCHITECT`: steps tagged QWEN / SONNET / CLAUDE / USER, specs, review points (see "Building a feature") | Steps are done or the plan changes |
 
 `README.md` links to all plan files — keep it in sync when files are added or renamed.
 
@@ -129,6 +130,67 @@ commit-message writing, and editing code.
 5. Not for: large inputs that need full understanding (input is cut at 60k characters),
    or anything where a wrong answer would be silent and costly — do those yourself.
 
+## Adding a subagent
+
+Create it as usual: `.claude/agents/<name>.md` (frontmatter `name`, `description`, `model`,
+`tools`). Then make it visible in Pixel Agents: run `python3 .claude/tools/pixel.py sync` —
+it adds a standing `Agent_<name>` character, idle until the SubagentStart/SubagentStop
+hooks in `.claude/settings.json` (which already match every project agent) make it work.
+No other wiring is needed; the agent also appears in the Agent tool after a restart or
+`/agents`. If it takes part in building features, add its row to the table under
+"Building a feature" too.
+
+The Pixel Agents office itself (layout, areas, which label sits in which area) lives in
+`~/.pixel-agents/`, outside git. After changing it run `python3 .claude/tools/pixel_office.py
+save` and commit `.claude/pixel-agents/`; `... restore` puts it back on a new machine.
+
+## Building a feature: plan → implement → review → approve → PR
+
+For a feature that is more than a few lines. Who does what:
+
+| Role | Who | Does |
+|---|---|---|
+| Architect | `Agent_opus_ARCHITECT` (Opus, read-only) | plans, and estimates who can implement |
+| Recorder | local gemma (`delegate_doc.py`) | writes the plan file, drafts the GitHub issues and, at the end, the commit/push/PR commands |
+| Implementer | local qwen (`delegate_code.py`) **or** `Agent_sonnet5.5_CODE` (Sonnet, can edit and run tests) | writes the code — the user picks |
+| Reviewer | `sonnet5.5_REVIEW` (Sonnet, read-only) | reviews every implemented step |
+| Fixer | local qwen | implements the review findings |
+| Main session | Claude | coordinates, does `CLAUDE` steps, final call, commit messages, PR text |
+
+1. **User asks for an implementation plan.** Run `Agent_opus_ARCHITECT` with the request.
+   It returns: goal and done-when; **who can implement this** — qwen YES/PARTLY/NO,
+   Sonnet YES/PARTLY/NO — and a **recommendation** (QWEN / SONNET / MIXED) with cost and
+   review effort; a step table with executor (`QWEN`, `SONNET`, `CLAUDE`, `USER`) and
+   alternative per step; a spec for every QWEN/SONNET step; review points; issues; risks.
+   Save its text to the scratchpad and discuss the open questions with the user.
+2. **Gemma records it.** `python3 .claude/tools/delegate_doc.py plan <plan.md> --style
+   plan/<similar>.md` → `plan/feature-<slug>.md` (flat, no subfolder); `... issues
+   <plan.md>` drafts the `gh issue create` commands. gemma only formats: Claude checks the
+   output against the architect's text (no step dropped, no tag changed), saves the file,
+   adds it to `README.md`'s plan list, runs the `gh` commands one by one, and commits
+   (plan files: ask first, as always).
+3. **User asks to implement** ("work on <feature/issue>"). Read the plan file and the
+   architect's recommendation, then **ask the user which implementer to use** (qwen local /
+   Sonnet code agent / mixed per the table), recommended option first, with its cost.
+4. **Implement.** Follow the step table in order: `QWEN` steps → `delegate_code.py` with the
+   plan's spec (current file in the spec, rules under "Delegating whole-file code drafts");
+   `SONNET` steps → `Agent_sonnet5.5_CODE` (give it the step, its check and the plan file;
+   it edits and runs the check, never commits); `CLAUDE` steps → the main session. Several
+   independent steps can run in parallel. If an implementer fails a step twice, take it over
+   and tell the user — the estimate was off.
+5. **Review.** Run `sonnet5.5_REVIEW` on everything implemented (spec file + changed paths).
+6. **Fix.** The main session picks the findings that are right and sends them to **local
+   qwen** as a new spec (current file + finding), even for code Sonnet wrote. Re-check
+   (type check, tests); run the reviewer again if the findings were serious.
+7. **User checks and approves.** Stop at each `USER` step and at the end: say what was
+   built, what was run, what was not (live phone call, e2e), and wait for the user's
+   explicit approval. Tick finished steps in the plan file and on the issue.
+8. **Gemma submits.** After approval — and only then — gemma drafts the git commands
+   (`delegate.py`: branch, add, commit, push, `gh pr create`); the main session writes the
+   commit messages and the PR body (`Fixes #n`, what was tested and what was not; never
+   delegated, no "Generated by" footer), reviews each command and runs it. The user's
+   approval counts as the "ask before submitting" confirmation for exactly what was shown.
+
 ## Delegating whole-file code drafts
 
 A bigger scope than the command delegation above: drafting a whole Python module from
@@ -158,6 +220,14 @@ not a one-off.
   the full new file; review it as a diff. Prints the source only (the model's `reasoning_content` isn't surfaced by this
   script; read it directly via the `openai` client if you want to inspect it for a
   specific draft).
+- **When qwen finishes a draft, run the `sonnet5.5_REVIEW` subagent** (`.claude/agents/`,
+  Sonnet 5.5, read-only): give it the spec file and the paths qwen wrote or changed; it
+  answers `ACCEPT` / `ACCEPT WITH FIXES` / `REJECT` with `file:line` findings. The main
+  session reads its findings, decides which are right, and sends those back to qwen as a
+  new spec (current file + the finding) to implement — then reviews the result and still
+  makes the final call. Findings are not hand-fixed unless qwen got them wrong twice. The
+  review is a second pair of eyes, not a replacement for the checks below. Write its task
+  summary like any delegated task.
 - **Still review and test every draft against something real** before accepting it —
   fixtures, a live DB, or the actual target site, matching the workflow used in stage 1
   step 2. A good reasoning trace lowers the bug rate; it doesn't replace verification.
@@ -187,6 +257,12 @@ request — even when the task that produced the change clearly implied it shoul
 saved. Finishing the work and submitting it are two separate steps: say what would be
 committed (files touched, one-line summary) and wait for a yes before running the
 command. This holds every time, not just the first time in a session.
+
+## Claude config changes go straight to `main`
+
+Changes that only touch Claude Code's own config (`.claude/` — settings, hooks, agents,
+tools — and `CLAUDE.md`) don't need a branch or PR: pull `main`, commit there. The
+"ask before submitting" rule above still applies to the commit itself.
 
 ## Issues and PRs (DEC-45)
 

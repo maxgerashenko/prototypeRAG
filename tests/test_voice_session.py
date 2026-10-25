@@ -150,6 +150,24 @@ def test_split_sentences_keeps_abbreviations():
     assert split_sentences("Ask for Mrs. ") == ([], "Ask for Mrs. ")
 
 
+def test_split_sentences_cuts_long_unpunctuated_text_at_clauses():
+    text = ("We offer a sauna session, a cold plunge and a steam room, all included in the day "
+            "pass, and towels are free for every guest who arrives before noon, so come early")
+    chunks, tail = split_sentences(text)
+    assert chunks and all(len(c) <= 120 for c in chunks)
+    assert chunks[0].endswith(",")
+    assert " ".join(chunks + [tail]) == text
+    assert split_sentences("Short reply, with a comma, still buffered") == ([], "Short reply, with a comma, still buffered")
+    assert split_sentences("Pass is 1, 200 a month") == ([], "Pass is 1, 200 a month")
+
+
+def test_split_sentences_long_text_without_commas_cuts_at_a_space():
+    text = "word " * 40
+    chunks, tail = split_sentences(text.rstrip() + " ")
+    assert chunks and all(len(c) <= 120 for c in chunks)
+    assert " ".join(chunks + [tail.strip()]).split() == text.split()
+
+
 def test_speakable_strips_markdown_lists_and_urls():
     assert speakable("**Hours:** we close at *5 pm*.") == "Hours: we close at 5 pm."
     assert speakable("## Prices\n- Day pass $39\n2. Night pass") == "Prices Day pass $39 Night pass"

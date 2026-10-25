@@ -407,6 +407,7 @@ a:hover { color: var(--bot-light); }
   color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .end-btn svg { transform: rotate(135deg); }
+.end-btn-wide { flex: 1; width: auto; height: 64px; border-radius: 32px; gap: 10px; font-size: 16px; font-weight: 700; }
 
 /* ---------- phone calls watched live (DEC-46) ---------- */
 .phone-caller {
