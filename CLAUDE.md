@@ -24,6 +24,7 @@ Stage 1 build is in progress — see the build order in `DECISIONS.md` for what 
 | `05-cloud-migration.md` | Stage 2: move to Google Cloud with one pilot business | Cloud setup changes |
 | `06-scale.md` | Stage 3: many businesses — isolation, onboarding, reliability, cost, ops | Scale topics change |
 | `07-knowledge-quality.md` | Business = domain with locations, organize/clean step, facts library, business summary (built in stage 1, before step 5) | Fact/summary/organize design changes |
+| `feature-<slug>.md` | One feature's implementation plan from `Agent_opus_ARCHITECT`: steps tagged QWEN / CLAUDE / USER, qwen specs, review points (see "Planning a feature") | Steps are done or the plan changes |
 
 `README.md` links to all plan files — keep it in sync when files are added or renamed.
 
@@ -141,6 +142,32 @@ No other wiring is needed; the agent also appears in the Agent tool after a rest
 The Pixel Agents office itself (layout, areas, which label sits in which area) lives in
 `~/.pixel-agents/`, outside git. After changing it run `python3 .claude/tools/pixel_office.py
 save` and commit `.claude/pixel-agents/`; `... restore` puts it back on a new machine.
+
+## Planning a feature (`Agent_opus_ARCHITECT`)
+
+For a feature that is more than a few lines, plan before coding:
+
+1. **Plan.** Run the `Agent_opus_ARCHITECT` subagent (Opus, read-only, `.claude/agents/`)
+   with the feature request. It returns a plan in a fixed format: goal and done-when, a
+   **qwen feasibility** verdict (YES / PARTLY / NO, with the split "N of M steps go to
+   qwen"), a step table with an **executor** per step — `QWEN` (whole-file draft), `CLAUDE`
+   (decisions, multi-file wiring, debugging), `USER` (live check) — a ready-to-use spec for
+   every QWEN step, review points, GitHub issues, risks. Save its text to the scratchpad.
+   Read the verdict and the open questions with the user before anything is built.
+2. **Record it (gemma).** `python3 .claude/tools/delegate_doc.py plan <plan.md> --style
+   plan/<similar>.md` lays it out as `plan/feature-<slug>.md` (flat, no subfolder);
+   `... issues <plan.md>` drafts the `gh issue create` commands. gemma only formats —
+   Claude reads both against the architect's text (no step dropped, no tag changed),
+   saves the file, adds it to `README.md`'s plan list, runs the `gh` commands one by one,
+   and commits (plan files: ask first, as always).
+3. **Work on it.** When the user says "work on <feature/issue>", read its plan file and
+   follow the table in order: send every `QWEN` step to the local qwen model with the
+   plan's spec (`delegate_code.py`, current file in the spec), run `sonnet5.5_REVIEW` on
+   the result and send its findings back to qwen (rules under "Delegating whole-file code
+   drafts"), do the `CLAUDE` steps yourself, and stop at each `USER` step to ask for the
+   live check. Tick the step off in the plan file and on the issue when its check passes.
+   If qwen fails a step twice, take it over and note it in the plan file — and tell the
+   user, because the feasibility estimate was off.
 
 ## Delegating whole-file code drafts
 
