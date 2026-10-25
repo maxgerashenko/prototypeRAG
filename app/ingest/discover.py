@@ -39,6 +39,17 @@ def parse_sitemap(xml_text: str) -> list[str]:
     return [loc.text.strip() for loc in root.findall(".//url/loc") if loc.text]
 
 
+def parse_sitemap_index(xml_text: str) -> list[str]:
+    """Return the child sitemap URLs from a <sitemapindex> string (Yoast/WordPress serve
+    one at /sitemap.xml), or [] if it isn't an index or doesn't parse."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    locs = root.findall(".//sm:sitemap/sm:loc", _SITEMAP_NS) or root.findall(".//sitemap/loc")
+    return [loc.text.strip() for loc in locs if loc.text]
+
+
 def _bare_domain(netloc: str) -> str:
     netloc = netloc.lower()
     return netloc[4:] if netloc.startswith("www.") else netloc
@@ -187,14 +198,21 @@ def discover_pages(
     max_pages: int = 200,
     max_depth: int = 3,  # noqa: ARG001 — BFS expansion (depth-aware) happens in run.py
     blog_cap: int = DEFAULT_BLOG_CAP,
+    child_sitemaps: list[str] | None = None,
 ) -> list[str]:
     """The sitemap fast path: same-domain, non-skippable, robots-allowed URLs, priority-
     ordered (K1) and capped.
 
     Falls back to `[start_url]` when there's no sitemap or it doesn't parse — `run.py`
     then expands from there with `discover_links` page by page.
+
+    `child_sitemaps` are the already-fetched bodies of the children of a sitemap index
+    (one level, `fetch.fetch_child_sitemaps`); their URLs are added to the main sitemap's.
     """
     urls = parse_sitemap(sitemap_xml) if sitemap_xml else []
+    for child in child_sitemaps or []:
+        urls.extend(parse_sitemap(child))
+    urls = list(dict.fromkeys(urls))
     if not urls:
         return [start_url]
 
