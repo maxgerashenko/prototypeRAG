@@ -1,5 +1,6 @@
 """FastAPI app. The dashboard is added in step 5."""
 
+import asyncio
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -16,7 +17,7 @@ from app.api.custom_replies import router as custom_replies_router
 from app.config import get_settings
 from app.db import engine
 from app.voice import google_auth, tts
-from app.voice.browser_ws import router as voice_browser_router
+from app.voice.browser_ws import end_orphaned_browser_conversations, router as voice_browser_router
 from app.voice.call_feed import router as call_feed_router
 from app.voice.twilio_routes import router as twilio_router
 from app.voice.ws import router as twilio_stream_router
@@ -34,6 +35,10 @@ _app_log.setLevel(get_settings().log_level.upper())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        await asyncio.to_thread(end_orphaned_browser_conversations)  # V19
+    except Exception:
+        logging.getLogger(__name__).exception("could not close orphaned browser conversations")
     google_auth.warm_up()  # missing Google credentials show at startup, not mid-call (V7)
     # T4: warm the TTS connection in the background -- startup isn't held up by it
     threading.Thread(target=tts.warm_up, daemon=True).start()
