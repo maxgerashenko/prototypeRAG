@@ -34,6 +34,7 @@ a:hover { color: var(--bot-light); }
 @keyframes vw-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes vw-slide { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @keyframes vw-dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+@keyframes vw-spin { to { transform: rotate(360deg); } }
 @keyframes vw-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @keyframes vw-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 @keyframes vw-open { from { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; } to { opacity: 1; max-height: 420px; } }
@@ -432,3 +433,24 @@ a:hover { color: var(--bot-light); }
 .badge-outcome.outcome-booked { background: var(--accent); color: var(--ink); }
 .badge-outcome.outcome-unresolved { border-color: #5c2328; color: #ffc9cc; background: #2a1517; }
 .badge-follow { border-color: #8a6d1f; color: #ffe08a; background: #2b2410; }
+
+/* ---------- pull to refresh (mobile) ---------- */
+html, body { overscroll-behavior-y: none; } /* no native pull-to-refresh: it would reload the page, even mid-call */
+.scroll, .call-log { overscroll-behavior-y: contain; }
+/* front spinner: conversations list + transcript (refetch in place) */
+.ptr {
+  position: absolute; top: 0; left: 50%; margin-left: -20px; z-index: 6; width: 40px; height: 40px;
+  border-radius: 50%; background: var(--card); border: 1px solid var(--line); box-shadow: 0 6px 18px #0008;
+  display: flex; align-items: center; justify-content: center; pointer-events: none;
+}
+.ptr.armed, .ptr.refreshing { border-color: var(--accent); }
+.ptr-spinner { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--accent); }
+.ptr.refreshing .ptr-spinner, .ptr-behind.refreshing .ptr-spinner { animation: vw-spin .8s linear infinite; }
+/* business picker: the screen slides down over a loading icon (full reload on release) */
+.ptr-layer { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; z-index: 1; background: var(--bg); }
+.ptr-behind {
+  position: absolute; top: 12px; left: 50%; margin-left: -20px; z-index: 0; width: 40px; height: 40px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center; pointer-events: none;
+}
+.ptr-behind .ptr-spinner { width: 28px; height: 28px; border-width: 3px; }
+.ptr-behind.armed .ptr-spinner, .ptr-behind.refreshing .ptr-spinner { border-color: var(--accent); border-top-color: var(--call); }

@@ -94,7 +94,7 @@ export function SelectScreen(p: Props) {
       </div>
 
       <div className="scroll biz-list" ref={listRef}>
-        {p.businesses.status === "loading" && <p className="notice">Loading businesses…</p>}
+        {p.businesses.status === "loading" && !p.businesses.data && <p className="notice">Loading businesses…</p>}
         {p.businesses.status === "error" && (
           <p className="notice" role="alert">
             Couldn’t load businesses ({p.businesses.error}).{" "}

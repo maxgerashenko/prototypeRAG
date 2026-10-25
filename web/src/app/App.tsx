@@ -27,6 +27,9 @@ import { PhoneIcon } from "./icons";
 import { callerSpoke } from "./callState";
 import { callerLabel, latestLive } from "./liveCalls";
 import { useLiveCalls } from "./useLiveCalls";
+import { PullIndicator } from "./PullIndicator";
+import { PULL_THRESHOLD, vibrateTick } from "./pullToRefresh";
+import { usePullToRefresh } from "./usePullToRefresh";
 
 export interface Loadable<T> {
   status: "loading" | "ok" | "error";
@@ -41,6 +44,11 @@ interface TranscriptRef {
   convoId: string;
   returnTo: "select" | "convos";
 }
+
+/** The picker's pull-to-refresh: a full reload (its own function so e2e can watch the navigation). */
+const reloadPage = () => {
+  window.location.reload();
+};
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -80,7 +88,7 @@ export function App() {
 
   const loadBusinesses = useCallback(() => {
     setBusinesses((prev) => ({ ...prev, status: "loading" }));
-    listBusinesses().then(
+    return listBusinesses().then(
       (data) => setBusinesses({ status: "ok", data }),
       (err) => setBusinesses((prev) => ({ ...prev, status: "error", error: errorText(err) })),
     );
@@ -88,13 +96,15 @@ export function App() {
 
   const loadConvos = useCallback((bizId: string) => {
     setConvos((prev) => ({ ...prev, [bizId]: { ...prev[bizId], status: "loading" } }));
-    listConversations(bizId).then(
+    return listConversations(bizId).then(
       (data) => setConvos((prev) => ({ ...prev, [bizId]: { status: "ok", data } })),
       (err) => setConvos((prev) => ({ ...prev, [bizId]: { ...prev[bizId], status: "error", error: errorText(err) } })),
     );
   }, []);
 
-  useEffect(loadBusinesses, [loadBusinesses]);
+  useEffect(() => {
+    loadBusinesses();
+  }, [loadBusinesses]);
   useEffect(() => {
     getMainNumber().then((r) => setMainNumberState(r.number), () => setMainNumberState(null));
   }, []);
@@ -130,6 +140,17 @@ export function App() {
     getConversation(bizId, convoId).then(
       (data) => req === detailReq.current && setDetail({ status: "ok", data }),
       (err) => req === detailReq.current && setDetail({ status: "error", error: errorText(err) }),
+    );
+  };
+
+  // pull-to-refresh on the open transcript: refetch in place, the old data stays on screen
+  const refreshDetail = () => {
+    if (!transcript) return Promise.resolve();
+    const req = ++detailReq.current;
+    setDetail((prev) => ({ ...prev, status: "loading" }));
+    return getConversation(transcript.bizId, transcript.convoId).then(
+      (data) => req === detailReq.current && setDetail({ status: "ok", data }),
+      (err) => req === detailReq.current && setDetail((prev) => ({ ...prev, status: "error", error: errorText(err) })),
     );
   };
 
@@ -251,14 +272,40 @@ export function App() {
     };
   }, [voice.pttUp]);
 
+  // pull-to-refresh: the picker reloads the page; the lists and the transcript refetch in place.
+  // Off on the call screens and while a phone call is in progress (never reload mid-call).
+  // Not gated on call.phase: it starts as "connecting" before any call.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const ptrEnabled =
+    (stage === "select" || (stage === "convos" && !!selId) || (stage === "transcript" && !!transcript)) && !live;
+  const ptr = usePullToRefresh(rootRef, {
+    enabled: ptrEnabled,
+    onRefresh: () => {
+      if (stage === "select") return reloadPage();
+      if (stage === "convos" && selId) return Promise.allSettled([loadBusinesses(), loadConvos(selId)]);
+      if (stage === "transcript") return refreshDetail();
+    },
+    onArmed: () => {
+      if (stage === "select") vibrateTick();
+    },
+  });
+
   const all = businesses.data ?? [];
   const find = (id: string | null) => all.find((b) => b.id === id);
   const fallbackBiz = (id: string | null): Business =>
     find(id) ?? { id: id ?? "", name: "Business", website: null, domain: null, conversation_count: 0, default_location: null, phone_numbers: [] };
 
   return (
-    <div className="vapp">
+    <div className="vapp" ref={rootRef}>
+      {(stage === "convos" || stage === "transcript") && <PullIndicator state={ptr} variant="front" />}
+
+      {stage === "select" && <PullIndicator state={ptr} variant="behind" />}
       {stage === "select" && (
+        <div className="ptr-layer" style={{
+          transform: ptr.phase === "pulling" ? `translateY(${ptr.distance}px)`
+            : ptr.phase === "refreshing" ? `translateY(${PULL_THRESHOLD}px)` : "none",
+          transition: ptr.phase === "pulling" ? "none" : "transform .2s ease",
+        }}>
         <SelectScreen
           businesses={businesses}
           convos={convos}
@@ -284,6 +331,7 @@ export function App() {
           onRetry={loadBusinesses}
           onDismissBanner={() => setBanner(null)}
         />
+        </div>
       )}
 
       {stage === "convos" && selId && (
