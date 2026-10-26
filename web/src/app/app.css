@@ -110,7 +110,7 @@ a:hover { color: var(--bot-light); }
 .notice code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; color: var(--text); }
 
 /* ---------- 1. pick a business ---------- */
-.sel-head { padding: 14px 20px 16px; display: flex; flex-direction: column; gap: 8px; }
+.sel-head { padding: 52px 20px 16px; display: flex; flex-direction: column; gap: 8px; }
 .eyebrow {
   display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--bot);
   letter-spacing: .04em; text-transform: uppercase;
@@ -320,7 +320,7 @@ a:hover { color: var(--bot-light); }
 .ended-actions { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 8px; }
 
 /* ---------- 5. live call ---------- */
-.call-top { padding: 14px 20px 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.call-top { padding: 48px 20px 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .live-pill {
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 16px;
   background: #101c17; border: 1px solid #1f3a2d; flex-shrink: 0;
