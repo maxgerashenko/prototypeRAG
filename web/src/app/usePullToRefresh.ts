@@ -5,6 +5,8 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { IDLE, armedCrossed, pullReducer, shouldPreventScroll, type PullAction, type PullState } from "./pullToRefresh";
 
+const SCROLLER = ".scroll, .call-log";
+
 /** A refresh shows its spinner for at least this long. */
 export const MIN_SPIN_MS = 500;
 
@@ -43,7 +45,8 @@ export function usePullToRefresh(
     applyRef.current = apply;
 
     const onStart = (e: TouchEvent) => {
-      const scroller = (e.target as Element).closest(".scroll, .call-log");
+      // a touch on a header has no scroller above it: use the screen's own (one screen is mounted at a time)
+      const scroller = (e.target as Element).closest(SCROLLER) ?? root.querySelector(SCROLLER);
       const t = e.touches[0];
       if (!t) return;
       apply({

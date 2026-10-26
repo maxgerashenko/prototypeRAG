@@ -182,6 +182,38 @@ test("a pull that starts while the list is scrolled down does nothing", async ({
   expect(await marker(page)).toBe(42);
 });
 
+test("a pull that starts on the header while the list is scrolled down does nothing", async ({ page }) => {
+  const many = Array.from({ length: 30 }, (_, i) => c(`x${i}`, `Question ${i}`));
+  const api = await setup(page, { businesses: [BAKERY], conversations: { b1: many } });
+  await page.locator(".biz-pick").click();
+  await page.getByRole("button", { name: /See all/ }).click();
+  const list = page.locator("[data-screen=convos] .convo-list");
+  await expect(list.locator(".convo-card").first()).toBeVisible();
+  await list.evaluate((el) => (el.scrollTop = 300));
+  const before = api.requests.length;
+  const f = await finger(page, "[data-screen=convos] .biz-head", 200);
+  await expect(page.getByTestId("ptr")).toHaveCount(0);
+  await f.end();
+  await page.waitForTimeout(700);
+  expect(api.requests.length).toBe(before);
+});
+
+test("Back from a transcript restores the list scroll position", async ({ page }) => {
+  const many = Array.from({ length: 30 }, (_, i) => c(`x${i}`, `Question ${i}`));
+  await setup(page, { businesses: [BAKERY], conversations: { b1: many } });
+  await page.locator(".biz-pick").click();
+  await page.getByRole("button", { name: /See all/ }).click();
+  const list = page.locator("[data-screen=convos] .convo-list");
+  await expect(list.locator(".convo-card").first()).toBeVisible();
+  await list.evaluate((el) => (el.scrollTop = 600));
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(600);
+  await list.locator(".convo-card").nth(12).click();
+  await expect(page.locator("[data-screen=transcript]")).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.locator("[data-screen=convos] .convo-list")).toBeVisible();
+  await expect.poll(() => page.locator("[data-screen=convos] .convo-list").evaluate((el) => el.scrollTop)).toBe(600);
+});
+
 test("a tap on a card still selects it", async ({ page }) => {
   await setup(page);
   await expect(page.locator(".call-btn")).toBeDisabled();
