@@ -17,21 +17,23 @@ Decided with the user (2026-10-25):
 
 A pull-down gesture on a phone gets fresh data without leaving the screen, and never touches a live call. The business picker reloads the whole app (with a slide-down and a haptic tick). The conversations list and transcript refetch in place. The browser's own pull-to-refresh is switched off everywhere (`overscroll-behavior`), so it can no longer reload the page mid-call.
 
-- [ ] Business picker:
+- [x] Business picker:
   - pulling slides the screen down and shows the icon behind it, growing and rotating with progress;
   - crossing the threshold vibrates exactly once per pull (Android Chrome; nothing on iOS);
   - releasing past the threshold reloads the page;
   - releasing below the threshold slides back and does not reload.
-- [ ] Conversations list: a release past the threshold refetches that business's conversations and the business list. A spinner shows in front for at least 0.5 s. The screen, selection and list stay; the old data stays visible while loading.
-- [ ] Transcript: the same, refetching the conversation. The title never flashes "Loading…".
-- [ ] A short pull, a pull that starts while the list is scrolled down, a horizontal swipe and a tap trigger nothing. A tap on a card still works.
-- [ ] No gesture on the connecting / call / phone / ended screens, and none while a Twilio call is in progress. The page never reloads during a call.
-- [ ] Vitest: the gesture state machine, the threshold-crossing helper (vibrate once), and `vibrateTick` feature detection.
-- [ ] Playwright (Chromium, CDP touch):
+- [x] Conversations list: a release past the threshold refetches that business's conversations and the business list. A spinner shows in front for at least 0.5 s. The screen, selection and list stay; the old data stays visible while loading.
+- [x] Transcript: the same, refetching the conversation. The title never flashes "Loading…".
+- [x] A short pull, a pull that starts while the list is scrolled down, a horizontal swipe and a tap trigger nothing. A tap on a card still works.
+- [x] No gesture on the connecting / call / phone / ended screens, and none while a Twilio call is in progress. The page never reloads during a call.
+- [x] Vitest: the gesture state machine, the threshold-crossing helper (vibrate once), and `vibrateTick` feature detection.
+- [x] Playwright (Chromium, CDP touch):
   - a select-screen release reloads the page and vibrates once;
   - conversations / transcript releases refetch and do not reload;
   - nothing happens during a call or while a phone call is in progress.
-- [ ] Checked live on iOS Safari and Android Chrome via ngrok; the result is in `plan/03-voice-channel.md` and on the issue.
+- [ ] Checked live on iOS Safari and Android Chrome via ngrok; the result is in `plan/03-voice-channel.md` and on the issue. (open: V30 in 03; user step)
+
+**Status 2026-10-26:** steps 1-6 and 8 done in PR #125 (reviewed by `sonnet5.5_REVIEW`). Two follow-up fixes after the architect's check: a header pull while the list is scrolled down no longer refreshes (`usePullToRefresh.ts` falls back to the screen's own scroller), and Back from a transcript restores the list scroll position (`ConversationsScreen.tsx`). Step 7 (live phones) is open.
 
 ## Who can implement this
 
