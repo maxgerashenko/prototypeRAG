@@ -82,7 +82,7 @@ a:hover { color: var(--bot-light); }
 .btn-accent { background: var(--accent); }
 .btn-ghost { background: transparent; border: 1px solid #2e333e; color: var(--text); font-weight: 600; }
 .btn-pill:disabled { cursor: not-allowed; opacity: .55; }
-.back-row { padding: 44px 12px 4px; display: flex; align-items: center; }
+.back-row { padding: 14px 12px 4px; display: flex; align-items: center; }
 .back-btn {
   height: 44px; padding: 0 12px 0 0; border: 0; border-radius: 22px; background: transparent;
   color: var(--text); display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600;
@@ -454,3 +454,17 @@ html, body { overscroll-behavior-y: none; } /* no native pull-to-refresh: it wou
 }
 .ptr-behind .ptr-spinner { width: 28px; height: 28px; border-width: 3px; }
 .ptr-behind.armed .ptr-spinner, .ptr-behind.refreshing .ptr-spinner { border-color: var(--accent); border-top-color: var(--call); }
+
+/* ---------- thin scrollbars, invisible until the element scrolls (reserves an 8px gutter on desktop) ---------- */
+.scroll::-webkit-scrollbar, .call-log::-webkit-scrollbar { width: 8px; }
+.scroll::-webkit-scrollbar-track, .call-log::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb, .call-log::-webkit-scrollbar-thumb {
+  background-color: transparent; border-radius: 4px; border: 2px solid transparent; background-clip: padding-box;
+  transition: background-color .4s ease;
+}
+.scroll.is-scrolling::-webkit-scrollbar-thumb, .call-log.is-scrolling::-webkit-scrollbar-thumb { background-color: #ffffff59; }
+.scroll.is-scrolling::-webkit-scrollbar-thumb:hover, .call-log.is-scrolling::-webkit-scrollbar-thumb:hover { background-color: #ffffff8c; }
+/* Firefox has no ::-webkit-scrollbar: thin bar, always faint */
+@supports not selector(::-webkit-scrollbar) {
+  .scroll, .call-log { scrollbar-width: thin; scrollbar-color: #ffffff40 transparent; }
+}
