@@ -18,10 +18,13 @@
       ],
       "Agent_sonnet5.5_CODE": [
         "PLAN"
+      ],
+      "office": [
+        "SUPPORT"
       ]
     },
     "showAreas": true,
-    "alwaysShowLabels": true,
+    "alwaysShowLabels": false,
     "watchAllSessions": true,
     "showHostDirectories": true
   },
