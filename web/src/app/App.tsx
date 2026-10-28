@@ -27,7 +27,6 @@ import { PhoneIcon } from "./icons";
 import { callerSpoke } from "./callState";
 import { callerLabel, latestLive } from "./liveCalls";
 import { useLiveCalls } from "./useLiveCalls";
-import { PullIndicator } from "./PullIndicator";
 import { PULL_THRESHOLD, vibrateTick } from "./pullToRefresh";
 import { usePullToRefresh } from "./usePullToRefresh";
 
@@ -297,9 +296,6 @@ export function App() {
 
   return (
     <div className="vapp" ref={rootRef}>
-      {(stage === "convos" || stage === "transcript") && <PullIndicator state={ptr} variant="front" />}
-
-      {stage === "select" && <PullIndicator state={ptr} variant="behind" />}
       {stage === "select" && (
         <div className="ptr-layer" style={{
           transform: ptr.phase === "pulling" ? `translateY(${ptr.distance}px)`
@@ -336,6 +332,7 @@ export function App() {
 
       {stage === "convos" && selId && (
         <ConversationsScreen
+          pull={ptr}
           biz={fallbackBiz(selId)}
           convos={convos[selId]}
           newIds={newIds}
@@ -347,6 +344,7 @@ export function App() {
 
       {stage === "transcript" && transcript && (
         <TranscriptScreen
+          pull={ptr}
           bizName={fallbackBiz(transcript.bizId).name}
           convo={detail}
           onBack={() => setStage(transcript.returnTo)}

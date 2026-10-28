@@ -4,9 +4,12 @@ import type { Loadable } from "./App";
 import { ChatIcon, ChevronLeft, ClockIcon, GlobeIcon } from "./icons";
 import { SourceBadge } from "./SourceIcon";
 import { OutcomeBadge } from "./OutcomeBadge";
+import { PullRegion } from "./PullIndicator";
+import type { PullState } from "./pullToRefresh";
 import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
 
 interface Props {
+  pull: PullState;
   biz: Business;
   convos: Loadable<ConversationSummary[]> | undefined;
   newIds: ReadonlySet<string>;
@@ -18,7 +21,7 @@ interface Props {
 /** Scroll position of each business's list, so Back from a transcript lands where the user left. */
 const scrollMemo = new Map<string, number>();
 
-export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpen }: Props) {
+export function ConversationsScreen({ pull, biz, convos, newIds, onBack, onCall, onOpen }: Props) {
   const list = convos?.data ?? [];
   const listRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -53,6 +56,7 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
         <span>{convos?.status === "ok" ? list.length : ""}</span>
       </div>
 
+      <PullRegion state={pull}>
       <div
         className="scroll convo-list"
         ref={listRef}
@@ -90,6 +94,7 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
           </div>
         )}
       </div>
+      </PullRegion>
     </div>
   );
 }

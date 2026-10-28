@@ -82,7 +82,7 @@ test("picker: slides down over the icon, then a release reloads the page", async
   await page.locator(".biz-pick").click();
   await mark(page);
   const f = await finger(page, ".biz-list", 200);
-  await expect(page.getByTestId("ptr-behind")).toBeVisible();
+  await expect(page.getByTestId("ptr-behind")).toHaveCount(0); // no icon on the picker
   expect(await layerTransform(page)).toMatch(/^translateY\(/);
   const reloaded = page.waitForEvent("load");
   await f.end();
@@ -125,8 +125,14 @@ test("conversations: a release refetches the list in place", async ({ page }) =>
   const bizBefore = count(api, "/businesses");
   const listBefore = count(api, "/businesses/b1/conversations");
   await mark(page);
+  const headTop = async () => (await screen.locator(".biz-head").boundingBox())!.y;
+  const before = await headTop();
   const f = await finger(page, "[data-screen=convos] .convo-list", 200);
   await expect(page.getByTestId("ptr")).toBeVisible();
+  expect(await headTop()).toBe(before); // only the list slides, not the screen
+  expect(await screen.locator(".convo-list").evaluate((el) => el.getBoundingClientRect().top)).toBeGreaterThan(
+    await screen.locator(".section-head").evaluate((el) => el.getBoundingClientRect().bottom),
+  );
   await f.end();
   await expect(page.getByTestId("ptr")).toBeVisible(); // spinner stays at least 0.5 s
   await expect(screen.locator(".convo-card")).toHaveCount(5);

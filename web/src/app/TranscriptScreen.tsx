@@ -3,17 +3,20 @@ import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
 import { ChevronLeft, GlobeIcon } from "./icons";
 import { OutcomeBadge } from "./OutcomeBadge";
+import { PullRegion } from "./PullIndicator";
+import type { PullState } from "./pullToRefresh";
 import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, plural } from "./format";
 
 interface Props {
+  pull: PullState;
   bizName: string;
   convo: Loadable<ConversationDetail>;
   onBack: () => void;
   onContinue: () => void;
 }
 
-export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) {
+export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: Props) {
   const c = convo.data;
   const dur = c ? fmtClock(c.duration_s) : "";
   const when = c ? fmtWhen(c.started_at) : "";
@@ -49,6 +52,7 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
         </div>
       )}
 
+      <PullRegion state={pull}>
       <div className="scroll">
         <div className="bubbles">
           {convo.status === "error" && <div className="pill error" role="alert">Couldn’t load this conversation ({convo.error}).</div>}
@@ -64,6 +68,7 @@ export function TranscriptScreen({ bizName, convo, onBack, onContinue }: Props) 
           )}
         </div>
       </div>
+      </PullRegion>
 
       <div className="footer">
         <button className="btn-pill btn-call" onClick={onContinue}>
