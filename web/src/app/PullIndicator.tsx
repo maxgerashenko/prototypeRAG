@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PULL_THRESHOLD, isArmed, pullProgress, type PullState } from "./pullToRefresh";
 
 const BARS = 8;
@@ -60,12 +60,50 @@ export function PullRegion({ state, children }: { state: PullState; children: Re
   );
 }
 
-/** The same spinner as a loading state: replaces the "Loading…" texts (`small` for inside a row). */
-export function Loading({ label, small = false }: { label: string; small?: boolean }) {
+/** Loading placeholder shaped like the content it stands in for. The spinner is kept for pull-to-refresh only. */
+export type SkeletonKind = "businesses" | "convos" | "recent" | "messages";
+
+export function Skeleton({ kind, label }: { kind: SkeletonKind; label: string }) {
+  const n = { businesses: 4, convos: 4, recent: 3, messages: 5 }[kind];
   return (
-    <div className={"loading" + (small ? " small" : "")} role="status">
-      <BarsSpinner spinning size={small ? 22 : 32} />
+    <div className={`skeleton skeleton-${kind}`} role="status" aria-busy="true">
+      {Array.from({ length: n }, (_, i) =>
+        kind === "messages" ? (
+          <div key={i} className={`sk-bubble sk-bubble-${i % 2 ? "user" : "bot"}`} style={{ width: `${55 + ((i * 17) % 30)}%` }} />
+        ) : (
+          <div key={i} className="sk-row">
+            <div className="sk-block sk-icon" />
+            <div className="sk-lines">
+              <div className="sk-block sk-line" style={{ width: `${60 + ((i * 13) % 30)}%` }} />
+              <div className="sk-block sk-line short" />
+            </div>
+          </div>
+        ),
+      )}
       <span className="sr-only">{label}</span>
     </div>
   );
+}
+
+/** Keeps a skeleton up for at least `minMs` once it has appeared, so a fast load doesn't flash it.
+ * Nothing to load (never `loading`) -> false at once, no delay. */
+export function useMinShow(loading: boolean, minMs = 600): boolean {
+  const [held, setHeld] = useState(loading);
+  const since = useRef(loading ? Date.now() : 0);
+  useEffect(() => {
+    if (loading) {
+      if (!held) since.current = Date.now();
+      setHeld(true);
+      return;
+    }
+    if (!held) return;
+    const t = setTimeout(() => setHeld(false), Math.max(0, minMs - (Date.now() - since.current)));
+    return () => clearTimeout(t);
+  }, [loading, held, minMs]);
+  return loading || held;
+}
+
+/** Shows the skeleton while `loading` (and for at least 600 ms after it first showed), else the content. */
+export function SkeletonGate({ loading, kind, label, children }: { loading: boolean; kind: SkeletonKind; label: string; children: ReactNode }) {
+  return useMinShow(loading) ? <Skeleton kind={kind} label={label} /> : <>{children}</>;
 }

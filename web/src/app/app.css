@@ -455,8 +455,23 @@ html, body { overscroll-behavior-y: none; } /* no native pull-to-refresh: it wou
 .bars-spinner rect { transition: opacity .1s linear; }
 .bars-spinner.spinning { animation: vw-spin 1.2s linear infinite; }
 .bars-spinner.spinning rect { animation: vw-bar-fade .9s ease-in-out infinite; }
-.loading { display: flex; justify-content: center; padding: 28px 0; }
-.loading.small { padding: 10px 0; }
+/* loading skeletons (the spinner above is only for pull-to-refresh) */
+.skeleton { display: flex; flex-direction: column; gap: 12px; }
+.skeleton-businesses, .skeleton-convos { padding: 4px 0; }
+.skeleton-recent { padding: 6px 0; gap: 8px; }
+.sk-row { display: flex; align-items: center; gap: 12px; }
+.skeleton-businesses .sk-row, .skeleton-convos .sk-row { padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+.sk-block, .sk-bubble { background: var(--chip); animation: vw-sk 1.2s ease-in-out infinite; }
+.sk-icon { width: 40px; height: 40px; border-radius: 12px; flex: none; }
+.skeleton-recent .sk-icon { width: 32px; height: 32px; }
+.sk-lines { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.sk-line { height: 12px; border-radius: 6px; }
+.sk-line.short { width: 40%; height: 10px; }
+.sk-title { display: block; width: 160px; height: 20px; border-radius: 6px; }
+.sk-bubble { height: 44px; border-radius: 16px; }
+.sk-bubble-user { align-self: flex-end; }
+@keyframes vw-sk { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .sk-block, .sk-bubble { animation: none; } }
 .ptr-under.armed .bars-spinner { filter: drop-shadow(0 0 6px #8ab4f866); }
 
 /* ---------- thin scrollbars, invisible until the element scrolls (reserves an 8px gutter on desktop) ---------- */

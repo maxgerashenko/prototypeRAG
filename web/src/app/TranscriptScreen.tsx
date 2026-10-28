@@ -3,8 +3,7 @@ import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
 import { ChevronLeft, GlobeIcon } from "./icons";
 import { OutcomeBadge } from "./OutcomeBadge";
-import { BarsSpinner } from "./PullIndicator";
-import { PullRegion } from "./PullIndicator";
+import { PullRegion, Skeleton, useMinShow } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
 import { SourceBadge } from "./SourceIcon";
 import { fmtClock, fmtWhen, monogram, plural } from "./format";
@@ -21,6 +20,8 @@ export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: P
   const c = convo.data;
   const dur = c ? fmtClock(c.duration_s) : "";
   const when = c ? fmtWhen(c.started_at) : "";
+  const loading = !c && convo.status !== "error";
+  const showSk = useMinShow(loading);
   const kind = c?.channel === "chat" ? "Chat" : "Call";
   return (
     <div className="screen slide" data-screen="transcript">
@@ -33,10 +34,10 @@ export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: P
       </div>
       <div className="tr-head">
         <div className="tr-title">
-          {c && <SourceBadge source={c.source} size={20} />}
-          <h1>{c ? c.title : convo.status === "error" ? "Conversation" : (<><BarsSpinner spinning size={22} /><span className="sr-only">Loading</span></>)}</h1>
+          {c && !showSk && <SourceBadge source={c.source} size={20} />}
+          <h1>{c && !showSk ? c.title : convo.status === "error" ? "Conversation" : (<span className="sk-block sk-title" aria-hidden="true" />)}</h1>
         </div>
-        {c && (
+        {c && !showSk && (
           <div className="tr-meta">
             <span>{when}</span>
             <span>·</span>
@@ -47,7 +48,7 @@ export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: P
         )}
       </div>
 
-      {c && (c.summary || c.outcome || c.follow_up) && (
+      {c && !showSk && (c.summary || c.outcome || c.follow_up) && (
         <div className="tr-summary">
           <OutcomeBadge outcome={c.outcome} followUp={c.follow_up} />
           {c.summary && <p>{c.summary}</p>}
@@ -58,7 +59,8 @@ export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: P
       <div className="scroll">
         <div className="bubbles">
           {convo.status === "error" && <div className="pill error" role="alert">Couldn’t load this conversation ({convo.error}).</div>}
-          {c && (
+          {showSk && <Skeleton kind="messages" label="Loading conversation" />}
+          {c && !showSk && (
             <>
               <div className="pill">{kind} started · {when}</div>
               {c.messages.map((m, i) => (
