@@ -151,7 +151,7 @@ a:hover { color: var(--bot-light); }
   justify-content: center; font-size: 14px; font-weight: 800; transition: background .25s ease;
   background: var(--chip); color: var(--chip-text);
 }
-.biz-card.on .biz-mono { background: var(--accent); color: var(--ink); }
+.biz-card.on .biz-mono { box-shadow: inset 0 0 0 2px var(--accent); }
 .biz-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .biz-name { font-size: 16px; font-weight: 700; color: var(--text); }
 .biz-sub { font-size: 13px; color: var(--muted); }
@@ -215,8 +215,12 @@ a:hover { color: var(--bot-light); }
 /* ---------- 2. previous conversations ---------- */
 .biz-head { padding: 8px 20px 18px; display: flex; align-items: center; gap: 14px; }
 .biz-head .big-mono {
-  width: 60px; height: 60px; flex-shrink: 0; border-radius: 18px; background: var(--accent);
-  color: var(--ink); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800;
+  width: 60px; height: 60px; flex-shrink: 0; border-radius: 18px; background: var(--chip);
+  color: var(--chip-text); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800;
+}
+.back-mono {
+  width: 28px; height: 28px; flex-shrink: 0; border-radius: 9px; display: flex; align-items: center;
+  justify-content: center; font-size: 11px; font-weight: 800; background: var(--chip); color: var(--chip-text);
 }
 .biz-head h1 { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 800; letter-spacing: -.01em; }
 .biz-head div > div { font-size: 14px; color: var(--muted); }
