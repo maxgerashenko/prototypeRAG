@@ -112,7 +112,7 @@ a:hover { color: var(--bot-light); }
 .notice code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; color: var(--text); }
 
 /* ---------- 1. pick a business ---------- */
-.sel-head { padding: 52px 20px 16px; display: flex; flex-direction: column; gap: 8px; }
+.sel-head { padding: 0 20px 16px; display: flex; flex-direction: column; gap: 8px; }
 .eyebrow {
   display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--bot);
   letter-spacing: .04em; text-transform: uppercase;
@@ -439,15 +439,20 @@ a:hover { color: var(--bot-light); }
 html, body { overscroll-behavior-y: none; } /* no native pull-to-refresh: it would reload the page, even mid-call */
 .scroll, .call-log { overscroll-behavior-y: contain; }
 /* conversations list + transcript: the list slides down over a spinner behind it (refetch in place) */
+/* the picker's top gap stays put; only what is below it slides down, opening a gap with the spinner in it */
+.ptr-gap { height: 52px; flex-shrink: 0; }
 .ptr-region { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
-.ptr-under { position: absolute; top: 12px; left: 0; right: 0; z-index: 0; display: flex; justify-content: center; pointer-events: none; }
+/* the spinner sits at 1/4 of the strip the layer opens up (inline height is half the pull) (height set inline from the pull distance) */
+.ptr-under { position: absolute; top: 0; left: 0; right: 0; z-index: 0; display: flex; justify-content: center; align-items: center; pointer-events: none; }
 .ptr-layer { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; z-index: 1; background: var(--bg); }
 /* business picker: the whole screen slides down (full reload on release), no icon */
 .bars-spinner { display: block; transition: transform .1s linear; }
 .bars-spinner rect { transition: opacity .1s linear; }
 .bars-spinner.spinning { animation: vw-spin 1.2s linear infinite; }
 .bars-spinner.spinning rect { animation: vw-bar-fade .9s ease-in-out infinite; }
-.ptr-under.armed .bars-spinner { filter: drop-shadow(0 0 6px var(--glow)); }
+.loading { display: flex; justify-content: center; padding: 28px 0; }
+.loading.small { padding: 10px 0; }
+.ptr-under.armed .bars-spinner { filter: drop-shadow(0 0 6px #8ab4f866); }
 
 /* ---------- thin scrollbars, invisible until the element scrolls (reserves an 8px gutter on desktop) ---------- */
 .scroll::-webkit-scrollbar, .call-log::-webkit-scrollbar { width: 8px; }

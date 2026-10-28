@@ -82,7 +82,7 @@ test("picker: slides down over the icon, then a release reloads the page", async
   await page.locator(".biz-pick").click();
   await mark(page);
   const f = await finger(page, ".biz-list", 200);
-  await expect(page.getByTestId("ptr-behind")).toHaveCount(0); // no icon on the picker
+  await expect(page.getByTestId("ptr")).toBeVisible(); // the picker shows the spinner too
   expect(await layerTransform(page)).toMatch(/^translateY\(/);
   const reloaded = page.waitForEvent("load");
   await f.end();

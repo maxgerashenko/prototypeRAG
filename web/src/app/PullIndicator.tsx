@@ -3,16 +3,16 @@ import { PULL_THRESHOLD, isArmed, pullProgress, type PullState } from "./pullToR
 
 const BARS = 8;
 
-/** Eight rounded bars in a ring, blue to green like the app's accent and call colors. While
+/** Eight rounded bars in a ring, all the accent blue of the web globe icon (`--accent`). While
  * pulling, bars appear one by one and the ring turns with the finger (`progress` 0..1); while
  * `spinning` the bars fade in turn and the ring rotates (after svg-spinners' bars-rotate-fade). */
-export function BarsSpinner({ progress = 1, spinning = false }: { progress?: number; spinning?: boolean }) {
+export function BarsSpinner({ progress = 1, spinning = false, size = 32 }: { progress?: number; spinning?: boolean; size?: number }) {
   return (
     <svg
       className={"bars-spinner" + (spinning ? " spinning" : "")}
       viewBox="0 0 24 24"
-      width="32"
-      height="32"
+      width={size}
+      height={size}
       aria-hidden="true"
       style={spinning ? undefined : { transform: `rotate(${Math.round(progress * 180)}deg)` }}
     >
@@ -22,7 +22,7 @@ export function BarsSpinner({ progress = 1, spinning = false }: { progress?: num
           x="10.6" y="1.6" width="2.8" height="6" rx="1.4"
           transform={`rotate(${i * (360 / BARS)} 12 12)`}
           style={{
-            fill: `color-mix(in srgb, var(--accent), var(--call) ${Math.round((i / (BARS - 1)) * 100)}%)`,
+            fill: "var(--accent)",
             opacity: spinning ? undefined : Math.min(1, Math.max(0, progress * BARS - i)) * 0.9,
             animationDelay: spinning ? `${(i / BARS - 1).toFixed(3)}s` : undefined,
           }}
@@ -41,7 +41,8 @@ export function PullRegion({ state, children }: { state: PullState; children: Re
   return (
     <div className="ptr-region">
       {(pulling || refreshing) && (
-        <div className={"ptr-under" + (pulling && isArmed(state) ? " armed" : "")} data-testid="ptr" role={refreshing ? "status" : undefined}>
+        <div className={"ptr-under" + (pulling && isArmed(state) ? " armed" : "")} data-testid="ptr" role={refreshing ? "status" : undefined}
+          style={{ height: (pulling ? state.distance : PULL_THRESHOLD) / 2 }}>
           <BarsSpinner progress={p} spinning={refreshing} />
           <span className="sr-only">{refreshing ? "Refreshing…" : isArmed(state) ? "Release to refresh" : "Pull to refresh"}</span>
         </div>
@@ -55,6 +56,16 @@ export function PullRegion({ state, children }: { state: PullState; children: Re
       >
         {children}
       </div>
+    </div>
+  );
+}
+
+/** The same spinner as a loading state: replaces the "Loading…" texts (`small` for inside a row). */
+export function Loading({ label, small = false }: { label: string; small?: boolean }) {
+  return (
+    <div className={"loading" + (small ? " small" : "")} role="status">
+      <BarsSpinner spinning size={small ? 22 : 32} />
+      <span className="sr-only">{label}</span>
     </div>
   );
 }

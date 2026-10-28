@@ -27,7 +27,8 @@ import { PhoneIcon } from "./icons";
 import { callerSpoke } from "./callState";
 import { callerLabel, latestLive } from "./liveCalls";
 import { useLiveCalls } from "./useLiveCalls";
-import { PULL_THRESHOLD, vibrateTick } from "./pullToRefresh";
+import { vibrateTick } from "./pullToRefresh";
+import { PullRegion } from "./PullIndicator";
 import { usePullToRefresh } from "./usePullToRefresh";
 
 export interface Loadable<T> {
@@ -297,11 +298,9 @@ export function App() {
   return (
     <div className="vapp" ref={rootRef}>
       {stage === "select" && (
-        <div className="ptr-layer" style={{
-          transform: ptr.phase === "pulling" ? `translateY(${ptr.distance}px)`
-            : ptr.phase === "refreshing" ? `translateY(${PULL_THRESHOLD}px)` : "none",
-          transition: ptr.phase === "pulling" ? "none" : "transform .2s ease",
-        }}>
+        <>
+        <div className="ptr-gap" />
+        <PullRegion state={ptr}>
         <SelectScreen
           businesses={businesses}
           convos={convos}
@@ -327,7 +326,8 @@ export function App() {
           onRetry={loadBusinesses}
           onDismissBanner={() => setBanner(null)}
         />
-        </div>
+        </PullRegion>
+        </>
       )}
 
       {stage === "convos" && selId && (

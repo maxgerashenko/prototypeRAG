@@ -3,6 +3,7 @@ import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
 import { ChevronLeft, GlobeIcon } from "./icons";
 import { OutcomeBadge } from "./OutcomeBadge";
+import { BarsSpinner } from "./PullIndicator";
 import { PullRegion } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
 import { SourceBadge } from "./SourceIcon";
@@ -32,7 +33,7 @@ export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: P
       <div className="tr-head">
         <div className="tr-title">
           {c && <SourceBadge source={c.source} size={20} />}
-          <h1>{c ? c.title : convo.status === "error" ? "Conversation" : "Loading…"}</h1>
+          <h1>{c ? c.title : convo.status === "error" ? "Conversation" : (<><BarsSpinner spinning size={22} /><span className="sr-only">Loading</span></>)}</h1>
         </div>
         {c && (
           <div className="tr-meta">

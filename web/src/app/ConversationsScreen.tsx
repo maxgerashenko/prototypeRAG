@@ -4,7 +4,7 @@ import type { Loadable } from "./App";
 import { ChatIcon, ChevronLeft, ClockIcon, GlobeIcon } from "./icons";
 import { SourceBadge } from "./SourceIcon";
 import { OutcomeBadge } from "./OutcomeBadge";
-import { PullRegion } from "./PullIndicator";
+import { Loading, PullRegion } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
 import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
 
@@ -62,7 +62,7 @@ export function ConversationsScreen({ pull, biz, convos, newIds, onBack, onCall,
         ref={listRef}
         onScroll={(e) => list.length > 0 && scrollMemo.set(biz.id, e.currentTarget.scrollTop)}
       >
-        {(!convos || (convos.status === "loading" && !convos.data)) && <p className="notice">Loading conversations…</p>}
+        {(!convos || (convos.status === "loading" && !convos.data)) && <Loading label="Loading conversations" />}
         {convos?.status === "error" && <p className="notice" role="alert">Couldn’t load conversations ({convos.error}).</p>}
         {list.map((c, i) => {
           const isNew = newIds.has(c.id);

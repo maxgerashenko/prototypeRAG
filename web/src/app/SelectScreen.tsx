@@ -2,6 +2,7 @@ import { useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
 import { CheckIcon, ChevronRight, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
+import { BarsSpinner, Loading } from "./PullIndicator";
 import { SourceBadge } from "./SourceIcon";
 import { chatsLabel, fmtClock, fmtPhone, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
 
@@ -70,7 +71,7 @@ export function SelectScreen(p: Props) {
       ) : (
         <div className="sel-head">
           <div className="eyebrow">
-            <MicIcon />
+            {p.businesses.status === "loading" ? <BarsSpinner spinning size={16} /> : <MicIcon />}
             Voice assistant
           </div>
           <h1>Talk about a business, out loud</h1>
@@ -94,7 +95,7 @@ export function SelectScreen(p: Props) {
       </div>
 
       <div className="scroll biz-list" ref={listRef}>
-        {p.businesses.status === "loading" && !p.businesses.data && <p className="notice">Loading businesses…</p>}
+        {p.businesses.status === "loading" && !p.businesses.data && <Loading label="Loading businesses" />}
         {p.businesses.status === "error" && (
           <p className="notice" role="alert">
             Couldn’t load businesses ({p.businesses.error}).{" "}
@@ -138,7 +139,7 @@ export function SelectScreen(p: Props) {
                     <span>Recent conversations</span>
                     <span>{countLabel}</span>
                   </div>
-                  {convos?.status === "loading" && !convos.data && <div className="recent-empty">Loading…</div>}
+                  {convos?.status === "loading" && !convos.data && <Loading label="Loading conversations" small />}
                   {convos?.status === "error" && (
                     <div className="recent-empty" role="alert">Couldn’t load conversations ({convos.error}).</div>
                   )}
