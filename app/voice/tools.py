@@ -16,9 +16,11 @@ from app.rag.location import default_location_id
 from app.rag.prompt import format_chunks
 from app.rag.retrieve import retrieve
 
-# T1b (V16): 3, not 5 -- the LLM's post-search time grows with the tool result's length
-# (~3.7 s measured with 5); re-run the eval set when changing it
-SEARCH_TOP_N = 3
+# T1b (V16) chose 3: the LLM's post-search time grows with the tool result's length
+# (~3.7 s measured with 5). V28 (#108): 5 so "Till what time are you working?" finds the
+# hours chunk (rank #5); latency re-check pending under "Test on Mac" -- go back to 3 or
+# fill an hours fact (#41) if it is too slow. Re-run the eval set when changing it
+SEARCH_TOP_N = 5
 
 
 def search_business_info(business_id: uuid.UUID, query: str) -> str:
