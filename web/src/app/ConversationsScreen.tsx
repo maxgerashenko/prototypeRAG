@@ -1,11 +1,15 @@
+import { useLayoutEffect, useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
 import { ChatIcon, ChevronLeft, ClockIcon, GlobeIcon } from "./icons";
 import { SourceBadge } from "./SourceIcon";
 import { OutcomeBadge } from "./OutcomeBadge";
+import { Loading, PullRegion } from "./PullIndicator";
+import type { PullState } from "./pullToRefresh";
 import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
 
 interface Props {
+  pull: PullState;
   biz: Business;
   convos: Loadable<ConversationSummary[]> | undefined;
   newIds: ReadonlySet<string>;
@@ -14,12 +18,19 @@ interface Props {
   onOpen: (convoId: string) => void;
 }
 
-export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpen }: Props) {
+/** Scroll position of each business's list, so Back from a transcript lands where the user left. */
+const scrollMemo = new Map<string, number>();
+
+export function ConversationsScreen({ pull, biz, convos, newIds, onBack, onCall, onOpen }: Props) {
   const list = convos?.data ?? [];
+  const listRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = scrollMemo.get(biz.id) ?? 0;
+  }, [biz.id, list.length > 0]); // again once the data arrives: an empty list clamps scrollTop to 0
   return (
     <div className="screen slide" data-screen="convos">
       <div className="back-row">
-        <button className="back-btn" aria-label="Back to businesses" onClick={onBack}>
+        <button className="back-btn" aria-label="Back to businesses" onClick={() => { scrollMemo.delete(biz.id); onBack(); }}>
           <span className="back-circle"><ChevronLeft /></span>
           Businesses
         </button>
@@ -45,8 +56,13 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
         <span>{convos?.status === "ok" ? list.length : ""}</span>
       </div>
 
-      <div className="scroll convo-list">
-        {(!convos || (convos.status === "loading" && !convos.data)) && <p className="notice">Loading conversations…</p>}
+      <PullRegion state={pull}>
+      <div
+        className="scroll convo-list"
+        ref={listRef}
+        onScroll={(e) => list.length > 0 && scrollMemo.set(biz.id, e.currentTarget.scrollTop)}
+      >
+        {(!convos || (convos.status === "loading" && !convos.data)) && <Loading label="Loading conversations" />}
         {convos?.status === "error" && <p className="notice" role="alert">Couldn’t load conversations ({convos.error}).</p>}
         {list.map((c, i) => {
           const isNew = newIds.has(c.id);
@@ -78,6 +94,7 @@ export function ConversationsScreen({ biz, convos, newIds, onBack, onCall, onOpe
           </div>
         )}
       </div>
+      </PullRegion>
     </div>
   );
 }

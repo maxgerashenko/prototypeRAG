@@ -15,6 +15,8 @@ Detailed plan per part:
 6. [Scale — stage 2 multi-business, stage 3 cost/load](plan/06-scale.md) — many businesses: tenant isolation, onboarding, reliability, cost per business
 7. [Knowledge quality](plan/07-knowledge-quality.md) — business = domain with locations, organize/clean step, facts library, business summary
 
+Feature plans: [Pull-to-refresh in the voice app](plan/feature-pull-to-refresh.md) (#124)
+
 Working on this repo with Claude Code: see [CLAUDE.md](CLAUDE.md) for the file structure and how architecture discussions are recorded.
 
 ## Run locally (stage 1)

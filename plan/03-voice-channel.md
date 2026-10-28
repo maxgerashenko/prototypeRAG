@@ -302,6 +302,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 | V29 | Voice answers name internals and over-generalize: "I don't have information about specific sound sessions in the profile"; pool hours given as the answer to the business's hours. Guided sauna sessions (Aufguss) are in the data — "sound" is likely STT mishearing "sauna" (V27) | Real | #109; prompt rule (no "profile"/"search", say which area hours belong to), STT phrase hints |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had — **fixed 2026-10-05**: `CHAT_REASONING_EFFORT` (default `none`); measuring is still open | Potential | [02-local-rag.md](02-local-rag.md) tasks |
 | V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Done 2026-10-18: 14 voice conversations from 2026-10-05 and their 108 messages deleted; 10 later ones kept | Delete when convenient |
+| V30 | Pull-to-refresh (#124, PR #125) is tested only in Chromium with CDP touch. Not checked on a real phone: iOS Safari (no vibration, bounce), Android Chrome (one vibration at the threshold, also on the first pull of a fresh page), Back from a transcript keeps the list scroll | Potential | Open #124 (live check, step 7 of `feature-pull-to-refresh.md`) |
 
 ## Tasks
 
