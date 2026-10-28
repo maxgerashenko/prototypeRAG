@@ -71,6 +71,8 @@ WORKING_SOUND_CHUNK_S = 0.2  # T1: sent in real time, so stopping it is never mo
 SILENCE_REPROMPT_S = 6.0
 SILENCE_MAX_REPROMPTS = 1  # re-prompts before the goodbye
 SILENCE_POLL_S = 0.25
+MARK_GRACE_S = 1.0  # V11: how long past its estimate an un-echoed playback mark still counts
+MARK_POLL_S = 0.05  # re-check the playback end this often, an echo can end it early
 HANG_UP_GRACE_S = 0.5  # after the last audio's estimated end, so the transport plays it out
 REPROMPT_TEXT = "Are you still there?"
 SILENCE_GOODBYE_TEXT = "I haven't heard anything, so I'll end the call now. Thanks for calling, goodbye."
@@ -192,6 +194,7 @@ class CallSession:
         continue_from: uuid.UUID | None = None,
         call_sid: str | None = None,
         hang_up: Callable[[], Awaitable[None]] | None = None,
+        playback_marks: bool = False,
     ) -> None:
         if turn_detection not in ("vad", "manual"):
             raise ValueError(f"turn_detection must be 'vad' or 'manual', got {turn_detection!r}")
@@ -206,6 +209,7 @@ class CallSession:
         self._continue_from = continue_from
         self._call_sid = call_sid
         self._hang_up = hang_up
+        self._playback_marks = playback_marks
         self._topic: str | None = None
 
         settings = get_settings()
@@ -222,6 +226,10 @@ class CallSession:
         # STT of a turn a barge-in cut off before it was answered; its words lead the next turn
         self._unanswered_stt: asyncio.Task | None = None
         self._playing_until = 0.0  # monotonic time the caller's buffer runs out of bot audio
+        # V11: with `playback_marks` the client echoes a mark once it has played the audio
+        # before it; name → estimated end. Until the echo arrives the bot counts as playing.
+        self._marks: dict[str, float] = {}
+        self._mark_seq = 0
         self._silence_task: asyncio.Task | None = None
         self._heard_at = 0.0  # monotonic time of the caller's last speech start/end (V17)
         self._reprompts = 0  # since the caller last spoke
@@ -305,6 +313,7 @@ class CallSession:
         if self._bot_active():
             await self._cancel_reply()
             self._playing_until = 0.0
+            self._marks.clear()  # the client echoes them at once on `clear`; nothing left to wait for
             await self._send_event({"type": "clear"})
         self._turn = self._new_transcriber(self.sample_rate)
         self._turn.push(preroll)
@@ -336,7 +345,28 @@ class CallSession:
 
     def _bot_active(self) -> bool:
         replying = self._reply_task is not None and not self._reply_task.done()
-        return replying or time.monotonic() < self._playing_until
+        return replying or self._playback_left() > 0
+
+    def _playback_left(self) -> float:
+        """Seconds until the caller has heard everything sent. A mark not yet echoed keeps
+        the bot playing up to MARK_GRACE_S past its estimate (the echo may never come)."""
+        now = time.monotonic()
+        left = self._playing_until - now
+        for end in self._marks.values():
+            left = max(left, end + MARK_GRACE_S - now)
+        return left
+
+    def on_mark(self, name: str) -> None:
+        """The client played the audio up to mark `name` (Twilio `mark` echo, V11): that is
+        the real playback end, replacing the estimate once no later mark is outstanding."""
+        if name not in self._marks:
+            return
+        for earlier in list(self._marks):  # echoes come in order; an earlier one never will
+            del self._marks[earlier]
+            if earlier == name:
+                break
+        if not self._marks:
+            self._playing_until = time.monotonic()
 
     async def _cancel_reply(self) -> None:
         task, self._reply_task = self._reply_task, None
@@ -383,7 +413,8 @@ class CallSession:
             await self._send_event({"type": "latency", **timings})
             # audio goes out faster than real time: the reply stays in progress until the
             # caller has heard it, so a barge-in still cuts what was sent but not played (B2)
-            await asyncio.sleep(max(0.0, self._playing_until - time.monotonic()))
+            while (left := self._playback_left()) > 0:
+                await asyncio.sleep(min(left, MARK_POLL_S))
         except asyncio.CancelledError:
             heard_by = time.monotonic()  # barge-in or hang-up
             raise
@@ -531,7 +562,7 @@ class CallSession:
         await self._hang_up_after_playback("silence")
 
     async def _hang_up_after_playback(self, reason: str) -> None:
-        await asyncio.sleep(max(0.0, self._playing_until - time.monotonic()) + HANG_UP_GRACE_S)
+        await asyncio.sleep(max(0.0, self._playback_left()) + HANG_UP_GRACE_S)
         self._hung_up = True
         log.info("voice call %s: hanging up (%s)", self.conversation_id, reason)
         await self._try_send_event({"type": "hangup", "reason": reason})
@@ -584,6 +615,11 @@ class CallSession:
         await self._send_audio(audio)
         now = time.monotonic()
         self._playing_until = max(now, self._playing_until) + tts.pcm16_duration_s(audio, self.sample_rate)
+        if self._playback_marks:
+            self._mark_seq += 1
+            name = f"p{self._mark_seq}"
+            self._marks[name] = self._playing_until
+            await self._send_event({"type": "mark", "name": name})
 
     # --- database (sync, run in a thread) --------------------------------------------
 
