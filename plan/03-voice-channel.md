@@ -341,6 +341,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **Tool loop in text chat (#51)**: with `google/gemma-4-12b` loaded, `POST /chat` and `GET /chat/stream` on the pilot with a question that makes the model call `search_business_info` (e.g. "Do you have parking?"): the answer arrives, no error, `llm chat` log lines show `tool_calls=1` then a text round. Then a plain greeting (no tool call) still answers. Repeat in the voice app (`/web/`) to confirm the voice loop still works after the shared-tool change.
 - [ ] **Facts extraction (OPEN-20, V23)** on the crawled pilot: `uv run python -m app.ingest.run
   --url https://www.abathhouse.com/ --only facts --dry-run --force --model google/gemma-4-12b`,
   then again with `--model qwen/qwen3.6-35b-a3b` (`lms ps` first). Audit 5 pages: every
