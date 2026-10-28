@@ -17,11 +17,13 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ActionContext:
-    """What a handler gets besides the model's arguments. Both values come from the call
+    """What a handler gets besides the model's arguments. All values come from the call
     session, never from the model, so it can't reach another business's data."""
 
     business_id: uuid.UUID
     conversation_id: uuid.UUID | None = None
+    call_sid: str | None = None  # Twilio phone calls only; None in chat and browser calls
+    caller: str | None = None  # caller ID, not what the model heard
 
 
 @dataclass(frozen=True)

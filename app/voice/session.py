@@ -29,6 +29,9 @@ last sentence is a farewell ("Thank you. Bye.") is answered and then hung up on 
 Hanging up = a `hangup` event, then the adapter's `hang_up` callback (closes the socket);
 `close()` still runs as for any hang-up.
 
+A successful `transfer_to_human` tool call also hangs up once the bot's last sentence has
+played: closing the stream is how Twilio gets to `<Dial>` (app/actions/transfer.py).
+
 Pass `continue_from` to load an earlier conversation of the same business as LLM history
 (a new conversation row is still created). Twilio calls pass `call_sid`, stored on the
 conversation for the status callback.
@@ -44,6 +47,7 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.actions.transfer import TRANSFER_STARTED
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
@@ -86,7 +90,8 @@ VOICE_SYSTEM_PROMPT = (
     "Answer only from the business profile below or from search_business_info results. "
     "Never use outside knowledge about this business or any other.\n"
     "Call search_business_info for any question the profile doesn't answer.\n"
-    "If the answer isn't found, say so plainly and offer to take a message.\n"
+    "If the answer isn't found, say so plainly and offer to take a message (take_message). "
+    "If the caller asks for a person, offer transfer_to_human; if it fails, take a message.\n"
     "Your words are spoken aloud: one to three short sentences, no lists, no markdown, "
     "no URLs. Answer in the language the caller uses.\n"
     "If the caller says goodbye, thank them for calling and say a short, warm goodbye; "
@@ -226,6 +231,7 @@ class CallSession:
         self._heard_at = 0.0  # monotonic time of the caller's last speech start/end (V17)
         self._reprompts = 0  # since the caller last spoke
         self._hung_up = False
+        self._transfer_pending = False  # transfer_to_human succeeded: hang up (Twilio dials) after the reply
         self._history: list[dict] = []
         self._system_prompt = ""
         self.conversation_id: uuid.UUID | None = None
@@ -398,7 +404,9 @@ class CallSession:
                 # may run after hang-up (cancelled by close()), when the socket is closed
                 await self._try_send_event({"type": "latency", **timings})
         # only reached when the answer was played out, not cut by a barge-in
-        if is_farewell(text):
+        if self._transfer_pending:
+            await self._hang_up_after_playback("transfer")  # closing the stream hands the call to /twilio/transfer
+        elif is_farewell(text):
             await self._hang_up_after_playback("goodbye")
 
     async def _transcribe(self, turn: TurnTranscriber, earlier: asyncio.Task | None) -> str:
@@ -473,7 +481,12 @@ class CallSession:
                 ],
             })
             for c in calls.values():
-                result = await asyncio.to_thread(run_tool, self.business_id, c["name"], c["arguments"], self.conversation_id)
+                result = await asyncio.to_thread(
+                    run_tool, self.business_id, c["name"], c["arguments"], self.conversation_id,
+                    self._call_sid, self._caller,
+                )
+                if c["name"] == "transfer_to_human" and result.startswith(TRANSFER_STARTED):
+                    self._transfer_pending = True
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
             timings.setdefault("tool_end_ms", _ms(speech_end))
         await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, play_ends, speech_end, timings)

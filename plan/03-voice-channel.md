@@ -328,7 +328,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
 - [x] Filler while a tool runs: dropped 2026-10-19 (#40) — the T1 working-sound ticks are enough, no spoken "one moment"
 - [x] Called number / TwiML App → business_id mapping from Postgres (`To` in `businesses.phone_numbers`; Voice SDK `business_id` parameter)
-- [ ] Call transfer + take-a-message fallback
+- [x] Call transfer + take-a-message fallback (#50): `transfer_to_human` and `take_message` tools (`app/actions/transfer.py`, `messages.py`); the session hangs up after the bot's last sentence, Twilio continues at the `<Redirect>` after `<Connect>` → `POST /twilio/transfer` dials `businesses.settings.transfer_number`; not answered → voicemail recorded into `messages_for_owner` (migration 0009). Tested with fakes; live check under "Test on Mac"
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
 - [x] Summary runs in the Twilio status callback (DEC-24) — callback built (`POST /twilio/status`, sets `ended_at`); summary checked live 2026-10-21 (see "Post-call summary" below)
 - [x] Measure latency per stage and log it per turn (`latency` event + log: stt, tool, first sentence, first audio)
@@ -341,6 +341,14 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **Call transfer + voicemail (#50)**: `uv run alembic upgrade head` (0009); set the transfer number on the business:
+  `UPDATE businesses SET settings = settings || '{"transfer_number": "+1..."}' WHERE id = '...'` (a trial
+  Twilio account can only dial verified numbers). Call the trial number and ask for a person: the bot asks, you
+  say yes, it says one connecting line, the call rings the transfer number and talks through. Then (1) let the
+  transfer number ring out or reject it: expect the "leave a message after the beep" prompt, and after speaking
+  a `messages_for_owner` row with `recording_url`; (2) a normal goodbye still ends the call (Redirect → Hangup);
+  (3) say "leave a message" in a call: the bot reads it back, a row without `recording_url` appears.
+  Check that Twilio accepts relative `<Redirect>`/`action` URLs and that the stream closing really runs the Redirect
 - [ ] **Facts extraction (OPEN-20, V23)** on the crawled pilot: `uv run python -m app.ingest.run
   --url https://www.abathhouse.com/ --only facts --dry-run --force --model google/gemma-4-12b`,
   then again with `--model qwen/qwen3.6-35b-a3b` (`lms ps` first). Audit 5 pages: every
