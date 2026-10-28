@@ -30,6 +30,7 @@ import { useLiveCalls } from "./useLiveCalls";
 import { vibrateTick } from "./pullToRefresh";
 import { PullRegion } from "./PullIndicator";
 import { usePullToRefresh } from "./usePullToRefresh";
+import { useSwipeBack } from "./useSwipeBack";
 
 export interface Loadable<T> {
   status: "loading" | "ok" | "error";
@@ -290,13 +291,34 @@ export function App() {
     },
   });
 
+  // swipe right = the screen's Back button (mobile). Off on the picker and during a call of our own.
+  const goBack: (() => void) | null =
+    stage === "convos" ? () => setStage("select")
+    : stage === "transcript" && transcript ? () => setStage(transcript.returnTo)
+    : stage === "ended" ? backToConversations
+    : stage === "phone" || stage === "phoneEnded" ? closePhone
+    : null;
+  const swipe = useSwipeBack(rootRef, {
+    enabled: goBack !== null,
+    onBack: () => goBack?.(),
+    onArmed: vibrateTick,
+  });
+
   const all = businesses.data ?? [];
   const find = (id: string | null) => all.find((b) => b.id === id);
   const fallbackBiz = (id: string | null): Business =>
     find(id) ?? { id: id ?? "", name: "Business", website: null, domain: null, conversation_count: 0, default_location: null, phone_numbers: [] };
 
   return (
-    <div className="vapp" ref={rootRef}>
+    <div
+      className="vapp"
+      ref={rootRef}
+      data-testid="vapp"
+      style={{
+        transform: swipe.offset ? `translateX(${swipe.offset}px)` : undefined,
+        transition: swipe.swiping ? "none" : "transform .2s ease",
+      }}
+    >
       {stage === "select" && (
         <>
         <div className="ptr-gap" />
