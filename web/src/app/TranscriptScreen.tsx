@@ -7,7 +7,7 @@ import { BarsSpinner } from "./PullIndicator";
 import { PullRegion } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
 import { SourceBadge } from "./SourceIcon";
-import { fmtClock, fmtWhen, plural } from "./format";
+import { fmtClock, fmtWhen, monogram, plural } from "./format";
 
 interface Props {
   pull: PullState;
@@ -27,6 +27,7 @@ export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: P
       <div className="back-row">
         <button className="back-btn" aria-label="Back" onClick={onBack}>
           <span className="back-circle"><ChevronLeft /></span>
+          <span className="back-mono" aria-hidden="true">{monogram(bizName)}</span>
           <span className="ellipsis">{bizName}</span>
         </button>
       </div>
