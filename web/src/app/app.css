@@ -127,7 +127,8 @@ a:hover { color: var(--bot-light); }
 }
 .search input {
   flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: var(--text);
-  font-size: 15px; font-family: inherit;
+  /* 16px: iOS Safari zooms the page into any focused input smaller than that */
+  font-size: 16px; font-family: inherit;
 }
 .search:focus-within { border-color: var(--accent); }
 .biz-list { padding: 2px 20px 16px; display: flex; flex-direction: column; gap: 8px; }
