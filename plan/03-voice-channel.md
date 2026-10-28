@@ -175,7 +175,7 @@ Re-check each item once its environment exists, then tick it or turn it into a t
 | V5 | `TTS_VOICE=en-US-Neural2-F` may be retired/renamed; TTS may not return the exact requested rate (8000/16000) → `ValueError` | Potential | First TTS call at both rates | Pick a current voice (Chirp 3 HD?); resample instead of failing |
 | V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Real | Time from connect to first audio | Cache greeting audio per business (onboarding) |
 | V7 | Missing credentials surface only after ~3 s (auth probes the metadata server), and again on every turn | Real | Seen in smoke test | Check ADC once at startup / fail fast |
-| V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Real (design gap) | Ask a question in another language | `alternative_language_codes`, or language per business |
+| V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Fixed in code 2026-10-28 (#75): `STT_ALTERNATIVE_LANGUAGES` (comma list, max 3) → `alternative_language_codes`; empty by default. Live check pending | Set it, e.g. `es-US,ru-RU`, ask a question in that language | Language per business if detection is too unreliable |
 
 **Checked live 2026-10-03** (ADC on project `prototype-rag-max`; TTS output and the
 speech fixture streamed at real-time pace):
@@ -372,6 +372,7 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
   — ✅ 2026-10-18: fails fast with a clear message at startup, no stall per turn
+- [ ] **V8** Set `STT_ALTERNATIVE_LANGUAGES=es-US` (or another), ask a question in that language on `/web/` and over Twilio: the transcript is in that language and the bot answers in it; check English accuracy hasn't dropped and `latest_short` accepts the combination (else try `latest_long`)
 - [ ] **V3** 10+ turns: no "STT final result not in after 2.0s" log line; if it shows,
   compare the transcript with what was said
 - [x] **V14** Ask for "the address and the website": no markup or full URL read aloud;
