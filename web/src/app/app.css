@@ -35,6 +35,7 @@ a:hover { color: var(--bot-light); }
 @keyframes vw-slide { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @keyframes vw-dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
 @keyframes vw-spin { to { transform: rotate(360deg); } }
+@keyframes vw-bar-fade { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
 @keyframes vw-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @keyframes vw-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 @keyframes vw-open { from { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; } to { opacity: 1; max-height: 420px; } }
@@ -437,23 +438,16 @@ a:hover { color: var(--bot-light); }
 /* ---------- pull to refresh (mobile) ---------- */
 html, body { overscroll-behavior-y: none; } /* no native pull-to-refresh: it would reload the page, even mid-call */
 .scroll, .call-log { overscroll-behavior-y: contain; }
-/* front spinner: conversations list + transcript (refetch in place) */
-.ptr {
-  position: absolute; top: 0; left: 50%; margin-left: -20px; z-index: 6; width: 40px; height: 40px;
-  border-radius: 50%; background: var(--card); border: 1px solid var(--line); box-shadow: 0 6px 18px #0008;
-  display: flex; align-items: center; justify-content: center; pointer-events: none;
-}
-.ptr.armed, .ptr.refreshing { border-color: var(--accent); }
-.ptr-spinner { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--accent); }
-.ptr.refreshing .ptr-spinner, .ptr-behind.refreshing .ptr-spinner { animation: vw-spin .8s linear infinite; }
-/* business picker: the screen slides down over a loading icon (full reload on release) */
+/* conversations list + transcript: the list slides down over a spinner behind it (refetch in place) */
+.ptr-region { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.ptr-under { position: absolute; top: 12px; left: 0; right: 0; z-index: 0; display: flex; justify-content: center; pointer-events: none; }
 .ptr-layer { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; z-index: 1; background: var(--bg); }
-.ptr-behind {
-  position: absolute; top: 12px; left: 50%; margin-left: -20px; z-index: 0; width: 40px; height: 40px;
-  border-radius: 50%; display: flex; align-items: center; justify-content: center; pointer-events: none;
-}
-.ptr-behind .ptr-spinner { width: 28px; height: 28px; border-width: 3px; }
-.ptr-behind.armed .ptr-spinner, .ptr-behind.refreshing .ptr-spinner { border-color: var(--accent); border-top-color: var(--call); }
+/* business picker: the whole screen slides down (full reload on release), no icon */
+.bars-spinner { display: block; transition: transform .1s linear; }
+.bars-spinner rect { transition: opacity .1s linear; }
+.bars-spinner.spinning { animation: vw-spin 1.2s linear infinite; }
+.bars-spinner.spinning rect { animation: vw-bar-fade .9s ease-in-out infinite; }
+.ptr-under.armed .bars-spinner { filter: drop-shadow(0 0 6px var(--glow)); }
 
 /* ---------- thin scrollbars, invisible until the element scrolls (reserves an 8px gutter on desktop) ---------- */
 .scroll::-webkit-scrollbar, .call-log::-webkit-scrollbar { width: 8px; }
