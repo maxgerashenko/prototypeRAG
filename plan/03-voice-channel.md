@@ -222,7 +222,7 @@ Findings:
 |---|---|---|---|---|
 | V9 | Speaker echo → VAD hears the bot → false barge-in; browser echo cancellation may not cover WebAudio playback | Potential | Mic test without headphones | Fixed in code 2026-10-18 (DEC-44): raise VAD aggressiveness while bot speaks. Mic test without headphones still open |
 | V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | DEC-44 fix (minimum speech length before barge-in) insufficient — ❌ still reproduces live 2026-10-19 (real call): saying "hmm" or coughing stopped the bot's voice. Needs stronger hardening (longer `VAD_BARGE_IN_START_MS`, or an energy/pitch check beyond webrtcvad aggressiveness) |
-| V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | Client reports playback end; Twilio `mark` events |
+| V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | **Twilio fixed in code 2026-10-28 (#76)**: see V26. Browser mode C still estimates; client-reported playback end not built |
 | V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); Safari untested | Closed (Safari ✅ 2026-10-19: works, mic streams; Firefox explicitly not supported/tested — not a target browser) | Open page in Chrome, Safari | — |
 | V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Fixed in code (#77), unconfirmed on real replies | Look at `reply` events of real answers | Abbreviation list; text past 120 chars is cut at the last `,;:` (min 30 chars) or space |
 | V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
@@ -287,7 +287,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 |---|---|---|---|---|
 | V18 | STT/TTS each hold a thread from the default executor (`asyncio.to_thread`); an STT stream holds one for a whole turn → limits concurrent calls per instance | Potential (stage 2–3) | Load test with several calls | Async Google clients; dedicated executor |
 | V19 | `conversations.ended_at` stays NULL if the process dies mid-call | Fixed in code, live check pending — Twilio: the status callback sets it by `call_sid` (DEC-43); browser (mode C): `browser_ws` writes `ended_at` even when closing the session is cancelled, and a startup sweep closes calls left open by a killed process (#78) | Kill the server during a Twilio call and a browser call, restart, check `ended_at` | — |
-| V26 | Barge-in over Twilio relies on the estimated playback end (audio duration sent), as in mode C; Twilio buffers what we send faster than real time, so network jitter can shift it | Potential | A call over Twilio: interrupt the bot near the end of a sentence | Send Twilio `mark` messages after each sentence and use their echo as the real playback end |
+| V26 | Barge-in over Twilio relies on the estimated playback end (audio duration sent), as in mode C; Twilio buffers what we send faster than real time, so network jitter can shift it | Fixed in code 2026-10-28 (#76), live check pending — `CallSession(playback_marks=True)` (set by `/voice/ws`) sends a `mark` after every audio chunk; Twilio's echo (`on_mark`) replaces the estimated `_playing_until` with the real end, and an un-echoed mark keeps the bot "playing" up to 1 s past its estimate (`MARK_GRACE_S`). Unit tests with fakes only | A call over Twilio: interrupt the bot near the end of a sentence; talk right after it stops (no false barge-in, no swallowed first word) | Tune `MARK_GRACE_S`; client-reported end for browser mode C |
 | V27 | `STT_MODEL=latest_short` is tuned for clean mic audio; Twilio audio is 8 kHz μ-law | Potential | Compare `phone_call` on the same Twilio test questions | Per-transport STT model (session already knows the sample rate) |
 | V20 | `VOICE_REASONING_EFFORT=none` is only verified against LM Studio; Gemini's accepted value depends on the model | Potential | Step 6 Gemini comparison | Map per provider in `.env` |
 
@@ -348,6 +348,8 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   `+` line true to its quote, nothing missed, rejections sensible; the site-chrome page
   must yield the "7 days a week 8am to 11:30pm" hours fact. Pick the model → `FACTS_LLM_MODEL`
   in `.env`, then run without `--dry-run` and check `--report conflicts`.
+- [ ] **Twilio playback marks (#76, V11/V26)**: on a real call (Voice SDK or phone), interrupt the bot
+  right as a sentence ends and again just after it stops — no false barge-in, first word not swallowed
 - [ ] **Hands-free calls on mobile** (#114): on a phone or tablet browser (Safari, Chrome) the voice app
   disables push-to-talk and uses `mode: "vad"` (mic always open, server VAD); desktop keeps push-to-talk. Watch echo on the phone
   speaker (#83) and the VAD-only silence re-prompt (V17)

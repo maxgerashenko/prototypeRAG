@@ -48,6 +48,8 @@ async def twilio_media_stream(ws: WebSocket) -> None:
         feed.event(event)
         if event.get("type") == "clear":
             await ws.send_text(json.dumps({"event": "clear", "streamSid": stream_sid}))
+        elif event.get("type") == "mark":  # V11: Twilio echoes it once the audio before it has played
+            await ws.send_text(json.dumps({"event": "mark", "streamSid": stream_sid, "mark": {"name": event["name"]}}))
         else:
             log.debug("twilio stream %s: %s", stream_sid, event)
 
@@ -88,7 +90,7 @@ async def twilio_media_stream(ws: WebSocket) -> None:
                 session = CallSession(
                     business_id, TWILIO_SAMPLE_RATE, send_audio, send_event,
                     channel_caller=params.get("caller") or None, call_sid=call_sid or None,
-                    hang_up=hang_up,
+                    hang_up=hang_up, playback_marks=True,
                 )
                 try:
                     await session.start()
@@ -101,6 +103,9 @@ async def twilio_media_stream(ws: WebSocket) -> None:
                 # no await since session.start() returned, so the greeting's events come after this
                 feed.start(stream_sid or str(uuid.uuid4()), business_id, session.conversation_id,
                            params.get("caller") or None)
+
+            elif event == "mark" and session is not None:
+                session.on_mark((data.get("mark") or {}).get("name", ""))
 
             elif event == "stop":
                 break
