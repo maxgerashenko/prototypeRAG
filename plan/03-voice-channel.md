@@ -175,7 +175,7 @@ Re-check each item once its environment exists, then tick it or turn it into a t
 | V5 | `TTS_VOICE=en-US-Neural2-F` may be retired/renamed; TTS may not return the exact requested rate (8000/16000) → `ValueError` | Potential | First TTS call at both rates | Pick a current voice (Chirp 3 HD?); resample instead of failing |
 | V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Real | Time from connect to first audio | Cache greeting audio per business (onboarding) |
 | V7 | Missing credentials surface only after ~3 s (auth probes the metadata server), and again on every turn | Real | Seen in smoke test | Check ADC once at startup / fail fast |
-| V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Real (design gap) | Ask a question in another language | `alternative_language_codes`, or language per business |
+| V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Fixed in code 2026-10-28 (#75): `STT_ALTERNATIVE_LANGUAGES` (comma list, max 3) → `alternative_language_codes`; empty by default. Live check pending | Set it, e.g. `es-US,ru-RU`, ask a question in that language | Language per business if detection is too unreliable |
 
 **Checked live 2026-10-03** (ADC on project `prototype-rag-max`; TTS output and the
 speech fixture streamed at real-time pace):
@@ -299,7 +299,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 | V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Fixed in code (2026-10-05): crawler sets it per location from the address; re-crawl the pilot to apply | [01-crawler.md](01-crawler.md) tasks |
 | V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real — cause found 2026-10-21: retrieval misses them (V28); `business_profile.opening_hours` is NULL and the pilot has 0 facts, so nothing else covers hours | `/debug/retrieve`, eval set; #41 (hours fact) |
 | V28 | Hours asked as "Till what time are you working?" (phone, 2026-10-21) → answered with the Rooftop Pool's hours. The chunk "Bathhouse locations are open daily from 9am to midnight" ranks #5 for that wording (#1 for "opening hours"), and voice search passes only the top 3 (`SEARCH_TOP_N`) | Real | #108; fill `opening_hours` (#41), try `SEARCH_TOP_N=5` against latency |
-| V29 | Voice answers name internals and over-generalize: "I don't have information about specific sound sessions in the profile"; pool hours given as the answer to the business's hours. Guided sauna sessions (Aufguss) are in the data — "sound" is likely STT mishearing "sauna" (V27) | Real | #109; prompt rule (no "profile"/"search", say which area hours belong to), STT phrase hints |
+| V29 | Voice answers name internals and over-generalize: "I don't have information about specific sound sessions in the profile"; pool hours given as the answer to the business's hours. Guided sauna sessions (Aufguss) are in the data — "sound" is likely STT mishearing "sauna" (V27) | Prompt rule added (#109, 2026-10-28; re-run on a call: "Test on Mac"); STT phrase hints still open | #109; STT phrase hints per business need Twilio audio (V27, #73) |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had — **fixed 2026-10-05**: `CHAT_REASONING_EFFORT` (default `none`); measuring is still open | Potential | [02-local-rag.md](02-local-rag.md) tasks |
 | V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Done 2026-10-18: 14 voice conversations from 2026-10-05 and their 108 messages deleted; 10 later ones kept | Delete when convenient |
 | V30 | Pull-to-refresh (#124, PR #125) is tested only in Chromium with CDP touch. Not checked on a real phone: iOS Safari (no vibration, bounce), Android Chrome (one vibration at the threshold, also on the first pull of a fresh page), Back from a transcript keeps the list scroll | Potential | Open #124 (live check, step 7 of `feature-pull-to-refresh.md`) |
@@ -341,6 +341,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **V29 (#109)** Voice prompt rule added 2026-10-28: re-ask on a call "What types of sauna sessions do you have?" and "What are your hours?" — no mention of "the profile"; area hours (e.g. Rooftop Pool) are labelled as that area's. Also try STT phrase hints per business (sauna, Aufguss, banya) on Twilio audio, or note the result under #73
 - [ ] **Call transfer + voicemail (#50)**: `uv run alembic upgrade head` (0009); set the transfer number on the business:
   `UPDATE businesses SET settings = settings || '{"transfer_number": "+1..."}' WHERE id = '...'` (a trial
   Twilio account can only dial verified numbers). Call the trial number and ask for a person: the bot asks, you
@@ -380,6 +381,7 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
   — ✅ 2026-10-18: fails fast with a clear message at startup, no stall per turn
+- [ ] **V8** Set `STT_ALTERNATIVE_LANGUAGES=es-US` (or another), ask a question in that language on `/web/` and over Twilio: the transcript is in that language and the bot answers in it; check English accuracy hasn't dropped and `latest_short` accepts the combination (else try `latest_long`)
 - [ ] **V3** 10+ turns: no "STT final result not in after 2.0s" log line; if it shows,
   compare the transcript with what was said
 - [x] **V14** Ask for "the address and the website": no markup or full URL read aloud;

@@ -284,3 +284,14 @@ def test_search_business_info_only_sees_its_own_business():
     finally:
         with tenant_session(a) as s:
             s.execute(delete(Business).where(Business.id.in_([a, b])))
+
+
+def test_alternative_language_codes():
+    from app.voice.stt import alternative_language_codes
+
+    assert alternative_language_codes("", "en-US") == []
+    assert alternative_language_codes(" es-US, en-US,es-US ,,ru-RU,de-DE,fr-FR", "en-US") == [
+        "es-US",
+        "ru-RU",
+        "de-DE",
+    ]

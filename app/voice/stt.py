@@ -33,6 +33,16 @@ def get_stt_client() -> speech.SpeechClient:
     return speech.SpeechClient()
 
 
+def alternative_language_codes(raw: str, primary: str) -> list[str]:
+    """V8: parse STT_ALTERNATIVE_LANGUAGES; drops blanks, repeats and the primary language,
+    keeps the first 3 (Google's limit)."""
+    codes: list[str] = []
+    for code in (c.strip() for c in raw.split(",")):
+        if code and code != primary and code not in codes:
+            codes.append(code)
+    return codes[:3]
+
+
 class TurnTranscriber:
     """One streaming recognition per turn: a background thread consumes the gRPC
     response stream while `push()` feeds the request stream through a queue."""
@@ -49,6 +59,9 @@ class TurnTranscriber:
                 encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
                 sample_rate_hertz=sample_rate,
                 language_code=settings.voice_language,
+                alternative_language_codes=alternative_language_codes(
+                    settings.stt_alternative_languages, settings.voice_language
+                ),
                 model=settings.stt_model,
                 enable_automatic_punctuation=True,
             ),
