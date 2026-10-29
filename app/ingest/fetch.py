@@ -15,13 +15,20 @@ from pypdf import PdfReader
 from app.ingest.discover import same_domain
 
 USER_AGENT = "prototypeRAG-crawler/0.1 (+https://github.com/placeholder; learning project, see robots.txt)"
+# httpx's default `Accept: */*` gets a 403 from some bot rules (bhbarbershop.com, #121); send
+# realistic content negotiation headers but keep our honest User-Agent.
+REQUEST_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 # a menu or price list is well under this; bigger PDFs are brochures/scans not worth the download
 MAX_PDF_BYTES = 20_000_000
 
 
 def fetch_text(url: str, client: httpx.Client, timeout: float = 15.0) -> str:
     """GET `url` and return its body text. Raises on a non-2xx response."""
-    response = client.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
+    response = client.get(url, headers=REQUEST_HEADERS, timeout=timeout)
     response.raise_for_status()
     return response.text
 
@@ -49,7 +56,7 @@ def fetch_document(url: str, client: httpx.Client, timeout: float = 15.0) -> Fet
     """GET `url` as HTML or PDF, decided by the response's Content-Type. Raises on a
     non-2xx response or a PDF over MAX_PDF_BYTES (checked from Content-Length before the
     body is read, and again on the body)."""
-    with client.stream("GET", url, headers={"User-Agent": USER_AGENT}, timeout=timeout) as response:
+    with client.stream("GET", url, headers=REQUEST_HEADERS, timeout=timeout) as response:
         response.raise_for_status()
         if not _is_pdf_response(response):
             response.read()
@@ -69,7 +76,7 @@ def fetch_robots_txt(base_url: str, client: httpx.Client) -> str | None:
     """GET `<scheme>://<netloc>/robots.txt`. None on any failure or non-200 — never raises."""
     parsed = urlparse(base_url)
     try:
-        response = client.get(f"{parsed.scheme}://{parsed.netloc}/robots.txt", headers={"User-Agent": USER_AGENT})
+        response = client.get(f"{parsed.scheme}://{parsed.netloc}/robots.txt", headers=REQUEST_HEADERS)
     except httpx.HTTPError:
         return None
     return response.text if response.status_code == 200 else None
@@ -79,7 +86,7 @@ def fetch_sitemap(base_url: str, client: httpx.Client) -> str | None:
     """GET `<scheme>://<netloc>/sitemap.xml`. None on any failure or non-200 — never raises."""
     parsed = urlparse(base_url)
     try:
-        response = client.get(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml", headers={"User-Agent": USER_AGENT})
+        response = client.get(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml", headers=REQUEST_HEADERS)
     except httpx.HTTPError:
         return None
     return response.text if response.status_code == 200 else None
@@ -106,7 +113,7 @@ def fetch_child_sitemaps(
             continue
         time.sleep(client._crawl_delay)
         try:
-            response = client.get(url, headers={"User-Agent": USER_AGENT})
+            response = client.get(url, headers=REQUEST_HEADERS)
         except httpx.HTTPError:
             continue
         if response.status_code == 200:

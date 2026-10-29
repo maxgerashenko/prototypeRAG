@@ -927,7 +927,7 @@ Grouped by the stage in which the answer is needed.
 
 | ID | Stage | Question | Options | Depends on / trigger |
 |---|---|---|---|---|
-| OPEN-03 | 1 | Languages for voice | English only · + local language(s) | OPEN-02 |
+| OPEN-03 | 1 | Languages for voice | English only · + local language(s) · long-term goal (Max, 2026-10-29): support all languages, and ask each business at onboarding which languages it wants (`STT_ALTERNATIVE_LANGUAGES` per business, V8/#75; Google allows 3 alternatives, one language is most accurate). NYC's 10 designated languages (Local Law 30: Spanish, Chinese, Russian, Bengali, Haitian Creole, Korean, Arabic, Urdu, French, Polish) are a starting menu for a New York business | OPEN-02; per-language STT/TTS/LLM quality check; stage 2 for the per-business setting |
 | OPEN-04 | 1 | Places API terms details | Confirm: only `place_id` stored; may Places pre-fill the owner's profile form? May a summary derived from Places reviews be stored (assumed no, DEC-39)? | Read current Places terms (R9) |
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
 | OPEN-18 | 1 | Phone/booking tests with the pilot (DEC-31) | Browser test calls by the developer only (Voice SDK, DEC-34), with the pilot's data as a fixture · swap in a consenting business first | DEC-31 caveat (R10) — needed before stage 1 step 4 (Twilio) |
