@@ -118,6 +118,7 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 
 - [x] Tool registry + executor with confirmation guard and action log (#42; `action_log` for side-effect calls only, per-business enabled-tools setting comes with the first booking tool)
 - [ ] Tool-calling loop in the RAG pipeline (text chat first, then voice)
+- [x] `take_message` and `transfer_to_human` (#50): messages saved to `messages_for_owner` (migration 0009; owner notification and dashboard list not done); transfer number is `businesses.settings.transfer_number` (no settings screen yet). Live check under 03 "Test on Mac"
 - [ ] Internal booking backend + rules
 - [ ] SMS confirmation
 - [x] Post-conversation summary job (#43): `actions/summary.py`, run from `POST /twilio/status`; stores a one-line summary, intent, outcome (info_request, booked, message, transferred, unresolved), follow_up on `conversations` (migration 0006). Sentiment, contact details and owner notification are not done yet. Needs a live check on the Mac (see 03 "Test on Mac")
