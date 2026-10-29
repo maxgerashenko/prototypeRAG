@@ -3,12 +3,14 @@
 RAG is a tool here, not a fixed pre-retrieval step: the LLM decides when to search. The
 same JSON-schema definitions go to the OpenAI-compatible `tools=[...]` in pipeline mode
 and to Gemini Live function declarations in stage 2, so switching modes doesn't change
-business logic. Part 4 action tools (bookings, ...) register in `app/actions/registry.py`;
+business logic. Part 4 action tools (bookings, take_message, transfer_to_human, ...) register in
+`app/actions/registry.py` (importing their modules below);
 `TOOLS` is the registry's schema list and `run_tool` goes through the executor.
 """
 
 import uuid
 
+from app.actions import messages, transfer  # noqa: F401  (importing registers the tools)
 from app.actions.executor import execute
 from app.actions.registry import TOOLS, ActionContext, Tool, register
 from app.db import tenant_session
@@ -51,12 +53,17 @@ __all__ = ["TOOLS", "run_tool", "search_business_info"]
 
 
 def run_tool(
-    business_id: uuid.UUID, name: str, arguments: str | dict, conversation_id: uuid.UUID | None = None
+    business_id: uuid.UUID,
+    name: str,
+    arguments: str | dict,
+    conversation_id: uuid.UUID | None = None,
+    call_sid: str | None = None,
+    caller: str | None = None,
 ) -> str:
-    """Execute one tool call from the LLM via the executor. `business_id` and
-    `conversation_id` come from the call session, never from the model's arguments.
+    """Execute one tool call from the LLM via the executor. `business_id`,
+    `conversation_id`, `call_sid` and `caller` come from the call session, never from the model's arguments.
 
     Returns the tool result as text; unknown tools / bad arguments return an error
     string the model can see instead of raising mid-call.
     """
-    return execute(ActionContext(business_id, conversation_id), name, arguments)
+    return execute(ActionContext(business_id, conversation_id, call_sid, caller), name, arguments)

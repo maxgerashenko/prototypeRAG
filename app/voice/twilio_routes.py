@@ -7,6 +7,11 @@
 - POST /twilio/status  Call status callback: sets `conversations.ended_at` for a call whose
   WebSocket didn't close cleanly (V19), then stores the call summary (DEC-24, run inside
   the request: app/actions/summary.py).
+- POST /twilio/transfer  Where the call continues once the media stream closes (`<Redirect>`
+  after `<Connect>`): `<Dial>` the business's transfer number if the bot started a transfer
+  (app/actions/transfer.py), else hang up.
+- POST /twilio/transfer-result  `<Dial action>`: nobody answered → voicemail prompt.
+- POST /twilio/voicemail  `<Record action>`: stores the recording as a message for the owner.
 - GET /twilio/token    Voice SDK access token for `web/call.html` (mode B).
 - GET /twilio/number   The main number (`TWILIO_PHONE_NUMBER`), or null when not set; the
   voice app assigns it to a business (app/api/businesses.py).
@@ -38,9 +43,10 @@ from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 from app.actions.summary import summarize_conversation
+from app.actions.transfer import transfer_number, transfer_requested
 from app.config import get_settings
 from app.db import tenant_session
-from app.db.models import Business, Conversation
+from app.db.models import Business, Conversation, MessageForOwner
 from app.db.session import SessionLocal
 
 log = logging.getLogger(__name__)
@@ -48,6 +54,10 @@ router = APIRouter()
 
 # CallStatus values after which the call is over
 FINAL_STATUSES = {"completed", "busy", "failed", "no-answer", "canceled"}
+# <Dial> outcomes that mean nobody picked up (the caller is then offered a voicemail)
+UNANSWERED = {"no-answer", "busy", "failed", "canceled"}
+TRANSFER_RING_S = 25
+VOICEMAIL_MAX_S = 120
 TOKEN_IDENTITY = "web-tester"
 TOKEN_TTL_S = 3600
 
@@ -144,7 +154,73 @@ async def twilio_voice(request: Request) -> Response:
     stream.parameter(name="caller", value=form.get("From", ""))
     stream.parameter(name="token", value=stream_token(business_id, call_sid))
     response.append(connect)
+    # runs when the stream closes: a transfer (see /twilio/transfer) or the end of the call
+    response.redirect("/twilio/transfer", method="POST")
     log.info("twilio call %s → business %s (from %s)", call_sid, business_id, form.get("From"))
+    return twiml(response)
+
+
+def find_call(call_sid: str) -> tuple[uuid.UUID, uuid.UUID] | None:
+    """(business_id, conversation_id) of a Twilio call, like the status callback's lookup."""
+    if not call_sid:
+        return None
+    with SessionLocal() as session:
+        row = session.execute(
+            select(Conversation.business_id, Conversation.id).where(Conversation.call_sid == call_sid)
+        ).first()
+    return (row.business_id, row.id) if row is not None else None
+
+
+@router.post("/twilio/transfer")
+async def twilio_transfer(request: Request) -> Response:
+    """The media stream closed. If the bot started a transfer, dial the business's number;
+    otherwise (goodbye, silence hang-up) the call is over."""
+    form = await twilio_form(request)
+    call_sid = form.get("CallSid", "")
+    response = VoiceResponse()
+    found = await run_in_threadpool(find_call, call_sid)
+    number = None
+    if found is not None and await run_in_threadpool(transfer_requested, found[0], call_sid):
+        number = await run_in_threadpool(transfer_number, found[0])
+    if number is None:
+        response.hangup()
+    else:
+        log.info("twilio call %s: transferring to %s", call_sid, number)
+        response.dial(number, timeout=TRANSFER_RING_S, action="/twilio/transfer-result", method="POST")
+    return twiml(response)
+
+
+@router.post("/twilio/transfer-result")
+async def twilio_transfer_result(request: Request) -> Response:
+    """`<Dial>` ended. Answered (and later hung up) → done; nobody answered → leave a message."""
+    form = await twilio_form(request)
+    response = VoiceResponse()
+    status = form.get("DialCallStatus", "")
+    if status in UNANSWERED:
+        log.info("twilio call %s: transfer not answered (%s)", form.get("CallSid"), status)
+        response.say("Sorry, nobody is available right now. Please leave a message after the beep. "
+                     "Your message will be recorded.")
+        response.record(max_length=VOICEMAIL_MAX_S, play_beep=True, action="/twilio/voicemail", method="POST")
+    response.hangup()
+    return twiml(response)
+
+
+@router.post("/twilio/voicemail")
+async def twilio_voicemail(request: Request) -> Response:
+    form = await twilio_form(request)
+    call_sid, url = form.get("CallSid", ""), form.get("RecordingUrl", "")
+    found = await run_in_threadpool(find_call, call_sid)
+    if found is not None and url:
+        business_id, conversation_id = found
+        seconds = form.get("RecordingDuration", "?")
+        with tenant_session(business_id) as session:
+            session.add(MessageForOwner(
+                business_id=business_id, conversation_id=conversation_id, caller_phone=form.get("From") or None,
+                text=f"Voicemail ({seconds} s) left after a transfer nobody answered.", recording_url=url,
+            ))
+    response = VoiceResponse()
+    response.say("Thank you. Goodbye.")
+    response.hangup()
     return twiml(response)
 
 

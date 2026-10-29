@@ -175,7 +175,7 @@ Re-check each item once its environment exists, then tick it or turn it into a t
 | V5 | `TTS_VOICE=en-US-Neural2-F` may be retired/renamed; TTS may not return the exact requested rate (8000/16000) → `ValueError` | Potential | First TTS call at both rates | Pick a current voice (Chirp 3 HD?); resample instead of failing |
 | V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Real | Time from connect to first audio | Cache greeting audio per business (onboarding) |
 | V7 | Missing credentials surface only after ~3 s (auth probes the metadata server), and again on every turn | Real | Seen in smoke test | Check ADC once at startup / fail fast |
-| V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Real (design gap) | Ask a question in another language | `alternative_language_codes`, or language per business |
+| V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Fixed in code 2026-10-28 (#75): `STT_ALTERNATIVE_LANGUAGES` (comma list, max 3) → `alternative_language_codes`; empty by default. Live check pending | Set it, e.g. `es-US,ru-RU`, ask a question in that language | Language per business if detection is too unreliable |
 
 **Checked live 2026-10-03** (ADC on project `prototype-rag-max`; TTS output and the
 speech fixture streamed at real-time pace):
@@ -222,7 +222,7 @@ Findings:
 |---|---|---|---|---|
 | V9 | Speaker echo → VAD hears the bot → false barge-in; browser echo cancellation may not cover WebAudio playback | Potential | Mic test without headphones | Fixed in code 2026-10-18 (DEC-44): raise VAD aggressiveness while bot speaks. Mic test without headphones still open |
 | V10 | Any noise (cough, "mm-hm") stops the bot for good — no resume | Real (by design) | Cough during an answer | DEC-44 fix (minimum speech length before barge-in) insufficient — ❌ still reproduces live 2026-10-19 (real call): saying "hmm" or coughing stopped the bot's voice. Needs stronger hardening (longer `VAD_BARGE_IN_START_MS`, or an energy/pitch check beyond webrtcvad aggressiveness) |
-| V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | Client reports playback end; Twilio `mark` events |
+| V11 | Playback end is *estimated* from audio duration sent (`_playing_until`); drifts with network/client buffering | Potential | Barge-in right after the bot stops | **Twilio fixed in code 2026-10-28 (#76)**: see V26. Browser mode C still estimates; client-reported playback end not built |
 | V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); Safari untested | Closed (Safari ✅ 2026-10-19: works, mic streams; Firefox explicitly not supported/tested — not a target browser) | Open page in Chrome, Safari | — |
 | V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Fixed in code (#77), unconfirmed on real replies | Look at `reply` events of real answers | Abbreviation list; text past 120 chars is cut at the last `,;:` (min 30 chars) or space |
 | V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
@@ -287,7 +287,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 |---|---|---|---|---|
 | V18 | STT/TTS each hold a thread from the default executor (`asyncio.to_thread`); an STT stream holds one for a whole turn → limits concurrent calls per instance | Potential (stage 2–3) | Load test with several calls | Async Google clients; dedicated executor |
 | V19 | `conversations.ended_at` stays NULL if the process dies mid-call | Fixed in code, live check pending — Twilio: the status callback sets it by `call_sid` (DEC-43); browser (mode C): `browser_ws` writes `ended_at` even when closing the session is cancelled, and a startup sweep closes calls left open by a killed process (#78) | Kill the server during a Twilio call and a browser call, restart, check `ended_at` | — |
-| V26 | Barge-in over Twilio relies on the estimated playback end (audio duration sent), as in mode C; Twilio buffers what we send faster than real time, so network jitter can shift it | Potential | A call over Twilio: interrupt the bot near the end of a sentence | Send Twilio `mark` messages after each sentence and use their echo as the real playback end |
+| V26 | Barge-in over Twilio relies on the estimated playback end (audio duration sent), as in mode C; Twilio buffers what we send faster than real time, so network jitter can shift it | Fixed in code 2026-10-28 (#76), live check pending — `CallSession(playback_marks=True)` (set by `/voice/ws`) sends a `mark` after every audio chunk; Twilio's echo (`on_mark`) replaces the estimated `_playing_until` with the real end, and an un-echoed mark keeps the bot "playing" up to 1 s past its estimate (`MARK_GRACE_S`). Unit tests with fakes only | A call over Twilio: interrupt the bot near the end of a sentence; talk right after it stops (no false barge-in, no swallowed first word) | Tune `MARK_GRACE_S`; client-reported end for browser mode C |
 | V27 | `STT_MODEL=latest_short` is tuned for clean mic audio; Twilio audio is 8 kHz μ-law | Potential | Compare `phone_call` on the same Twilio test questions | Per-transport STT model (session already knows the sample rate) |
 | V20 | `VOICE_REASONING_EFFORT=none` is only verified against LM Studio; Gemini's accepted value depends on the model | Potential | Step 6 Gemini comparison | Map per provider in `.env` |
 
@@ -299,7 +299,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 | V22 | `businesses.timezone` is never set by the crawler → stays `UTC`; the voice prompt's "current local time" is wrong for the pilot (New York) | Fixed in code (2026-10-05): crawler sets it per location from the address; re-crawl the pilot to apply | [01-crawler.md](01-crawler.md) tasks |
 | V23 | "Saturday opening hours" answered "don't have it" — unknown whether the hours are missing from the data or retrieval missed them | Real — cause found 2026-10-21: retrieval misses them (V28); `business_profile.opening_hours` is NULL and the pilot has 0 facts, so nothing else covers hours | `/debug/retrieve`, eval set; #41 (hours fact) |
 | V28 | Hours asked as "Till what time are you working?" (phone, 2026-10-21) → answered with the Rooftop Pool's hours. The chunk "Bathhouse locations are open daily from 9am to midnight" ranks #5 for that wording (#1 for "opening hours"), and voice search passes only the top 3 (`SEARCH_TOP_N`) | Code changed 2026-10-28 (`SEARCH_TOP_N=5`, 3 hours phrasings in the eval set); latency check pending on the Mac | #108; fill `opening_hours` (#41) as the alternative |
-| V29 | Voice answers name internals and over-generalize: "I don't have information about specific sound sessions in the profile"; pool hours given as the answer to the business's hours. Guided sauna sessions (Aufguss) are in the data — "sound" is likely STT mishearing "sauna" (V27) | Real | #109; prompt rule (no "profile"/"search", say which area hours belong to), STT phrase hints |
+| V29 | Voice answers name internals and over-generalize: "I don't have information about specific sound sessions in the profile"; pool hours given as the answer to the business's hours. Guided sauna sessions (Aufguss) are in the data — "sound" is likely STT mishearing "sauna" (V27) | Prompt rule added (#109, 2026-10-28; re-run on a call: "Test on Mac"); STT phrase hints still open | #109; STT phrase hints per business need Twilio audio (V27, #73) |
 | V24 | `/chat` doesn't send `reasoning_effort` → likely the same ~8 s thinking delay as voice had — **fixed 2026-10-05**: `CHAT_REASONING_EFFORT` (default `none`); measuring is still open | Potential | [02-local-rag.md](02-local-rag.md) tasks |
 | V25 | Smoke tests left 4 test `voice` conversations on the pilot business | Done 2026-10-18: 14 voice conversations from 2026-10-05 and their 108 messages deleted; 10 later ones kept | Delete when convenient |
 | V30 | Pull-to-refresh (#124, PR #125) is tested only in Chromium with CDP touch. Not checked on a real phone: iOS Safari (no vibration, bounce), Android Chrome (one vibration at the threshold, also on the first pull of a fresh page), Back from a transcript keeps the list scroll | Potential | Open #124 (live check, step 7 of `feature-pull-to-refresh.md`) |
@@ -328,7 +328,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
 - [x] Filler while a tool runs: dropped 2026-10-19 (#40) — the T1 working-sound ticks are enough, no spoken "one moment"
 - [x] Called number / TwiML App → business_id mapping from Postgres (`To` in `businesses.phone_numbers`; Voice SDK `business_id` parameter)
-- [ ] Call transfer + take-a-message fallback
+- [x] Call transfer + take-a-message fallback (#50): `transfer_to_human` and `take_message` tools (`app/actions/transfer.py`, `messages.py`); the session hangs up after the bot's last sentence, Twilio continues at the `<Redirect>` after `<Connect>` → `POST /twilio/transfer` dials `businesses.settings.transfer_number`; not answered → voicemail recorded into `messages_for_owner` (migration 0009). Tested with fakes; live check under "Test on Mac"
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
 - [x] Summary runs in the Twilio status callback (DEC-24) — callback built (`POST /twilio/status`, sets `ended_at`); summary checked live 2026-10-21 (see "Post-call summary" below)
 - [x] Measure latency per stage and log it per turn (`latency` event + log: stt, tool, first sentence, first audio)
@@ -341,13 +341,24 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **V29 (#109)** Voice prompt rule added 2026-10-28: re-ask on a call "What types of sauna sessions do you have?" and "What are your hours?" — no mention of "the profile"; area hours (e.g. Rooftop Pool) are labelled as that area's. Also try STT phrase hints per business (sauna, Aufguss, banya) on Twilio audio, or note the result under #73
 - [ ] **V28 / #108 latency with `SEARCH_TOP_N=5`**: run the eval set (the three "Till what time…" / "When do you close?" questions must pass), then a phone or `/web/` call asking "Till what time are you working?" → business hours (midnight), not the Rooftop Pool's. Compare the latency line with the V16 figure (~3.7 s post-search LLM time with 5); if too slow, set `SEARCH_TOP_N` back to 3 and fill an hours fact (#41) instead
+- [ ] **Call transfer + voicemail (#50)**: `uv run alembic upgrade head` (0009); set the transfer number on the business:
+  `UPDATE businesses SET settings = settings || '{"transfer_number": "+1..."}' WHERE id = '...'` (a trial
+  Twilio account can only dial verified numbers). Call the trial number and ask for a person: the bot asks, you
+  say yes, it says one connecting line, the call rings the transfer number and talks through. Then (1) let the
+  transfer number ring out or reject it: expect the "leave a message after the beep" prompt, and after speaking
+  a `messages_for_owner` row with `recording_url`; (2) a normal goodbye still ends the call (Redirect → Hangup);
+  (3) say "leave a message" in a call: the bot reads it back, a row without `recording_url` appears.
+  Check that Twilio accepts relative `<Redirect>`/`action` URLs and that the stream closing really runs the Redirect
 - [ ] **Facts extraction (OPEN-20, V23)** on the crawled pilot: `uv run python -m app.ingest.run
   --url https://www.abathhouse.com/ --only facts --dry-run --force --model google/gemma-4-12b`,
   then again with `--model qwen/qwen3.6-35b-a3b` (`lms ps` first). Audit 5 pages: every
   `+` line true to its quote, nothing missed, rejections sensible; the site-chrome page
   must yield the "7 days a week 8am to 11:30pm" hours fact. Pick the model → `FACTS_LLM_MODEL`
   in `.env`, then run without `--dry-run` and check `--report conflicts`.
+- [ ] **Twilio playback marks (#76, V11/V26)**: on a real call (Voice SDK or phone), interrupt the bot
+  right as a sentence ends and again just after it stops — no false barge-in, first word not swallowed
 - [ ] **Hands-free calls on mobile** (#114): on a phone or tablet browser (Safari, Chrome) the voice app
   disables push-to-talk and uses `mode: "vad"` (mic always open, server VAD); desktop keeps push-to-talk. Watch echo on the phone
   speaker (#83) and the VAD-only silence re-prompt (V17)
@@ -373,6 +384,7 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
   — ✅ 2026-10-18: fails fast with a clear message at startup, no stall per turn
+- [ ] **V8** Set `STT_ALTERNATIVE_LANGUAGES=es-US` (or another), ask a question in that language on `/web/` and over Twilio: the transcript is in that language and the bot answers in it; check English accuracy hasn't dropped and `latest_short` accepts the combination (else try `latest_long`)
 - [ ] **V3** 10+ turns: no "STT final result not in after 2.0s" log line; if it shows,
   compare the transcript with what was said
 - [x] **V14** Ask for "the address and the website": no markup or full URL read aloud;
