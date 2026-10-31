@@ -13,6 +13,24 @@ SYSTEM_PROMPT = (
 )
 
 
+BOOKING_TOOLS = ("check_availability", "create_booking", "cancel_booking")
+
+BOOKING_PROMPT = (
+    "Bookings: when the caller wants to book a table or an appointment, call check_availability "
+    "first and offer only times it says are free. Then read all the details back (date, time, "
+    "people, service, name) and wait for a clear yes before calling create_booking with "
+    "confirmed=true; if they say no or change their mind, don't book. Read the booking reference "
+    "aloud afterwards. To cancel, ask for the reference and call cancel_booking, again only after "
+    "a yes. Never say something is booked or cancelled unless the tool said so."
+)
+
+
+def tools_prompt(enabled: frozenset[str] | set[str]) -> str:
+    """Prompt rules for the optional tools this business enabled (#151); "" when there are none.
+    Only tools that are really offered are described, so the model isn't told about others."""
+    return BOOKING_PROMPT if any(t in enabled for t in BOOKING_TOOLS) else ""
+
+
 def format_profile(profile: BusinessProfile | None) -> str:
     """Known facts, one per line, skipping unset fields. No internal ids (business_id/place_id)."""
     if profile is None:
@@ -90,8 +108,9 @@ def build_prompt(
     question: str,
     summary: BusinessSummary | None = None,
     locations: str = "",
+    enabled_tools: frozenset[str] | set[str] = frozenset(),
 ) -> list[dict]:
     """System message (rules + profile + locations + summary + chunks) + history + the new question."""
-    sections = [SYSTEM_PROMPT, format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
+    sections = [SYSTEM_PROMPT, tools_prompt(enabled_tools), format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
     system_content = "\n\n".join(s for s in sections if s)
     return [{"role": "system", "content": system_content}, *history, {"role": "user", "content": question}]

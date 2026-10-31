@@ -8,11 +8,17 @@ only thing that calls handlers.
 A tool with `side_effect=True` (booking, SMS, message to the owner, ...) gets a required
 `confirmed` boolean added to its schema; the executor refuses to run it until the model
 passes `confirmed=true`, i.e. after reading the details back and hearing a "yes".
+
+A tool with `optional=True` (bookings, sessions) is offered to the model, and run by the
+executor, only for businesses that list its name in `businesses.settings["enabled_tools"]`.
+`TOOLS` holds the always-on tools only; `tools_for(business_id)` adds the enabled optional ones.
 """
 
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+
+from sqlalchemy import select
 
 
 @dataclass(frozen=True)
@@ -34,6 +40,7 @@ class Tool:
     handler: Callable[[ActionContext, dict], str]
     required: tuple[str, ...] = ()
     side_effect: bool = False
+    optional: bool = False  # off unless the business lists it in settings["enabled_tools"]
 
     def schema(self) -> dict:
         properties = dict(self.parameters)
@@ -58,17 +65,44 @@ class Tool:
 
 
 _REGISTRY: dict[str, Tool] = {}
-# Same list object the voice session passes as `tools=`; `register` appends to it.
+# Always-on tools only; `register` appends to it. Callers use `tools_for(business_id)`,
+# which returns this very list when the business enabled no optional tool.
 TOOLS: list[dict] = []
+_OPTIONAL_SCHEMAS: dict[str, dict] = {}
 
 
 def register(tool: Tool) -> Tool:
     if tool.name in _REGISTRY:
         raise ValueError(f"tool {tool.name!r} is already registered")
     _REGISTRY[tool.name] = tool
-    TOOLS.append(tool.schema())
+    if tool.optional:
+        _OPTIONAL_SCHEMAS[tool.name] = tool.schema()
+    else:
+        TOOLS.append(tool.schema())
     return tool
 
 
 def get_tool(name: str) -> Tool | None:
     return _REGISTRY.get(name)
+
+
+def enabled_tool_names(business_id: uuid.UUID) -> frozenset[str]:
+    """Optional tools this business turned on: `businesses.settings["enabled_tools"]`, a
+    list of tool names. Missing, malformed or unknown names mean "off"."""
+    from app.db import tenant_session  # lazy: keeps the registry importable without a DB
+    from app.db.models import Business
+
+    with tenant_session(business_id) as session:
+        settings = session.scalar(select(Business.settings).where(Business.id == business_id)) or {}
+    names = settings.get("enabled_tools")
+    if not isinstance(names, list):
+        return frozenset()
+    return frozenset(n for n in names if isinstance(n, str) and n in _OPTIONAL_SCHEMAS)
+
+
+def tools_for(business_id: uuid.UUID) -> list[dict]:
+    """Schemas to send as `tools=` for this business: `TOOLS` plus its enabled optional tools."""
+    enabled = enabled_tool_names(business_id)
+    if not enabled:
+        return TOOLS
+    return [*TOOLS, *(_OPTIONAL_SCHEMAS[n] for n in sorted(enabled))]

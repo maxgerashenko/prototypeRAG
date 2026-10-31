@@ -129,7 +129,9 @@ def test_chat_answers_send_reasoning_effort_and_tools(fake_llm):
     assert "".join(answer.stream_answer(bid, "hours?")) == "ok"
     effort = get_settings().chat_reasoning_effort  # "none" unless .env overrides it
     assert [r["reasoning_effort"] for r in llm.requests] == [effort, effort]
-    assert all(r["tools"] is answer.TOOLS for r in llm.requests)
+    from app.voice.tools import TOOLS
+
+    assert all(r["tools"] is TOOLS for r in llm.requests)  # no optional tool enabled for this business
 
 
 def test_answer_runs_tool_calls_in_a_loop(fake_llm):
