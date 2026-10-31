@@ -47,9 +47,9 @@ timers). Phone layout 390 × 844; touch targets ≥ 44 px.
 | # | Screen | In the app today | Notes |
 |---|---|---|---|
 | 1 | Pick a business | `SelectScreen.tsx` | **Change:** no radio/check mark and no blue border on the open card — the card only expands (chevron flips). Open card: `#181b22` background, monogram black `#07090c` with a 1.5 px accent border. List keeps its order and scrolls the open card to the top. |
-| 1a | Open-card panel | `SelectScreen.tsx` (`.recent`) | **New:** two rows above *Recent conversations*: **Business settings** (hint: number · greeting cached?) and **Bookings** (hint: today's count). |
+| 1a | Open-card panel | `SelectScreen.tsx` (`.recent`) | **New:** two rows above *Recent conversations*: **Business settings** (hint: number · greeting cached?) and **Bookings** (hint: today's count) — both built. |
 | 1b | Business settings | — **new** | See below. |
-| 1c | Bookings (day view) | — **new** | See below. |
+| 1c | Bookings (day view) | `BookingsScreen.tsx`, `MonthCalendar.tsx`, `BookingSheet.tsx` | Built. **Change:** the top is the Settings-style header (`Businesses` back row, monogram, h1 *Bookings*, `name · host`), not the `BOOKINGS · <business>` caption; the date bar sits below it. See below. |
 | 2 | Previous conversations | `ConversationsScreen.tsx` | Matches. Header monogram is black with accent border. |
 | 3 | Transcript | `TranscriptScreen.tsx` | Matches. |
 | 4 | Connecting | `CallScreens.tsx` | Matches. |
@@ -82,9 +82,9 @@ Back button → list (the business stays open). Header: monogram (black + accent
    first open by default). Needs an aggregate over conversations (question clustering) — no
    API yet.
 
-### 1c. Bookings — day view (new)
+### 1c. Bookings — day view (built)
 
-Back button → list. Header: `BOOKINGS · <business>`, date button (`Today, Oct 31` ▾), **Today**
+Back button → list. Header as on Settings (see the table); under it a bar with the date button (`Today, Oct 31` ▾), **Today**
 (when not on today), ‹ › day arrows. Summary line `N bookings · K by assistant`.
 
 - **Day column** like Google Calendar, one day, vertical scroll. Visible hours = **1 h before
@@ -97,6 +97,11 @@ Back button → list. Header: `BOOKINGS · <business>`, date button (`Today, Oct
 - Red current-time line on today.
 - **Swipe** left/right (horizontal, `touch-action: pan-y`) = next/previous day, with a short
   slide-in animation; a swipe must not also open the booking under the finger.
+- Built with `GET /businesses/{id}/bookings` (one month per request, times in the business
+  timezone as minutes since local midnight). "Today" and the red line follow the device clock.
+  The day column opts out of swipe-back (`data-swipe-back="off"`); the header and bar still
+  swipe back. Known limits: overlapping bookings are drawn on top of each other; the sheet
+  shows only the design's fields (no phone/notes).
 - **Mini calendar**: tapping the date opens a month grid inline — circles, selected day
   filled accent, today outlined accent, green dot = day has bookings; `«` `‹` `›` `»` =
   previous/next year and month; tapping a day jumps to it and closes the grid.
