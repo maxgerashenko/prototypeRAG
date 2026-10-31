@@ -52,6 +52,7 @@ from app.ingest.profile import (
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 from app.ingest.summary import summarize_business
 from app.ingest.timezone import assign_timezones
+from app.voice.greeting_cache import pregenerate as pregenerate_greeting
 
 
 # PDFs linked from crawled pages, on top of max_pages (a sitemap crawl already fills
@@ -436,6 +437,16 @@ def crawl_business(
                 print(f"summary failed: {exc}")
                 summary_status = "failed"
 
+        # V6: after the name is settled (profile, og:site_name) -- the greeting says it.
+        # Needs Google TTS credentials; without them the first call fills the cache.
+        greeting_status = "skipped"
+        if extract_profile:
+            try:
+                greeting_status = f"{pregenerate_greeting(business_id)} generated"
+            except Exception as exc:
+                print(f"greeting audio failed: {exc}")
+                greeting_status = "failed"
+
         return {
             "pages_crawled": pages_crawled,
             "pages_changed": pages_changed,
@@ -446,6 +457,7 @@ def crawl_business(
             "timezones_set": timezones_set,
             "facts": facts_summary,
             "summary": summary_status,
+            "greeting_audio": greeting_status,
         }
     finally:
         client.close()

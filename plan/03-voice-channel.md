@@ -173,7 +173,7 @@ Re-check each item once its environment exists, then tick it or turn it into a t
 | V3 | `finish()` waits up to 5 s, then silently uses the interim text | Potential | Log line "STT final result not in…" | Lower timeout; tune VAD `end_silence_ms` |
 | V4 | `STT_MODEL=latest_short` vs `phone_call` on 8 kHz μ-law audio — accuracy unknown | Potential | Same questions via mic and via Twilio, compare transcripts | Per-transport STT model |
 | V5 | `TTS_VOICE=en-US-Neural2-F` may be retired/renamed; TTS may not return the exact requested rate (8000/16000) → `ValueError` | Potential | First TTS call at both rates | Pick a current voice (Chirp 3 HD?); resample instead of failing |
-| V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Real | Time from connect to first audio | Cache greeting audio per business (onboarding) |
+| V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Fixed in code 2026-10-28 (#74): the standard greeting is stored per business in `greeting_audio` (migration 0009) at both call sample rates — generated at the end of a crawl (`python -m app.voice.greeting_cache --business-id …` re-runs it) or on the first call that misses; read back after a restart. Live timing check pending | "Test on Mac" below | Per-business audio for the "Welcome back" line is not cached (new text every call) |
 | V7 | Missing credentials surface only after ~3 s (auth probes the metadata server), and again on every turn | Real | Seen in smoke test | Check ADC once at startup / fail fast |
 | V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Real (design gap) | Ask a question in another language | `alternative_language_codes`, or language per business |
 
@@ -341,6 +341,10 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **Pre-generated greeting (V6, #74)**: `uv run alembic upgrade head`, then `uv run python -m app.voice.greeting_cache
+  --business-id <pilot id>` (prints `generated: 2`; again → `0`). Call from `/web/` and the phone: the greeting
+  starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
+  TTS). Restart the app and call again — still instant. Change `TTS_VOICE` → one slow call, then instant.
 - [ ] **Facts extraction (OPEN-20, V23)** on the crawled pilot: `uv run python -m app.ingest.run
   --url https://www.abathhouse.com/ --only facts --dry-run --force --model google/gemma-4-12b`,
   then again with `--model qwen/qwen3.6-35b-a3b` (`lms ps` first). Audit 5 pages: every

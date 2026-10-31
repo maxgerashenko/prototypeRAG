@@ -20,6 +20,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     Text,
     UniqueConstraint,
     func,
@@ -394,6 +395,23 @@ class ActionLog(Base):
     arguments: Mapped[dict] = mapped_column(JSONB, nullable=False)
     result: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _now()
+
+
+class GreetingAudio(Base):
+    """Pre-generated greeting audio (app/voice/greeting_cache.py, V6): raw mono PCM16 LE.
+    Keyed by everything that changes the audio, so a stale row is never played."""
+
+    __tablename__ = "greeting_audio"
+
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
+    text: Mapped[str] = mapped_column(Text, primary_key=True)
+    sample_rate: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    voice: Mapped[str] = mapped_column(Text, primary_key=True)
+    language: Mapped[str] = mapped_column(Text, primary_key=True)
+    audio: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[datetime] = _now()
 
 
