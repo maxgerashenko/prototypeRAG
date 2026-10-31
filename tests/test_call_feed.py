@@ -99,11 +99,12 @@ def test_sse_lines_and_keepalive():
 
 def greeting_long_rest_short(text: str, sample_rate: int) -> bytes:
     """Greeting 3 s (long enough to barge into), answer sentences 0.2 s (the test waits them out)."""
-    seconds = 3 if text.startswith("Hi") else 0.2
+    seconds = 3 if text.startswith("Hi, I am an AI") else 0.2
     return b"\0\0" * int(sample_rate * seconds)
 
 
 def test_phone_call_shows_up_live(settings, business, monkeypatch):
+    session_mod._greeting_audio.clear()  # the opening text is the same for every business (DEC-53)
     monkeypatch.setattr(session_mod, "get_async_chat_client", lambda: AnswerLLM())
     monkeypatch.setattr(ws_mod, "CallSession", functools.partial(
         CallSession, transcriber_factory=FakeTranscriber, synthesize=greeting_long_rest_short))
@@ -146,7 +147,7 @@ def test_phone_call_shows_up_live(settings, business, monkeypatch):
     assert all(m["call_id"] == "MZ1" for m in msgs[2:-1])
     seen = [(e["type"], e.get("text", e.get("active"))) for e in events if e["type"] != "latency"]
     assert seen == [
-        ("reply", "Hi, you've reached Zebra Spa. I'm an AI assistant. How can I help?"),
+        ("reply", "Hi, I am an AI assistant."),
         ("playback", True),
         ("clear", None),
         ("playback", False),  # barge-in stops the bot at once

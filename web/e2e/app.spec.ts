@@ -82,7 +82,7 @@ test.describe("1 · pick a business", () => {
     await expect(page.locator(".halo")).toHaveCount(0);
   });
 
-  test("the main Twilio number is the title, tappable to call, and moves to the picked business", async ({ page }) => {
+  test("the main Twilio number is the title and tappable to call; picking a business does not move it", async ({ page }) => {
     const N = "+15550001234";
     const init = data();
     init.businesses = init.businesses!.map((b) => (b.id === "b1" ? { ...b, phone_numbers: [N] } : b));
@@ -91,21 +91,15 @@ test.describe("1 · pick a business", () => {
     await expect(link).toHaveText("+1 (555) 000-1234");
     await expect(link).toHaveAttribute("href", `tel:${N}`);
     await expect(page.getByTestId("num-note")).toContainText("Calls to this number reach Corner Bakery.");
+    await expect(page.getByTestId("num-note")).toContainText("Change which business it reaches in that business's Settings.");
     await expect(page.getByTestId("biz-num")).toHaveCount(1);
     await expect(card(page, "Corner Bakery").getByTestId("biz-num")).toHaveText("+1 (555) 000-1234");
 
-    await pick(page, "Harbor Auto Repair"); // picking assigns the number
-    await expect(page.getByTestId("num-note")).toContainText("Calls to this number reach Harbor Auto Repair.");
-    await expect(card(page, "Harbor Auto Repair").getByTestId("biz-num")).toHaveText("+1 (555) 000-1234");
+    await pick(page, "Harbor Auto Repair"); // opening a card only selects it (DEC-52)
+    await expect(page.getByTestId("num-note")).toContainText("Calls to this number reach Corner Bakery.");
+    await expect(card(page, "Harbor Auto Repair").getByTestId("biz-num")).toHaveCount(0);
     await expect(page.getByTestId("biz-num")).toHaveCount(1);
-    expect(api.requests).toContain("POST /businesses/b2/main-number");
-
-    await pick(page, "Harbor Auto Repair"); // unselecting keeps the number where it is
-    await pick(page, "Corner Bakery");
-    await expect(page.getByTestId("num-note")).toContainText("reach Corner Bakery.");
-    expect(api.requests.filter((r) => r.startsWith("POST"))).toEqual([
-      "POST /businesses/b2/main-number", "POST /businesses/b1/main-number",
-    ]);
+    expect(api.requests.filter((r) => r.startsWith("POST") || r.startsWith("PUT"))).toEqual([]);
   });
 
   test("no number: the plain header, and picking assigns nothing", async ({ page }) => {

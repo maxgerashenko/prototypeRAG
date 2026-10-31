@@ -1,8 +1,10 @@
 // Mock backend for the browser tests: the HTTP API of app/api/*.py and the
 // /voice/browser WebSocket of app/voice/browser_ws.py, driven from the test.
 
-import type { Page, Request, WebSocketRoute } from "@playwright/test";
-import type { Business, ConversationDetail, ConversationSource, ConversationSummary, VoiceEvent } from "../src/api";
+import type { Page, Request, Route, WebSocketRoute } from "@playwright/test";
+import type {
+  Business, ConversationDetail, ConversationSource, ConversationSummary, GreetingStatus, TopQuestions, TwilioNumbers, VoiceEvent,
+} from "../src/api";
 
 const MIN = 60_000;
 
@@ -36,15 +38,39 @@ export function summary(c: ConversationDetail): ConversationSummary {
 export interface ApiState {
   businesses: Business[];
   conversations: Record<string, ConversationDetail[]>;
-  /** Make an endpoint fail: "businesses" | "conversations" | "detail". */
+  /** Make an endpoint fail: "businesses" | "conversations" | "detail" | "greeting" | "greeting-save" |
+   * "questions" | "numbers" | "assign". */
   fail: Set<string>;
+  /** Hold an endpoint's answer for this many ms (same keys as `fail`). */
+  delay: Record<string, number>;
+  /** Business settings (app/api/business_settings.py): one greeting for every business. */
+  greeting: GreetingStatus;
+  questions: TopQuestions;
+  /** GET /twilio/numbers; assigning moves `business_id`/`business_name` like PUT /businesses/{id}/number. */
+  numbers: TwilioNumbers;
   requests: string[];
   /** GET /twilio/number; null = TWILIO_PHONE_NUMBER not set. */
   mainNumber: string | null;
 }
 
 export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise<ApiState> {
-  const api: ApiState = { businesses: [], conversations: {}, fail: new Set(), requests: [], mainNumber: null, ...init };
+  const api: ApiState = {
+    businesses: [], conversations: {}, fail: new Set(), delay: {}, requests: [], mainNumber: null,
+    greeting: { text: "", is_default: true, cached: false, cached_at: null, max_length: 300 },
+    questions: { total_questions: 0, conversations: 0, days: 30, questions: [] },
+    numbers: { numbers: [], error: null },
+    ...init,
+  };
+  // answer (or fail) a settings endpoint, after its optional delay
+  const reply = async (route: Route, key: string, body: unknown, status = 200) => {
+    if (api.delay[key]) await new Promise((r) => setTimeout(r, api.delay[key]));
+    if (api.fail.has(key)) return route.fulfill({ status: 500, body: "boom" });
+    return route.fulfill({ status, ...json(body) });
+  };
+  await page.route("**/twilio/numbers", (route) => {
+    api.requests.push("GET /twilio/numbers");
+    return reply(route, "numbers", api.numbers);
+  });
   const json = (body: unknown) => ({ contentType: "application/json", body: JSON.stringify(body) });
   await page.route("**/twilio/number", (route) => route.fulfill(json({ number: api.mainNumber })));
   await page.route(
@@ -62,6 +88,32 @@ export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise
           return { ...b, phone_numbers: method === "POST" && b.id === bizId ? [...rest, n] : rest };
         });
         return route.fulfill(json({ business_id: bizId, number: method === "POST" ? n : null }));
+      }
+      if (sub === "greeting") {
+        if (method === "GET") return reply(route, "greeting", api.greeting);
+        const text = (route.request().postDataJSON() as { text: string }).text;
+        if (text.length > api.greeting.max_length) {
+          return route.fulfill({ status: 422, ...json({ detail: `Greeting is too long (max ${api.greeting.max_length} characters).` }) });
+        }
+        if (!api.fail.has("greeting-save")) {
+          api.greeting = { ...api.greeting, text, is_default: text === "", cached: true, cached_at: new Date().toISOString() };
+        }
+        return reply(route, "greeting-save", api.greeting);
+      }
+      if (sub === "top-questions") return reply(route, "questions", api.questions);
+      if (sub === "number") {
+        const number = (route.request().postDataJSON() as { number: string }).number;
+        const movedFrom = api.businesses.filter((b) => b.id !== bizId && b.phone_numbers.includes(number)).map((b) => b.id);
+        if (!api.fail.has("assign")) {
+          api.businesses = api.businesses.map((b) => (
+            b.id === bizId ? { ...b, phone_numbers: [number] } : { ...b, phone_numbers: b.phone_numbers.filter((x) => x !== number) }
+          ));
+          const name = api.businesses.find((b) => b.id === bizId)?.name ?? null;
+          api.numbers = { ...api.numbers, numbers: api.numbers.numbers.map((n) => (
+            n.number === number ? { ...n, business_id: bizId!, business_name: name } : n.business_id === bizId ? { ...n, business_id: null, business_name: null } : n
+          )) };
+        }
+        return reply(route, "assign", { business_id: bizId, phone_numbers: [number], moved_from: movedFrom });
       }
       const kind = convoId ? "detail" : bizId ? "conversations" : "businesses";
       if (api.fail.has(kind)) return route.fulfill({ status: 500, body: "boom" });

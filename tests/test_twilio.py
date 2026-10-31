@@ -299,10 +299,11 @@ def _start(business_id, call_sid, token):
 def greeting_long_synthesize(text: str, sample_rate: int) -> bytes:
     """3 s greeting, so the caller can talk over it; a 50 ms answer plays out before the
     hang-up, so it is saved whole (B2 saves only the sentences the caller heard)."""
-    return (fake_synthesize if text.startswith("Hi,") else short_synthesize)(text, sample_rate)
+    return (fake_synthesize if text.startswith("Hi, I am an AI") else short_synthesize)(text, sample_rate)
 
 
 def test_media_stream_full_call(settings, business, monkeypatch):
+    session_mod._greeting_audio.clear()  # the opening text is the same for every business (DEC-53)
     monkeypatch.setattr(session_mod, "get_async_chat_client", lambda: AnswerLLM())
     monkeypatch.setattr(ws_mod, "CallSession", functools.partial(
         CallSession, transcriber_factory=FakeTranscriber, synthesize=greeting_long_synthesize))

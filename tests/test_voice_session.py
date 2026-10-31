@@ -284,7 +284,7 @@ def test_full_turn_with_tool_call(business, monkeypatch):
     assert len(FakeTranscriber.created[0].audio) >= len(_speech()) * 0.8
 
     replies = [e["text"] for e in events if e["type"] == "reply"]
-    assert replies[0] == "Hi, you've reached Zebra Spa. I'm an AI assistant. How can I help?"
+    assert replies[0] == "Hi, I am an AI assistant."
     assert replies[1:] == ["We close at 5 pm on Saturday.", "Anything else?"]
     assert {"type": "transcript", "text": "What time do you close on Saturday?"} in events
     speech = [a for a in audio_out if len(a) == len(short_synthesize("", RATE))]
@@ -781,7 +781,7 @@ def test_greeting_audio_is_synthesized_once_per_text_and_rate(business, monkeypa
             await s.close()
 
         run_async(run())
-    assert calls == ["Hi, you've reached Zebra Spa. I'm an AI assistant. How can I help?"]
+    assert calls == ["Hi, I am an AI assistant."]
     assert len(audio_out) == 2 and audio_out[0] == audio_out[1]
 
     # a "welcome back" greeting carries the earlier topic: synthesized every time, not cached

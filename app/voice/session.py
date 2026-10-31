@@ -56,7 +56,7 @@ from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import format_profile, format_summary
 from app.voice import greeting_cache, tts
 from app.voice.audio import working_sound
-from app.voice.greeting_cache import greeting_text, voice_name
+from app.voice.greeting_cache import business_greeting, voice_name
 from app.voice.stt import TurnTranscriber
 from app.voice.tools import TOOLS, run_tool
 from app.voice.vad import TurnDetector
@@ -247,6 +247,7 @@ class CallSession:
         self._history: list[dict] = []
         self._system_prompt = ""
         self.conversation_id: uuid.UUID | None = None
+        self._opening = ""  # the standard greeting, set by _load_business
 
     # --- lifecycle ------------------------------------------------------------------
 
@@ -258,7 +259,7 @@ class CallSession:
         if self._topic is not None:
             greeting = f"Welcome back to {name}. I'm an AI assistant. Let's pick up where we left off: {self._topic}."
         else:
-            greeting = greeting_text(name)
+            greeting = self._opening  # DEC-53: AI disclosure + the owner's text
         self._reply_task = self._spawn(self._speak_fixed(greeting, cache=self._topic is None))
         if get_settings().voice_llm_warmup:
             self._warmup_task = asyncio.create_task(self._warm_up_llm())
@@ -692,6 +693,7 @@ class CallSession:
                 self._system_prompt += f"\n\n{locations_text}"  # DEC-49
             if summary_text := format_summary(session.get(BusinessSummary, self.business_id)):
                 self._system_prompt += f"\n\n{summary_text}"
+            self._opening = business_greeting(business, profile)
             return voice_name(business, profile)
 
     def _load_cached_audio(self, key: tuple) -> bytes | None:

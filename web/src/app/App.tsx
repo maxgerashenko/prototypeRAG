@@ -13,7 +13,7 @@ import {
   getMainNumber,
   listBusinesses,
   listConversations,
-  setMainNumber,
+  type AssignResult,
   type Business,
   type ConversationDetail,
   type ConversationSummary,
@@ -21,9 +21,12 @@ import {
 import { CallScreen, ConnectingScreen, EndedScreen, PhoneCallScreen } from "./CallScreens";
 import { ConversationsScreen } from "./ConversationsScreen";
 import { SelectScreen } from "./SelectScreen";
+import { SettingsScreen } from "./SettingsScreen";
 import { TranscriptScreen } from "./TranscriptScreen";
+import { useBusinessSettings } from "./useBusinessSettings";
 import { useVoiceCall } from "./useVoiceCall";
 import { PhoneIcon } from "./icons";
+import "./settings.css";
 import { callerSpoke } from "./callState";
 import { callerLabel, latestLive } from "./liveCalls";
 import { useLiveCalls } from "./useLiveCalls";
@@ -38,7 +41,7 @@ export interface Loadable<T> {
   error?: string;
 }
 
-type Stage = "select" | "convos" | "transcript" | "connecting" | "call" | "ended" | "phone" | "phoneEnded";
+type Stage = "select" | "settings" | "convos" | "transcript" | "connecting" | "call" | "ended" | "phone" | "phoneEnded";
 
 interface TranscriptRef {
   bizId: string;
@@ -110,21 +113,17 @@ export function App() {
     getMainNumber().then((r) => setMainNumberState(r.number), () => setMainNumberState(null));
   }, []);
 
-  // picking a business also points the one main number at it (taken off whichever had it),
-  // so dialling the number from a phone reaches the business on screen
-  const assignMainNumber = (bizId: string) => {
-    if (!mainNumber || find(bizId)?.phone_numbers.includes(mainNumber)) return;
-    setMainNumber(bizId, true).then(
-      () => setBusinesses((prev) => ({
-        ...prev,
-        data: prev.data?.map((b) => {
-          const rest = b.phone_numbers.filter((n) => n !== mainNumber);
-          return { ...b, phone_numbers: b.id === bizId ? [...rest, mainNumber] : rest };
-        }),
+  // a number was assigned in Settings (DEC-52): it moves to this business and leaves any other
+  const onAssigned = useCallback((r: AssignResult) => {
+    setBusinesses((prev) => ({
+      ...prev,
+      data: prev.data?.map((b) => ({
+        ...b,
+        phone_numbers: b.id === r.business_id ? r.phone_numbers : b.phone_numbers.filter((n) => !r.phone_numbers.includes(n)),
       })),
-      (err) => setBanner(`Couldn’t assign ${mainNumber}: ${errorText(err)}`),
-    );
-  };
+    }));
+  }, []);
+  const settings = useBusinessSettings(selId, stage === "settings", onAssigned);
 
   const openConversation = (bizId: string, convoId: string, returnTo: TranscriptRef["returnTo"]) => {
     const req = ++detailReq.current;
@@ -164,6 +163,12 @@ export function App() {
       setBanner(`Couldn’t start the call: ${errorText(err)}`);
       setStage("select");
     });
+  };
+
+  // Back from Settings: the number picker closes first; the business stays open on the list
+  const leaveSettings = () => {
+    if (settings.sheetOpen) settings.onCloseSheet();
+    else setStage("select");
   };
 
   const cancelCall = () => {
@@ -229,7 +234,11 @@ export function App() {
   const onKey = useRef<(e: KeyboardEvent, down: boolean) => void>(() => {});
   onKey.current = (e, down) => {
     const el = document.activeElement;
-    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
+    // typing in a field: only Esc, and only to close the number picker (the filter field is in it)
+    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+      if (down && e.key === "Escape" && stage === "settings" && settings.sheetOpen) settings.onCloseSheet();
+      return;
+    }
     if (e.key === " ") {
       e.preventDefault();
       if (!down) {
@@ -244,6 +253,7 @@ export function App() {
     } else if (down && e.key === "Escape") {
       if (stage === "connecting") cancelCall();
       else if (stage === "call") voice.hangUp();
+      else if (stage === "settings") leaveSettings();
       else if (stage === "convos") setStage("select");
       else if (stage === "transcript" && transcript) setStage(transcript.returnTo);
       else if (stage === "ended") backToConversations();
@@ -293,7 +303,8 @@ export function App() {
 
   // swipe right = the screen's Back button (mobile). Off on the picker and during a call of our own.
   const goBack: (() => void) | null =
-    stage === "convos" ? () => setStage("select")
+    stage === "settings" ? leaveSettings
+    : stage === "convos" ? () => setStage("select")
     : stage === "transcript" && transcript ? () => setStage(transcript.returnTo)
     : stage === "ended" ? backToConversations
     : stage === "phone" || stage === "phoneEnded" ? closePhone
@@ -335,7 +346,6 @@ export function App() {
             setSelId(id);
             if (id) {
               loadConvos(id);
-              assignMainNumber(id);
             }
           }}
           onOpen={(bizId, convoId) => openConversation(bizId, convoId, "select")}
@@ -344,12 +354,21 @@ export function App() {
             setStage("convos");
           }}
           onCall={startCall}
+          onSettings={(bizId) => {
+            setSelId(bizId);
+            setStage("settings");
+          }}
+          greetingCached={settings.greetingCached}
           mainNumber={mainNumber}
           onRetry={loadBusinesses}
           onDismissBanner={() => setBanner(null)}
         />
         </PullRegion>
         </>
+      )}
+
+      {stage === "settings" && selId && (
+        <SettingsScreen biz={fallbackBiz(selId)} {...settings} onBack={leaveSettings} />
       )}
 
       {stage === "convos" && selId && (
