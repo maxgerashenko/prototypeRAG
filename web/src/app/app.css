@@ -133,13 +133,13 @@ a:hover { color: var(--bot-light); }
   font-size: 16px; font-family: inherit;
 }
 .search:focus-within { border-color: var(--accent); }
-.biz-list { padding: 2px 20px 16px; display: flex; flex-direction: column; gap: 8px; }
+.biz-list { scrollbar-gutter: stable; padding: 2px 12px 16px 20px; /* 12 + the 8px gutter = 20, so cards end where the search box ends */ display: flex; flex-direction: column; gap: 8px; }
 .biz-card {
   flex-shrink: 0; border-radius: 18px; overflow: hidden;
   border: 1.5px solid var(--line); background: var(--card);
   transition: border-color .25s ease, background .25s ease, box-shadow .25s ease;
 }
-.biz-card.on { border-color: var(--accent); background: var(--tint); box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.biz-card.on { background: #181b22; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
 /* numbers that reach this business (the main Twilio number moves to the picked one) */
 .biz-num { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--call); min-width: 0; }
 .biz-pick {
@@ -151,16 +151,12 @@ a:hover { color: var(--bot-light); }
   justify-content: center; font-size: 14px; font-weight: 800; transition: background .25s ease;
   background: var(--chip); color: var(--chip-text);
 }
-.biz-card.on .biz-mono { box-shadow: inset 0 0 0 2px var(--accent); }
+.biz-card.on .biz-mono { color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .biz-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .biz-name { font-size: 16px; font-weight: 700; color: var(--text); }
 .biz-sub { font-size: 13px; color: var(--muted); }
-.radio {
-  width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center;
-  justify-content: center; transition: all .2s ease; border: 2px solid #3a404c;
-}
-.biz-card.on .radio { background: var(--accent); color: var(--ink); border: 0; }
-.radio svg { animation: vw-pop .28s ease-out; }
+.biz-chev { width: 24px; height: 24px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: transform .25s ease; }
+.biz-card.on .biz-chev { transform: rotate(180deg); }
 .recent {
   border-top: 1px solid var(--line); padding: 12px 8px 10px; display: flex; flex-direction: column;
   gap: 4px; overflow: hidden; animation: vw-open .4s ease-out;

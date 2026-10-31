@@ -51,7 +51,12 @@ export const ChevronRight = () => (
     <polyline points="9 18 15 12 9 6" />
   </Icon>
 );
-export const ChevronLeft = () => (
+export const ChevronDown = () => (
+  <Icon size={16} color="#8A919D" stroke={2.4}>
+    <polyline points="6 9 12 15 18 9" />
+  </Icon>
+);
+export const ChevronLeft =() => (
   <Icon size={22}>
     <polyline points="15 18 9 12 15 6" />
   </Icon>
