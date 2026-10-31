@@ -2,7 +2,7 @@
 
 Child tables reference their parent by `(business_id, id)`, so a row can never point at
 another business's row — the database rejects cross-tenant links even before RLS.
-Action tables (bookings, ...) are added in step 5 (plan/04-actions.md); `action_log` is first.
+Action tables (plan/04-actions.md): `action_log`, `booking_rules`, `bookings`.
 """
 
 import uuid
@@ -395,6 +395,64 @@ class ActionLog(Base):
     result: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = _now()
+
+
+class BookingRule(Base):
+    """Owner-set booking rules, one row per business (app/actions/booking/rules.py).
+    No row = defaults: 60-minute slots, one booking at a time, no hours check."""
+
+    __tablename__ = "booking_rules"
+    __table_args__ = (
+        CheckConstraint("slot_minutes > 0 AND capacity > 0 AND lead_time_minutes >= 0", name="positive"),
+    )
+
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
+    slot_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
+    capacity: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    lead_time_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    max_party_size: Mapped[int | None] = mapped_column(Integer)
+    # {"mon": [["09:00", "21:00"]], ...}; NULL = no hours check
+    hours: Mapped[dict | None] = mapped_column(JSONB)
+    # {"massage": 60, ...} lowercase service name -> minutes; others use slot_minutes
+    service_durations: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    updated_at: Mapped[datetime] = _now()
+
+
+class Booking(Base):
+    """A booking or appointment in the internal backend. Times are UTC; `ends_at` is
+    starts_at + the service's duration at booking time."""
+
+    __tablename__ = "bookings"
+    __table_args__ = (
+        CheckConstraint("type IN ('table', 'appointment')", name="type"),
+        CheckConstraint("status IN ('confirmed', 'cancelled')", name="status"),
+        CheckConstraint("ends_at > starts_at", name="times"),
+        UniqueConstraint("business_id", "id"),
+        ForeignKeyConstraint(
+            ["business_id", "conversation_id"],
+            ["conversations.business_id", "conversations.id"],
+            ondelete="SET NULL (conversation_id)",
+        ),
+        Index("ix_bookings_business_id_starts_at", "business_id", "starts_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    business_id: Mapped[uuid.UUID] = _business_id()
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    party_size: Mapped[int | None] = mapped_column(Integer)
+    service: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    phone: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="confirmed")
+    external_ref: Mapped[str | None] = mapped_column(Text)  # id in Google Calendar etc. (DEC-48)
+    created_at: Mapped[datetime] = _now()
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 def message_order() -> tuple:
