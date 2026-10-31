@@ -127,8 +127,7 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 - [ ] Google Calendar backend for the pilot (service account, free/busy, create event, `external_ref`) — DEC-48
 - [ ] Google Calendar per-business OAuth (R14) — stage 3
 - [ ] Owner notifications
-- [ ] Test scripts: simulated conversations for booking happy path + edge cases
-  (closed day, full slot, change of mind, cancellation)
+- [x] Test scripts: simulated conversations for booking happy path + edge cases (#55): `tests/test_booking_conversations.py` — scripted calls where a fake model plays tool calls and answers through the real tool loop (`answer_question`), executor, booking tools, rules and Postgres. Covers happy path, appointment with a service, closed day, outside hours, full slot (+ alternatives), party too large, change of mind, declining at the read-back, bad date / missing name, cancellation (frees the slot, wrong phone, unknown reference), text chat without caller ID, caller ID beating a made-up number. Tests only: the booking tools are still not wired into live calls (#151), and a fake model doesn't show how a real model behaves — live run under 03 "Test on Mac"
 
 ## Notes
 
