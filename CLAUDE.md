@@ -269,6 +269,11 @@ tools — and `CLAUDE.md`) don't need a branch or PR: pull `main`, commit there.
 Work is tracked as GitHub issues, grouped by milestones named `S<stage> · M<n> <name>`;
 labels are `area:*`, `type:*`, `blocked` and `in-progress`. When working on an issue:
 
+- **Label `LOCAL_USER_PHONE`** (grey) marks work that is done on the Mac and/or needs the
+  user — e.g. a live phone/Twilio call, a mic/speaker check, a manual "Test on Mac" check.
+  When a plan is created (`plan/feature-<slug>.md`) and its tasks become GitHub issues,
+  add this label to every issue whose step is `USER` or can only be done on the Mac /
+  with a real call. Leave it off pure code work any agent can do and off cloud-only work.
 - Put `Fixes #n` in the PR body, so GitHub closes the issue when the PR merges.
 - While a PR is open for an issue, give the issue the `in-progress` label and link the PR.
 - When the PR merges, close the issue as completed, remove `in-progress`, and make sure the

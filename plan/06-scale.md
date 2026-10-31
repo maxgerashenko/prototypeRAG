@@ -42,7 +42,8 @@ Trigger: second business. Details in [04-actions.md](04-actions.md) (dashboard).
    location, incl. conflicts, stale facts and the summary (DEC-38,
    [07-knowledge-quality.md](07-knowledge-quality.md)).
 4. Assign a Twilio number → `business_id` (per location or per business: OPEN-21) (its monthly rental is charged to the business, DEC-34); generate greeting audio (DEC-17).
-5. Owner tests answers, adds custom replies, enables tools, connects calendar (OAuth, R14).
+5. Ask the owner which languages callers should be able to use (goal: support all languages, each business picks its own; OPEN-03, V8). Stored per business: STT primary + up to 3 alternatives, TTS voice per language, answer language. Offer the region's common languages as the menu (New York: the 10 Local Law 30 languages).
+6. Owner tests answers, adds custom replies, enables tools, connects calendar (OAuth, R14).
 
 ## 3. Cost visibility and pricing
 

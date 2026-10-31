@@ -2,7 +2,7 @@
 
 Child tables reference their parent by `(business_id, id)`, so a row can never point at
 another business's row — the database rejects cross-tenant links even before RLS.
-Action tables (plan/04-actions.md): `action_log`, `booking_rules`, `bookings`.
+Action tables (bookings, ...) are added in step 5 (plan/04-actions.md); `action_log` is first.
 """
 
 import uuid
@@ -20,6 +20,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     Text,
     UniqueConstraint,
     func,
@@ -394,6 +395,50 @@ class ActionLog(Base):
     arguments: Mapped[dict] = mapped_column(JSONB, nullable=False)
     result: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _now()
+
+
+class GreetingAudio(Base):
+    """Pre-generated greeting audio (app/voice/greeting_cache.py, V6): raw mono PCM16 LE.
+    Keyed by everything that changes the audio, so a stale row is never played."""
+
+    __tablename__ = "greeting_audio"
+
+    business_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), primary_key=True
+    )
+    text: Mapped[str] = mapped_column(Text, primary_key=True)
+    sample_rate: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    voice: Mapped[str] = mapped_column(Text, primary_key=True)
+    language: Mapped[str] = mapped_column(Text, primary_key=True)
+    audio: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = _now()
+
+
+class MessageForOwner(Base):
+    """A message a caller left for the owner (`take_message` tool, or a voicemail after an
+    unanswered transfer: `recording_url`). Owner notification is not built yet."""
+
+    __tablename__ = "messages_for_owner"
+    __table_args__ = (
+        CheckConstraint("urgency IN ('normal', 'urgent')", name="urgency"),
+        CheckConstraint("status IN ('new', 'seen')", name="status"),
+        ForeignKeyConstraint(
+            ["business_id", "conversation_id"],
+            ["conversations.business_id", "conversations.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    business_id: Mapped[uuid.UUID] = _business_id()
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    caller_name: Mapped[str | None] = mapped_column(Text)
+    caller_phone: Mapped[str | None] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    urgency: Mapped[str] = mapped_column(Text, nullable=False, server_default="normal")
+    recording_url: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="new")
     created_at: Mapped[datetime] = _now()
 
 

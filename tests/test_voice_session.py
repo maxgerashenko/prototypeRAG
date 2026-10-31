@@ -7,6 +7,7 @@ through the voice app at /web/ (push-to-talk) or web/voice-debug.html (VAD).
 """
 
 import asyncio
+import time
 import uuid
 import wave
 from pathlib import Path
@@ -19,7 +20,8 @@ from sqlalchemy import delete, select
 
 from app.db import tenant_session
 from app.db.models import Business, Chunk, Conversation, CustomReply, Message
-from app.voice import session as session_mod
+from app.config import get_settings
+from app.voice import greeting_cache, session as session_mod
 from app.voice.session import CallSession, speakable, split_sentences
 
 FIXTURES = Path(__file__).parent / "fixtures" / "voice"
@@ -797,6 +799,75 @@ def test_greeting_audio_is_synthesized_once_per_text_and_rate(business, monkeypa
     assert len(session_mod._greeting_audio) == 1
 
 
+def _call_once(business, send_audio, send_event, synthesize):
+    s = CallSession(business, RATE, send_audio, send_event, synthesize=synthesize)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+
+
+def test_greeting_audio_survives_a_restart_via_the_database(business, monkeypatch):
+    """V6: the in-process cache is lost on restart; the stored audio is not."""
+    calls: list[str] = []
+
+    def counting_synthesize(text, rate):
+        calls.append(text)
+        return fake_synthesize(text, rate)
+
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+    _call_once(business, s._send_audio, s._send_event, counting_synthesize)
+    session_mod._greeting_audio.clear()  # "restart"
+    _call_once(business, s._send_audio, s._send_event, counting_synthesize)
+    assert len(calls) == 1 and len(audio_out) == 2 and audio_out[0] == audio_out[1]
+
+
+def test_pregenerated_greeting_needs_no_tts_at_call_start(business, monkeypatch):
+    calls: list[tuple] = []
+
+    def counting_synthesize(text, rate):
+        calls.append((text, rate))
+        return fake_synthesize(text, rate)
+
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+    assert greeting_cache.pregenerate(business, counting_synthesize, rates=(RATE, 16000)) == 2
+    assert greeting_cache.pregenerate(business, counting_synthesize, rates=(RATE, 16000)) == 0  # idempotent
+    assert [r for _, r in calls] == [RATE, 16000]
+    calls.clear()
+    _call_once(business, s._send_audio, s._send_event, counting_synthesize)
+    assert calls == [] and len(audio_out) == 1
+
+
+def test_changed_voice_is_a_cache_miss(business, monkeypatch):
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+    greeting_cache.pregenerate(business, fake_synthesize, rates=(RATE,))
+    session_mod._greeting_audio.clear()
+    monkeypatch.setattr(get_settings(), "tts_voice", "en-US-Other-Voice")
+    calls: list[str] = []
+
+    def counting_synthesize(text, rate):
+        calls.append(text)
+        return fake_synthesize(text, rate)
+
+    _call_once(business, s._send_audio, s._send_event, counting_synthesize)
+    assert len(calls) == 1
+
+
+def test_greeting_cache_database_error_falls_back_to_tts(business, monkeypatch):
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(greeting_cache, "load", boom)
+    monkeypatch.setattr(greeting_cache, "store", boom)
+    _call_once(business, s._send_audio, s._send_event, fake_synthesize)
+    assert len(audio_out) == 1
+
+
 @pytest.mark.parametrize("rate", [8000, 16000])
 def test_working_sound_is_quiet_and_not_speech_for_the_vad(rate):
     import numpy as np
@@ -1051,3 +1122,78 @@ def test_barge_in_on_the_goodbye_keeps_the_call(business, monkeypatch):
     run_async(run())
     assert {"type": "clear"} in events
     assert not hung_up
+
+
+def _marked_session(business, monkeypatch):
+    s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
+    s._playback_marks = True
+    return s, events
+
+
+def test_playback_marks_sent_after_each_audio_chunk(business, monkeypatch):
+    s, events = _marked_session(business, monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    marks = [e["name"] for e in events if e["type"] == "mark"]
+    assert marks and len(set(marks)) == len(marks)
+
+
+def test_no_marks_without_playback_marks(business, monkeypatch):
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert not any(e["type"] == "mark" for e in events)
+
+
+def test_mark_echo_ends_playback_early_and_late_echo_keeps_bot_active(business, monkeypatch):
+    s, events = _marked_session(business, monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        assert s._bot_active()  # greeting's estimate says 3 s are left
+        for e in [e for e in events if e["type"] == "mark"]:
+            s.on_mark(e["name"])
+        assert not s._bot_active()  # client says it finished, estimate overridden
+        assert s._marks == {}
+
+        # estimate over, echo not yet in: still playing until the grace runs out
+        await s._play(b"\0\0" * (RATE // 10))
+        s._playing_until = time.monotonic() - 0.1
+        assert s._bot_active()
+        name = next(iter(s._marks))
+        s._marks[name] = time.monotonic() - session_mod.MARK_GRACE_S - 0.1  # echo never came
+        assert not s._bot_active()
+        await s.close()
+
+    run_async(run())
+
+
+def test_mark_echo_of_later_mark_clears_earlier_and_unknown_is_ignored(business, monkeypatch):
+    s, events = _marked_session(business, monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s._play(b"\0\0" * (RATE // 10))
+        names = list(s._marks)
+        assert len(names) >= 2
+        s.on_mark("nope")
+        assert list(s._marks) == names
+        s.on_mark(names[0])
+        assert list(s._marks) == names[1:] and s._playing_until > time.monotonic()
+        s.on_mark(names[-1])
+        assert s._marks == {}
+        await s.close()
+
+    run_async(run())

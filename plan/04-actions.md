@@ -5,7 +5,7 @@ messages, and gives the business owner a summary of every conversation.
 
 **Done when:** in one phone call, a caller books an appointment (the stage-1 pilot is a
 spa, DEC-31 — table booking uses the same tools); the booking appears in the owner
-dashboard (or Google Calendar), the caller hears the booking reference, and the call has a
+dashboard (or Google Calendar), the caller gets an SMS confirmation, and the call has a
 saved summary.
 
 ---
@@ -25,7 +25,7 @@ caller: "8 please, name is Anna"
   LLM ─► confirms details back to the caller
 caller: "yes"
   LLM ─► create_booking(date=..., time=20:00, party_size=4, name="Anna", phone=<caller id>)
-  code ─► booking saved
+  code ─► booking saved, SMS sent
 ```
 
 ## Tools
@@ -33,8 +33,9 @@ caller: "yes"
 | Tool | Parameters | Used by |
 |---|---|---|
 | `check_availability` | date, time, party_size / service, duration | restaurants, appointments |
-| `create_booking` | date, time, party_size, service, name, phone, notes | both: a `service` makes it an appointment (one tool for tables and appointments, built in #52); phone is caller ID, the model's number only without one |
-| `cancel_booking` | reference, phone | both; the phone must match the booking. Change = cancel + book again |
+| `create_booking` | date, time, party_size, name, phone, notes | restaurants |
+| `create_appointment` | service, date, time, name, phone | salons, clinics, services |
+| `cancel_or_change_booking` | phone, booking reference, new time | both |
 | `take_message` | name, phone, message, urgency | fallback for anything |
 | `transfer_to_human` | reason | voice channel (Twilio `<Dial>`) |
 | `send_sms` | text | confirmations (internal, called after bookings) |
@@ -90,8 +91,8 @@ second business ([06-scale.md](06-scale.md)).
 ## Data model additions
 
 - `bookings` — id, business_id, conversation_id, type, start, end, party_size/service,
-  name, phone, status, external_ref (built)
-- `booking_rules` — business_id, capacity, slot length, lead time, max party, hours per weekday, service durations (built)
+  name, phone, status, external_ref
+- `booking_rules` — business_id, capacity per slot, slot length, lead time, max party
 - `messages_for_owner` — id, business_id, conversation_id, text, status
 - `conversations` — + summary, outcome, intent, follow_up, recording_url
 - `action_log` — business_id, conversation_id, tool, arguments, result, timestamp (debugging + audit)
@@ -105,9 +106,9 @@ All tables carry `business_id` and are covered by Row-Level Security (R18).
 app/actions/
   registry.py        tool schemas + per-business enabled tools
   executor.py        runs tool calls, confirmation guard, logging
-  booking/           rules.py, internal.py (done), tools.py (done), google_calendar.py
+  booking/           backend interface, internal.py, google_calendar.py
   messages.py        take_message, owner notifications
-  sms.py             Twilio SMS (suggestion, not built)
+  sms.py             Twilio SMS
   summary.py         post-conversation summary job
 app/api/dashboard.py  JSON routes for the dashboard screens
 web/src/dashboard/   dashboard screens (React, DEC-41)
@@ -116,8 +117,9 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 ## Tasks
 
 - [x] Tool registry + executor with confirmation guard and action log (#42; `action_log` for side-effect calls only, per-business enabled-tools setting comes with the first booking tool)
-- [ ] Tool-calling loop in the RAG pipeline (text chat first, then voice)
-- [x] Internal booking backend + rules (#52): `actions/booking/` (`rules.py` pure rules: hours per weekday, capacity, lead time, max party, service durations, alternatives; `internal.py` backend with a per-business advisory lock so the capacity check and insert can't race; `tools.py` registers `check_availability`, `create_booking`, `cancel_booking`), tables `booking_rules`, `bookings` (migration 0009). Tested with unit tests and a Postgres without pgvector (concurrent creates book exactly one). **Not wired into the live call yet**: `app/voice/tools.py` doesn't import `booking.tools`, and the per-business enabled-tools setting comes with that wiring ("Tool-calling loop" task). Owners set `booking_rules` by SQL until the dashboard exists; no row = 60-minute slots, one booking at a time, no hours check (the profile's `opening_hours` is free text, so code can't enforce it)
+- [x] Tool-calling loop in the RAG pipeline (#51): text chat (`POST /chat`, `GET /chat/stream`) runs LLM → tools → LLM through the executor, max 3 rounds like voice, `conversation_id` passed so `action_log` rows link to the chat; voice already had the same loop. Unit tests use a fake LLM; live check with a real model on the Mac (see 03 "Test on Mac")
+- [x] `take_message` and `transfer_to_human` (#50): messages saved to `messages_for_owner` (migration 0011; owner notification and dashboard list not done); transfer number is `businesses.settings.transfer_number` (no settings screen yet). Live check under 03 "Test on Mac"
+- [x] Internal booking backend + rules (#52): `actions/booking/` (`rules.py` pure rules: hours per weekday, capacity, lead time, max party, service durations, alternatives; `internal.py` backend with a per-business advisory lock so the capacity check and insert can't race; `tools.py` registers `check_availability`, `create_booking`, `cancel_booking`), tables `booking_rules`, `bookings` (migration 0011). Tested with unit tests and a Postgres without pgvector (concurrent creates book exactly one). **Not wired into the live call yet**: `app/voice/tools.py` doesn't import `booking.tools`, and the per-business enabled-tools setting comes with that wiring ("Tool-calling loop" task). Owners set `booking_rules` by SQL until the dashboard exists; no row = 60-minute slots, one booking at a time, no hours check (the profile's `opening_hours` is free text, so code can't enforce it)
 - [ ] ~~SMS confirmation~~ — dropped from #52 (2026-10-28, Max); kept as suggestion issue #138 outside the milestones. The code was written and removed again; no SMS is sent, the model reads the booking reference back to the caller
 - [x] Post-conversation summary job (#43): `actions/summary.py`, run from `POST /twilio/status`; stores a one-line summary, intent, outcome (info_request, booked, message, transferred, unresolved), follow_up on `conversations` (migration 0006). Sentiment, contact details and owner notification are not done yet. Needs a live check on the Mac (see 03 "Test on Mac")
 - [ ] Owner dashboard: conversations, bookings, unanswered questions

@@ -328,6 +328,13 @@ def test_media_stream_full_call(settings, business, monkeypatch):
         await _until(lambda: len([m for m in sock.sent[clear_at:] if m["event"] == "media"]) >= 2)
         await asyncio.sleep(0.5)  # both 50 ms sentences sent and played out
 
+        # V11: every audio chunk is followed by a mark; Twilio's echo reaches the session
+        marks = [m for m in sock.sent if m["event"] == "mark"]
+        assert marks and all(m["streamSid"] == "MZ1" and m["mark"]["name"] for m in marks)
+        for m in marks:
+            sock.put({"event": "mark", "streamSid": "MZ1", "mark": {"name": m["mark"]["name"]}})
+        await asyncio.sleep(0.1)
+
         sock.put({"event": "stop", "streamSid": "MZ1", "stop": {"callSid": call_sid}})
         await asyncio.wait_for(handler, 5)
         return sock

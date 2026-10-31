@@ -68,7 +68,9 @@ def chat_endpoint(req: ChatRequest) -> ChatResponse:
     blocking I/O needs; `async def` with no `await` would just block the event loop.
     """
     conversation_id, history = _prepare_conversation_and_history(req.business_id, req.conversation_id)
-    result = answer_question(req.business_id, req.question, history=history, top_n=5)
+    result = answer_question(
+        req.business_id, req.question, history=history, top_n=5, conversation_id=conversation_id
+    )
     _save_turn(req.business_id, conversation_id, req.question, result.answer)
 
     return ChatResponse(
@@ -92,7 +94,9 @@ def chat_stream_endpoint(business_id: uuid.UUID, question: str, conversation_id:
     def event_generator() -> Generator[str, None, None]:
         yield _sse(str(conversation_id), event="conversation_id")  # so the client can continue the thread
         pieces: list[str] = []
-        for piece in stream_answer(business_id, question, history=history, top_n=5):
+        for piece in stream_answer(
+            business_id, question, history=history, top_n=5, conversation_id=conversation_id
+        ):
             pieces.append(piece)
             yield _sse(piece)
         _save_turn(business_id, conversation_id, question, "".join(pieces))

@@ -29,6 +29,9 @@ last sentence is a farewell ("Thank you. Bye.") is answered and then hung up on 
 Hanging up = a `hangup` event, then the adapter's `hang_up` callback (closes the socket);
 `close()` still runs as for any hang-up.
 
+A successful `transfer_to_human` tool call also hangs up once the bot's last sentence has
+played: closing the stream is how Twilio gets to `<Dial>` (app/actions/transfer.py).
+
 Pass `continue_from` to load an earlier conversation of the same business as LLM history
 (a new conversation row is still created). Twilio calls pass `call_sid`, stored on the
 conversation for the status callback.
@@ -44,15 +47,16 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.actions.transfer import TRANSFER_STARTED
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
-from app.ingest.profile import is_placeholder_name
 from app.llm import get_async_chat_client
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import format_profile, format_summary
-from app.voice import tts
+from app.voice import greeting_cache, tts
 from app.voice.audio import working_sound
+from app.voice.greeting_cache import greeting_text, voice_name
 from app.voice.stt import TurnTranscriber
 from app.voice.tools import TOOLS, run_tool
 from app.voice.vad import TurnDetector
@@ -71,13 +75,15 @@ WORKING_SOUND_CHUNK_S = 0.2  # T1: sent in real time, so stopping it is never mo
 SILENCE_REPROMPT_S = 6.0
 SILENCE_MAX_REPROMPTS = 1  # re-prompts before the goodbye
 SILENCE_POLL_S = 0.25
+MARK_GRACE_S = 1.0  # V11: how long past its estimate an un-echoed playback mark still counts
+MARK_POLL_S = 0.05  # re-check the playback end this often, an echo can end it early
 HANG_UP_GRACE_S = 0.5  # after the last audio's estimated end, so the transport plays it out
 REPROMPT_TEXT = "Are you still there?"
 SILENCE_GOODBYE_TEXT = "I haven't heard anything, so I'll end the call now. Thanks for calling, goodbye."
 
 # T4: the standard greeting's audio per (text, sample rate, voice, language), so a call
 # starts playing at once instead of after a TTS round trip. In-process only (lost on
-# restart); DEC-17 stores it at onboarding later. "Welcome back" greetings aren't cached:
+# restart); greeting_cache.py keeps the same audio in Postgres (V6). "Welcome back" greetings aren't cached:
 # they carry the earlier topic, so they are new text every time.
 _greeting_audio: dict[tuple, bytes] = {}
 
@@ -86,7 +92,12 @@ VOICE_SYSTEM_PROMPT = (
     "Answer only from the business profile below or from search_business_info results. "
     "Never use outside knowledge about this business or any other.\n"
     "Call search_business_info for any question the profile doesn't answer.\n"
-    "If the answer isn't found, say so plainly and offer to take a message.\n"
+    "If the answer isn't found, say so plainly and offer to take a message (take_message). "
+    "If the caller asks for a person, offer transfer_to_human; if it fails, take a message.\n"
+    "Never mention the profile, searching, documents or \"the information I have\"; just "
+    "answer, or say you don't know that.\n"
+    "If the hours or prices you found belong to one area (pool, spa, restaurant), say which "
+    "area; don't present them as the whole business's.\n"
     "Your words are spoken aloud: one to three short sentences, no lists, no markdown, "
     "no URLs. Answer in the language the caller uses.\n"
     "If the caller says goodbye, thank them for calling and say a short, warm goodbye; "
@@ -192,6 +203,7 @@ class CallSession:
         continue_from: uuid.UUID | None = None,
         call_sid: str | None = None,
         hang_up: Callable[[], Awaitable[None]] | None = None,
+        playback_marks: bool = False,
     ) -> None:
         if turn_detection not in ("vad", "manual"):
             raise ValueError(f"turn_detection must be 'vad' or 'manual', got {turn_detection!r}")
@@ -206,6 +218,7 @@ class CallSession:
         self._continue_from = continue_from
         self._call_sid = call_sid
         self._hang_up = hang_up
+        self._playback_marks = playback_marks
         self._topic: str | None = None
 
         settings = get_settings()
@@ -222,10 +235,15 @@ class CallSession:
         # STT of a turn a barge-in cut off before it was answered; its words lead the next turn
         self._unanswered_stt: asyncio.Task | None = None
         self._playing_until = 0.0  # monotonic time the caller's buffer runs out of bot audio
+        # V11: with `playback_marks` the client echoes a mark once it has played the audio
+        # before it; name → estimated end. Until the echo arrives the bot counts as playing.
+        self._marks: dict[str, float] = {}
+        self._mark_seq = 0
         self._silence_task: asyncio.Task | None = None
         self._heard_at = 0.0  # monotonic time of the caller's last speech start/end (V17)
         self._reprompts = 0  # since the caller last spoke
         self._hung_up = False
+        self._transfer_pending = False  # transfer_to_human succeeded: hang up (Twilio dials) after the reply
         self._history: list[dict] = []
         self._system_prompt = ""
         self.conversation_id: uuid.UUID | None = None
@@ -240,7 +258,7 @@ class CallSession:
         if self._topic is not None:
             greeting = f"Welcome back to {name}. I'm an AI assistant. Let's pick up where we left off: {self._topic}."
         else:
-            greeting = f"Hi, you've reached {name}. I'm an AI assistant. How can I help?"
+            greeting = greeting_text(name)
         self._reply_task = self._spawn(self._speak_fixed(greeting, cache=self._topic is None))
         if get_settings().voice_llm_warmup:
             self._warmup_task = asyncio.create_task(self._warm_up_llm())
@@ -305,6 +323,7 @@ class CallSession:
         if self._bot_active():
             await self._cancel_reply()
             self._playing_until = 0.0
+            self._marks.clear()  # the client echoes them at once on `clear`; nothing left to wait for
             await self._send_event({"type": "clear"})
         self._turn = self._new_transcriber(self.sample_rate)
         self._turn.push(preroll)
@@ -336,7 +355,28 @@ class CallSession:
 
     def _bot_active(self) -> bool:
         replying = self._reply_task is not None and not self._reply_task.done()
-        return replying or time.monotonic() < self._playing_until
+        return replying or self._playback_left() > 0
+
+    def _playback_left(self) -> float:
+        """Seconds until the caller has heard everything sent. A mark not yet echoed keeps
+        the bot playing up to MARK_GRACE_S past its estimate (the echo may never come)."""
+        now = time.monotonic()
+        left = self._playing_until - now
+        for end in self._marks.values():
+            left = max(left, end + MARK_GRACE_S - now)
+        return left
+
+    def on_mark(self, name: str) -> None:
+        """The client played the audio up to mark `name` (Twilio `mark` echo, V11): that is
+        the real playback end, replacing the estimate once no later mark is outstanding."""
+        if name not in self._marks:
+            return
+        for earlier in list(self._marks):  # echoes come in order; an earlier one never will
+            del self._marks[earlier]
+            if earlier == name:
+                break
+        if not self._marks:
+            self._playing_until = time.monotonic()
 
     async def _cancel_reply(self) -> None:
         task, self._reply_task = self._reply_task, None
@@ -383,7 +423,8 @@ class CallSession:
             await self._send_event({"type": "latency", **timings})
             # audio goes out faster than real time: the reply stays in progress until the
             # caller has heard it, so a barge-in still cuts what was sent but not played (B2)
-            await asyncio.sleep(max(0.0, self._playing_until - time.monotonic()))
+            while (left := self._playback_left()) > 0:
+                await asyncio.sleep(min(left, MARK_POLL_S))
         except asyncio.CancelledError:
             heard_by = time.monotonic()  # barge-in or hang-up
             raise
@@ -398,7 +439,9 @@ class CallSession:
                 # may run after hang-up (cancelled by close()), when the socket is closed
                 await self._try_send_event({"type": "latency", **timings})
         # only reached when the answer was played out, not cut by a barge-in
-        if is_farewell(text):
+        if self._transfer_pending:
+            await self._hang_up_after_playback("transfer")  # closing the stream hands the call to /twilio/transfer
+        elif is_farewell(text):
             await self._hang_up_after_playback("goodbye")
 
     async def _transcribe(self, turn: TurnTranscriber, earlier: asyncio.Task | None) -> str:
@@ -473,7 +516,12 @@ class CallSession:
                 ],
             })
             for c in calls.values():
-                result = await asyncio.to_thread(run_tool, self.business_id, c["name"], c["arguments"], self.conversation_id)
+                result = await asyncio.to_thread(
+                    run_tool, self.business_id, c["name"], c["arguments"], self.conversation_id,
+                    self._call_sid, self._caller,
+                )
+                if c["name"] == "transfer_to_human" and result.startswith(TRANSFER_STARTED):
+                    self._transfer_pending = True
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
             timings.setdefault("tool_end_ms", _ms(speech_end))
         await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, play_ends, speech_end, timings)
@@ -500,10 +548,14 @@ class CallSession:
         settings = get_settings()
         key = (text, self.sample_rate, settings.tts_voice, settings.voice_language)
         audio = _greeting_audio.get(key) if cache else None
+        if audio is None and cache:
+            audio = await asyncio.to_thread(self._load_cached_audio, key)
         if audio is None:
             audio = await asyncio.to_thread(self._synthesize, text, self.sample_rate)
             if cache:
-                _greeting_audio[key] = audio
+                await asyncio.to_thread(self._store_cached_audio, key, audio)
+        if cache:
+            _greeting_audio[key] = audio
         await self._play(audio)
         if history:
             self._history.append({"role": "assistant", "content": text})
@@ -531,7 +583,7 @@ class CallSession:
         await self._hang_up_after_playback("silence")
 
     async def _hang_up_after_playback(self, reason: str) -> None:
-        await asyncio.sleep(max(0.0, self._playing_until - time.monotonic()) + HANG_UP_GRACE_S)
+        await asyncio.sleep(max(0.0, self._playback_left()) + HANG_UP_GRACE_S)
         self._hung_up = True
         log.info("voice call %s: hanging up (%s)", self.conversation_id, reason)
         await self._try_send_event({"type": "hangup", "reason": reason})
@@ -584,6 +636,11 @@ class CallSession:
         await self._send_audio(audio)
         now = time.monotonic()
         self._playing_until = max(now, self._playing_until) + tts.pcm16_duration_s(audio, self.sample_rate)
+        if self._playback_marks:
+            self._mark_seq += 1
+            name = f"p{self._mark_seq}"
+            self._marks[name] = self._playing_until
+            await self._send_event({"type": "mark", "name": name})
 
     # --- database (sync, run in a thread) --------------------------------------------
 
@@ -635,14 +692,21 @@ class CallSession:
                 self._system_prompt += f"\n\n{locations_text}"  # DEC-49
             if summary_text := format_summary(session.get(BusinessSummary, self.business_id)):
                 self._system_prompt += f"\n\n{summary_text}"
-            # A3 (plan/07-knowledge-quality.md §3): business.name is now the brand
-            # ("Bathhouse"), kept in sync from the site's og:site_name on every crawl
-            # (app/ingest/run.py) -- preferred over business_profile.name, which still
-            # holds the old LLM-extracted "Bathhouse Williamsburg" (profile table is
-            # retired once the facts/location card replaces it, plan 07 §5.5).
-            if not is_placeholder_name(business.name):
-                return business.name
-            return (profile.name if profile and profile.name else None) or business.name
+            return voice_name(business, profile)
+
+    def _load_cached_audio(self, key: tuple) -> bytes | None:
+        """V6: the stored audio, if any. A database error only costs the TTS round trip."""
+        try:
+            return greeting_cache.load(self.business_id, *key)
+        except Exception:
+            log.warning("greeting cache read failed", exc_info=True)
+            return None
+
+    def _store_cached_audio(self, key: tuple, audio: bytes) -> None:
+        try:
+            greeting_cache.store(self.business_id, *key, audio)
+        except Exception:
+            log.warning("greeting cache write failed", exc_info=True)
 
     def _save_message(self, role: str, content: str) -> None:
         with tenant_session(self.business_id) as session:
