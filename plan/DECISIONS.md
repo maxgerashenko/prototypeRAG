@@ -123,6 +123,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (live Mac mic test) |
 | DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `blocked` labels (stage = milestone prefix); blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
 | DEC-50 | Stage order: multi-business before cloud (supersedes DEC-27's order) | Stage 2 = multi-business (milestone `S2 · M6 Multi-business`), stage 3 = cloud (`S3 · M7 Cloud`); `S3 · M8 Profitable scale` unchanged | 1 · 2 · 3 | ✅ |
+| DEC-51 | Keep our crawler; use MarkItDown for PDF text (issue #116) | `app/ingest/` stays (Scrapy found the same pages and has no priority/cap logic or extraction); add robots.txt `Sitemap:` lines to discovery; PDF extraction moves from `pypdf` page text to MarkItDown (`markitdown[pdf]`, pdfminer.six) because it keeps tables as Markdown rows; scanned PDFs still need OCR | 1 | ✅ (comparison [done 2026-10-28](comparison-scrapy-markitdown.md); follow-up issues open) |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
@@ -834,6 +835,22 @@ Consequences: GitHub milestones renamed `S2 · M6 Multi-business` (was S3 · M7)
 updated; other "stage 2/3" mentions inside the part files (05, 06, DEVELOPMENT_PLAN, DRIVERS
 tables) still use the old numbering until each part is picked up — follow-up.
 
+### DEC-51 — Keep our crawler, use MarkItDown for PDF text (stage 1)
+
+Issue #116. Evidence and numbers: [comparison-scrapy-markitdown.md](comparison-scrapy-markitdown.md).
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| Crawler | Keep `app/ingest/` (httpx + our discovery) | Same pages as Scrapy on 2 real sites; has priority order, blog cap, fractional Crawl-delay, sync and simple | Misses robots.txt `Sitemap:` lines | ✅ (add the lines, small fix) |
+| Crawler | Replace with Scrapy | Handles `Sitemap:` lines, mature | Twisted reactor, no content extraction, no priority/cap logic (we would rewrite it), JS still needs a plugin | ❌ |
+| PDF text | MarkItDown (`markitdown[pdf]`, MIT) | Tables become Markdown rows, price stays with its item; ~10 ms | New dependency (pulls `magika`, `requests`); no OCR; tested only on 3 generated PDFs | ✅ (re-check on a real menu) |
+| PDF text | Keep `pypdf` page text | No new dependency | One table cell per line, row lost | ❌ for tables |
+| HTML to Markdown | MarkItDown instead of markdownify | — | Same converter underneath, no main-content extraction | ❌ no gain |
+
+Consequences: follow-up issues for the `Sitemap:` lines and the MarkItDown switch; the size
+limit, Content-Type check and title logic in `fetch.py` stay ours. Licenses checked:
+Scrapy BSD-3-Clause, MarkItDown MIT.
+
 ### DEC-46 — Phone calls shown live in the voice app (stage 1)
 
 Context: Max wants a call the system takes over Twilio (modes A and B) to show in the web
@@ -957,6 +974,7 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Local model choice | `qwen2.5-coder` is a coding model; a customer-facing bot needs a general instruct model | DEC-06 |
 | Vertex AI Vector Search | Always-on endpoint → not cheap at small scale | DEC-02 |
 | Gemini 1.5 Flash "2M context" | Was 1M (2M was Pro); model generations change — check current model at deploy | DEC-07 |
+| Scrapy `CLOSESPIDER_PAGECOUNT` | Counts every response including robots.txt and sitemaps; cap pages with `CLOSESPIDER_ITEMCOUNT` | DEC-51 |
 | Qdrant snapshot migration | Doesn't help when switching embedding models — vectors must be recomputed anyway | DEC-08 |
 | Twilio webhook timing | While our webhook runs, the caller hears ringing (Twilio waits up to 15 s) — no dead air | DEC-17 |
 | Cloud Run CPU | With request-based billing CPU is throttled when no request is active; an open WebSocket counts as active — so "CPU always allocated" doesn't fix streaming | DEC-35, DEC-24, DEC-25 |

@@ -19,6 +19,8 @@ Detailed plan per part:
 
 Feature plans: [Pull-to-refresh in the voice app](plan/feature-pull-to-refresh.md) (#124)
 
+Comparisons: [Crawler vs Scrapy, PDF vs MarkItDown](plan/comparison-scrapy-markitdown.md) (#116)
+
 Working on this repo with Claude Code: see [CLAUDE.md](CLAUDE.md) for the file structure and how architecture discussions are recorded.
 
 ## Run locally (stage 1)
