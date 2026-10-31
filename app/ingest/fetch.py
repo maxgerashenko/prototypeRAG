@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import dataclass
 from collections.abc import Callable
+from functools import lru_cache
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -122,17 +123,26 @@ def fetch_child_sitemaps(
 
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:
-    """Text from a menu/price-list PDF, one paragraph per page, runs of blank lines and
-    trailing spaces squeezed. "" on any failure or for a scanned-image-only PDF (no OCR
-    yet, plan/01-crawler.md risks)."""
+    """Markdown from a menu/price-list PDF via MarkItDown (pdfminer.six), so a table row
+    stays on one line ("| Negroni | $13 |") instead of one cell per line (#135, DEC-51).
+    Runs of blank lines and trailing spaces squeezed. "" on any failure or for a
+    scanned-image-only PDF (no OCR yet, plan/01-crawler.md risks)."""
+    if b"%PDF-" not in pdf_bytes[:1024]:
+        return ""  # MarkItDown would read other bytes as plain text instead of failing
     try:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        pages = [page.extract_text() or "" for page in reader.pages]
+        text = _markitdown().convert_stream(io.BytesIO(pdf_bytes), file_extension=".pdf").text_content or ""
     except Exception:
         return ""
-    text = "\n\n".join(p.strip() for p in pages if p.strip())
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+@lru_cache(maxsize=1)
+def _markitdown():
+    """One converter per process, imported lazily (markitdown pulls in a lot at import)."""
+    from markitdown import MarkItDown
+
+    return MarkItDown()
 
 
 def pdf_title(pdf_bytes: bytes, url: str) -> str:
