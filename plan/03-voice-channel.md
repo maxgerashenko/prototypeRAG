@@ -386,6 +386,11 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   (`outcome=unresolved`, `follow_up=true`, intent and summary match the call); both test files
   pass. The local DB was still at 0005 — 34 tests failed and 8 errored until `alembic upgrade head`. A second
   callback was not re-sent live (covered by the unit tests)
+- [ ] **Booking backend (#52)**: `uv run alembic upgrade head` (0011, needs pgvector Postgres),
+  then `uv run pytest tests/test_booking.py` (cloud ran it only on a Postgres without pgvector,
+  with the booking tables created from the models and migration 0011 compared to them). The
+  booking tools are not wired into the live call yet, so there is no call-level check until the
+  tool-calling loop task is done
 - [x] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
