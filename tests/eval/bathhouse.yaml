@@ -46,6 +46,21 @@
   expected_in_context: ["7 days a week"]
   note: "V23"
 
+- question: "Till what time are you working?"
+  expected_facts: ["midnight"]
+  expected_in_context: ["midnight"]
+  note: "V28 / #108 — ranked #5 on the pilot with top-3 voice search; the Rooftop Pool's hours were answered instead."
+
+- question: "When do you close?"
+  expected_facts: ["midnight"]
+  expected_in_context: ["midnight"]
+  note: "V28 / #108"
+
+- question: "Till what time are you open on Saturday?"
+  expected_facts: ["midnight"]
+  expected_in_context: ["midnight"]
+  note: "V28 / #108"
+
 - question: "What is the address of the Flatiron location?"
   expected_facts: ["22nd", "New York"]
   expected_in_context: ["22nd"]

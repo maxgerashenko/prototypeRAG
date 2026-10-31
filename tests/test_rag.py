@@ -7,6 +7,7 @@ pieces (reciprocal_rank_fusion, prompt formatting) don't need either.
 """
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
@@ -44,31 +45,153 @@ def _add_chunk(session, business_id, text, page_id=None, kind="scraped", custom_
     return chunk
 
 
-def test_chat_answers_send_reasoning_effort(monkeypatch):
-    """V24: /chat used to leave thinking on (~8 s before the first word on gemma-4-12b)."""
-    from types import SimpleNamespace
+class FakeLLM:
+    """OpenAI-shaped chat client that plays back scripted replies, for the tool loop.
+    A reply is a text, or a list of (call_id, tool_name, json_arguments) tool calls."""
 
+    def __init__(self, *replies):
+        self.replies = list(replies)
+        self.requests: list[dict] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kw):
+        self.requests.append({**kw, "messages": list(kw["messages"])})  # the loop keeps appending
+        reply = self.replies.pop(0)
+        calls = [] if isinstance(reply, str) else reply
+        if kw.get("stream"):
+            return iter(self._chunks(reply, calls))
+        message = SimpleNamespace(
+            content=reply if isinstance(reply, str) else None,
+            tool_calls=[
+                SimpleNamespace(id=i, function=SimpleNamespace(name=n, arguments=a)) for i, n, a in calls
+            ] or None,
+        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    @staticmethod
+    def _chunks(reply, calls):
+        def chunk(**delta):
+            return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+                **{"content": None, "tool_calls": None, **delta}))])
+
+        if isinstance(reply, str):
+            mid = len(reply) // 2
+            return [chunk(content=reply[:mid]), chunk(content=reply[mid:])]
+        out = []
+        for index, (i, n, a) in enumerate(calls):  # name and arguments arrive in pieces
+            half = len(a) // 2
+            out.append(chunk(tool_calls=[SimpleNamespace(
+                index=index, id=i, function=SimpleNamespace(name=n, arguments=a[:half]))]))
+            out.append(chunk(tool_calls=[SimpleNamespace(
+                index=index, id=None, function=SimpleNamespace(name=None, arguments=a[half:]))]))
+        return out
+
+
+@pytest.fixture
+def fake_llm(monkeypatch):
+    """Prompt building and tools faked: no DB, no LM Studio. Returns (install_llm, tool_calls)."""
+    from app.rag import answer
+
+    monkeypatch.setattr(
+        answer, "prepare_prompt",
+        lambda business_id, question, history=None, top_n=5: (
+            None, [], [{"role": "system", "content": "rules"}, *(history or []), {"role": "user", "content": question}]
+        ),
+    )
+    tool_calls: list[tuple] = []
+
+    def run_tool(business_id, name, arguments, conversation_id=None):
+        tool_calls.append((business_id, name, arguments, conversation_id))
+        return f"result of {name}"
+
+    monkeypatch.setattr(answer, "run_tool", run_tool)
+
+    def install(*replies):
+        llm = FakeLLM(*replies)
+        monkeypatch.setattr(answer, "get_chat_client", lambda: llm)
+        return llm
+
+    return install, tool_calls
+
+
+def test_chat_answers_send_reasoning_effort_and_tools(fake_llm):
+    """V24: /chat used to leave thinking on (~8 s before the first word on gemma-4-12b).
+    Both modes also offer the registered tools."""
     from app.config import get_settings
     from app.rag import answer
 
-    monkeypatch.setattr(answer, "retrieve", lambda *a, **kw: [])
-    sent: list[dict] = []
-    monkeypatch.setattr(answer, "chat", lambda messages, **kw: sent.append(kw) or "ok")
-
-    def create(**kw):
-        sent.append(kw)
-        return iter([SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="ok"))])])
-
-    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    monkeypatch.setattr(answer, "get_chat_client", lambda: fake_client)
-
+    install, _ = fake_llm
+    llm = install("ok", "ok")
     bid = uuid.uuid4()  # no rows needed: profile None, retrieval faked
     result = answer.answer_question(bid, "hours?")
     assert result.answer == "ok"
     assert [m["role"] for m in result.messages] == ["system", "user"]  # the prompt, for the debug view
-    assert list(answer.stream_answer(bid, "hours?")) == ["ok"]
+    assert "".join(answer.stream_answer(bid, "hours?")) == "ok"
     effort = get_settings().chat_reasoning_effort  # "none" unless .env overrides it
-    assert [kw["reasoning_effort"] for kw in sent] == [effort, effort]
+    assert [r["reasoning_effort"] for r in llm.requests] == [effort, effort]
+    assert all(r["tools"] is answer.TOOLS for r in llm.requests)
+
+
+def test_answer_runs_tool_calls_in_a_loop(fake_llm):
+    from app.rag import answer
+
+    install, tool_calls = fake_llm
+    llm = install(
+        [("c1", "search_business_info", '{"query": "parking"}')],
+        [("c2", "search_business_info", '{"query": "price"}'), ("c3", "other", "{}")],
+        "Parking is free.",
+    )
+    bid, cid = uuid.uuid4(), uuid.uuid4()
+    result = answer.answer_question(bid, "parking?", conversation_id=cid)
+
+    assert result.answer == "Parking is free."
+    # business and conversation come from the request, not from the model's arguments
+    assert tool_calls == [
+        (bid, "search_business_info", '{"query": "parking"}', cid),
+        (bid, "search_business_info", '{"query": "price"}', cid),
+        (bid, "other", "{}", cid),
+    ]
+    last = llm.requests[-1]["messages"]
+    assert [m["role"] for m in last] == ["system", "user", "assistant", "tool", "assistant", "tool", "tool"]
+    assert last[2]["tool_calls"][0]["id"] == "c1" and last[3]["tool_call_id"] == "c1"
+    assert last[3]["content"] == "result of search_business_info"
+    assert [m["role"] for m in result.messages] == ["system", "user"]  # debug prompt stays the first one
+
+
+def test_answer_gives_up_after_max_tool_rounds(fake_llm):
+    from app.rag import answer
+
+    install, tool_calls = fake_llm
+    llm = install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS)])
+    result = answer.answer_question(uuid.uuid4(), "loop?")
+    assert result.answer == answer.GIVE_UP_ANSWER
+    assert len(llm.requests) == len(tool_calls) == answer.MAX_TOOL_ROUNDS
+
+
+def test_stream_answer_runs_tool_calls_in_a_loop(fake_llm):
+    from app.rag import answer
+
+    install, tool_calls = fake_llm
+    llm = install(
+        [("c1", "search_business_info", '{"query": "parking"}')],
+        "Parking is free.",
+    )
+    bid, cid = uuid.uuid4(), uuid.uuid4()
+    pieces = list(answer.stream_answer(bid, "parking?", conversation_id=cid))
+
+    assert "".join(pieces) == "Parking is free."
+    assert tool_calls == [(bid, "search_business_info", '{"query": "parking"}', cid)]  # pieces joined back
+    messages = llm.requests[-1]["messages"]
+    assert messages[-2]["tool_calls"][0]["function"]["arguments"] == '{"query": "parking"}'
+    assert messages[-1] == {"role": "tool", "tool_call_id": "c1", "content": "result of search_business_info"}
+
+
+def test_stream_answer_gives_up_after_max_tool_rounds(fake_llm):
+    from app.rag import answer
+
+    install, _ = fake_llm
+    install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS)])
+    assert list(answer.stream_answer(uuid.uuid4(), "loop?")) == [answer.GIVE_UP_ANSWER]
 
 
 def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
@@ -84,14 +207,14 @@ def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
     chunk = RetrievedChunk(chunk_id=uuid.uuid4(), text="We open at 9.", section_heading="Hours",
                            kind="scraped", score=0.9, source="both")
     monkeypatch.setattr(answer, "retrieve", lambda *a, **kw: [chunk])
-    sent: list[list[dict]] = []
-    monkeypatch.setattr(answer, "chat", lambda messages, **kw: sent.append(messages) or "At 9.")
+    llm = FakeLLM("At 9.")
+    monkeypatch.setattr(answer, "get_chat_client", lambda: llm)
     with tenant_session(business_id) as s:
         s.add(BusinessProfile(business_id=business_id, name="Cafe Uno"))
 
     client = TestClient(app)
     r = client.post("/chat", json={"business_id": str(business_id), "question": "When do you open?"}).json()
-    assert r["prompt"] == sent[0]
+    assert r["prompt"] == llm.requests[0]["messages"]
     system = r["prompt"][0]
     assert system["role"] == "system" and "Name: Cafe Uno" in system["content"] and "[1] Hours\nWe open at 9." in system["content"]
     assert r["prompt"][-1] == {"role": "user", "content": "When do you open?"}
@@ -101,7 +224,7 @@ def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
     assert [(m["role"], m["content"]) for m in d["messages"][1:]] == [
         ("user", "When do you open?"), ("assistant", "At 9."), ("user", "And close?")]
     assert d["messages"][0] == system
-    assert len(sent) == 1  # no LLM call
+    assert len(llm.requests) == 1  # no LLM call
 
     client.get("/debug/prompt", params={"business_id": str(business_id), "q": "x"})
     with tenant_session(business_id) as s:

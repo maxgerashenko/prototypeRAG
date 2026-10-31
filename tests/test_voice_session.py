@@ -7,6 +7,7 @@ through the voice app at /web/ (push-to-talk) or web/voice-debug.html (VAD).
 """
 
 import asyncio
+import time
 import uuid
 import wave
 from pathlib import Path
@@ -1121,3 +1122,78 @@ def test_barge_in_on_the_goodbye_keeps_the_call(business, monkeypatch):
     run_async(run())
     assert {"type": "clear"} in events
     assert not hung_up
+
+
+def _marked_session(business, monkeypatch):
+    s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
+    s._playback_marks = True
+    return s, events
+
+
+def test_playback_marks_sent_after_each_audio_chunk(business, monkeypatch):
+    s, events = _marked_session(business, monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    marks = [e["name"] for e in events if e["type"] == "mark"]
+    assert marks and len(set(marks)) == len(marks)
+
+
+def test_no_marks_without_playback_marks(business, monkeypatch):
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert not any(e["type"] == "mark" for e in events)
+
+
+def test_mark_echo_ends_playback_early_and_late_echo_keeps_bot_active(business, monkeypatch):
+    s, events = _marked_session(business, monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        assert s._bot_active()  # greeting's estimate says 3 s are left
+        for e in [e for e in events if e["type"] == "mark"]:
+            s.on_mark(e["name"])
+        assert not s._bot_active()  # client says it finished, estimate overridden
+        assert s._marks == {}
+
+        # estimate over, echo not yet in: still playing until the grace runs out
+        await s._play(b"\0\0" * (RATE // 10))
+        s._playing_until = time.monotonic() - 0.1
+        assert s._bot_active()
+        name = next(iter(s._marks))
+        s._marks[name] = time.monotonic() - session_mod.MARK_GRACE_S - 0.1  # echo never came
+        assert not s._bot_active()
+        await s.close()
+
+    run_async(run())
+
+
+def test_mark_echo_of_later_mark_clears_earlier_and_unknown_is_ignored(business, monkeypatch):
+    s, events = _marked_session(business, monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s._play(b"\0\0" * (RATE // 10))
+        names = list(s._marks)
+        assert len(names) >= 2
+        s.on_mark("nope")
+        assert list(s._marks) == names
+        s.on_mark(names[0])
+        assert list(s._marks) == names[1:] and s._playing_until > time.monotonic()
+        s.on_mark(names[-1])
+        assert s._marks == {}
+        await s.close()
+
+    run_async(run())

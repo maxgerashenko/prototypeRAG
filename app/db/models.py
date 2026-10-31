@@ -415,6 +415,33 @@ class GreetingAudio(Base):
     created_at: Mapped[datetime] = _now()
 
 
+class MessageForOwner(Base):
+    """A message a caller left for the owner (`take_message` tool, or a voicemail after an
+    unanswered transfer: `recording_url`). Owner notification is not built yet."""
+
+    __tablename__ = "messages_for_owner"
+    __table_args__ = (
+        CheckConstraint("urgency IN ('normal', 'urgent')", name="urgency"),
+        CheckConstraint("status IN ('new', 'seen')", name="status"),
+        ForeignKeyConstraint(
+            ["business_id", "conversation_id"],
+            ["conversations.business_id", "conversations.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    business_id: Mapped[uuid.UUID] = _business_id()
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    caller_name: Mapped[str | None] = mapped_column(Text)
+    caller_phone: Mapped[str | None] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    urgency: Mapped[str] = mapped_column(Text, nullable=False, server_default="normal")
+    recording_url: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="new")
+    created_at: Mapped[datetime] = _now()
+
+
 def message_order() -> tuple:
     """ORDER BY for a conversation's messages. A question and its answer are saved in one
     transaction, so both get the same `now()` (transaction start); `created_at` alone
