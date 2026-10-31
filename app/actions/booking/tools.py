@@ -16,6 +16,7 @@ import re
 
 from app.actions.booking.internal import BookingBackend, BookingRequest, InternalBackend
 from app.actions.registry import ActionContext, Tool, register
+from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Conversation
 
@@ -30,7 +31,20 @@ def normalize_phone(raw: str | None) -> str | None:
     return digits if E164.match(digits) else None
 
 
-backend: BookingBackend = InternalBackend()  # swapped for Google Calendar later (DEC-48)
+def make_backend() -> BookingBackend:
+    """`BOOKING_BACKEND` picks the backend (DEC-48); the default is the Postgres-only one."""
+    settings = get_settings()
+    if settings.booking_backend == "google_calendar":
+        from app.actions.booking.google_calendar import GoogleCalendarBackend
+        from app.actions.booking.google_client import GoogleCalendarClient
+
+        return GoogleCalendarBackend(
+            GoogleCalendarClient(settings.google_calendar_credentials_file), settings.google_calendar_id
+        )
+    return InternalBackend()
+
+
+backend: BookingBackend = make_backend()
 
 _DATE = {"type": "string", "description": "Date as YYYY-MM-DD, in the business's local time."}
 _TIME = {"type": "string", "description": "Start time as HH:MM, 24-hour, business local time."}

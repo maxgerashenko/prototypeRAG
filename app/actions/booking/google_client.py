@@ -1,0 +1,99 @@
+"""Thin Google Calendar REST client (DEC-48) behind a small protocol, so the backend is
+tested against a fake and only this file knows Google's wire format.
+
+Pilot auth: a service account whose key file is `GOOGLE_CALENDAR_CREDENTIALS_FILE`; the
+owner shares their calendar with its email ("make changes to events"). No OAuth. The
+credentials load on first use, so importing this module needs no key.
+"""
+
+from datetime import datetime
+from typing import Protocol
+
+API = "https://www.googleapis.com/calendar/v3"
+SCOPES = (
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.freebusy",
+)
+TIMEOUT_S = 10  # a caller is waiting on the line
+
+
+class CalendarError(Exception):
+    """Google could not be reached or refused the call. The message is for logs, not callers."""
+
+
+class CalendarClient(Protocol):
+    def busy(self, calendar_id: str, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
+        """Busy intervals (tz-aware) of the calendar inside [start, end)."""
+        ...
+
+    def insert_event(self, calendar_id: str, body: dict) -> str:
+        """Create an event; returns its id."""
+        ...
+
+    def delete_event(self, calendar_id: str, event_id: str) -> None:
+        """Delete an event; an already deleted one is not an error."""
+        ...
+
+
+class GoogleCalendarClient:
+    def __init__(self, credentials_file: str):
+        self.credentials_file = credentials_file
+        self._session = None
+
+    def _http(self):
+        if self._session is None:
+            if not self.credentials_file:
+                raise CalendarError("GOOGLE_CALENDAR_CREDENTIALS_FILE is not set")
+            from google.auth.transport.requests import AuthorizedSession
+            from google.oauth2 import service_account
+
+            try:
+                creds = service_account.Credentials.from_service_account_file(
+                    self.credentials_file, scopes=list(SCOPES)
+                )
+            except (OSError, ValueError) as exc:
+                raise CalendarError(f"cannot load service account key: {exc}") from exc
+            self._session = AuthorizedSession(creds)
+        return self._session
+
+    def _call(self, method: str, url: str, **kw):
+        try:
+            resp = self._http().request(method, url, timeout=TIMEOUT_S, **kw)
+        except CalendarError:
+            raise
+        except Exception as exc:  # network, token refresh
+            raise CalendarError(f"{method} {url}: {exc}") from exc
+        return resp
+
+    def busy(self, calendar_id, start, end):
+        resp = self._call(
+            "POST", f"{API}/freeBusy",
+            json={"timeMin": start.isoformat(), "timeMax": end.isoformat(), "items": [{"id": calendar_id}]},
+        )
+        if resp.status_code != 200:
+            raise CalendarError(f"freeBusy {resp.status_code}: {resp.text[:200]}")
+        cal = resp.json().get("calendars", {}).get(calendar_id, {})
+        if cal.get("errors"):  # e.g. notFound: the calendar is not shared with the service account
+            raise CalendarError(f"freeBusy for {calendar_id}: {cal['errors']}")
+        return [
+            (datetime.fromisoformat(b["start"].replace("Z", "+00:00")),
+             datetime.fromisoformat(b["end"].replace("Z", "+00:00")))
+            for b in cal.get("busy", [])
+        ]
+
+    def insert_event(self, calendar_id, body):
+        resp = self._call("POST", f"{API}/calendars/{_quote(calendar_id)}/events", json=body)
+        if resp.status_code not in (200, 201):
+            raise CalendarError(f"events.insert {resp.status_code}: {resp.text[:200]}")
+        return resp.json()["id"]
+
+    def delete_event(self, calendar_id, event_id):
+        resp = self._call("DELETE", f"{API}/calendars/{_quote(calendar_id)}/events/{_quote(event_id)}")
+        if resp.status_code not in (200, 204, 404, 410):
+            raise CalendarError(f"events.delete {resp.status_code}: {resp.text[:200]}")
+
+
+def _quote(value: str) -> str:
+    from urllib.parse import quote
+
+    return quote(value, safe="")

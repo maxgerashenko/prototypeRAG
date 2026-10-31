@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     # replaying requests by hand (curl) without a signature.
     twilio_validate_signature: bool = True
 
+    # Booking backend (plan/04-actions.md, DEC-48): "internal" (Postgres only) or "google_calendar".
+    # Pilot auth is a service account key; the owner shares the calendar with its email.
+    # `businesses.settings.google_calendar_id` overrides the id per business.
+    booking_backend: str = "internal"
+    google_calendar_id: str = ""
+    google_calendar_credentials_file: str = ""
+
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 
 
