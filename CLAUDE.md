@@ -86,7 +86,7 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
   `/web/` is the voice app from the "Voice Chat Bot" design with server push-to-talk (DEC-42);
   `chat.html`, `voice-debug.html` and `call.html` (Twilio Voice SDK, DEC-43) are debug pages.
   Twilio calls show live in `/web/` over `GET /voice/feed` (SSE, watch-only, DEC-46).
-  Design reference for `web/src/app/`: `design/voice-chat-bot/README.md` (screens, tokens,
+  Design reference for `web/src/app/`: `design/README.md` (screens, tokens,
   what is built vs. still to build) and its `Main.dc.html` (full prototype source) — read
   it before changing the voice app's UI.
   Frontend tests: `npm test`, `npm run e2e`.
