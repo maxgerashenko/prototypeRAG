@@ -28,7 +28,7 @@ from app.db.models import Business, BusinessProfile, Location, Page
 from app.db.session import SessionLocal
 from app.ingest.chunk import chunk_markdown
 from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
-from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, parse_sitemap_index
+from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, parse_robots_sitemaps, parse_sitemap_index
 from app.ingest.fetch import fetch_child_sitemaps, fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client
 from app.ingest.fact_chunks import sync_fact_chunks
 from app.ingest.facts import extract_page_facts, pages_to_extract
@@ -254,7 +254,6 @@ def crawl_business(
         base_url = f"{origin.scheme}://{origin.netloc}"
         root = site_root(start_url) or f"{base_url}/"
         robots_txt = fetch_robots_txt(base_url, client)
-        sitemap_xml = fetch_sitemap(base_url, client)
         robots_checker = RobotsChecker(robots_txt) if robots_txt else None
         robots_delay = robots_checker.crawl_delay() if robots_checker else None
         if robots_delay is not None and robots_delay > client._crawl_delay:
@@ -262,6 +261,11 @@ def crawl_business(
             # raises our own delay, never lowers it below delay_seconds
             client._crawl_delay = robots_delay
             print(f"robots.txt Crawl-delay: {robots_delay:g} s between requests")
+        # robots.txt `Sitemap:` lines first, then /sitemap.xml (#136); after the delay is set
+        sitemap_xml = fetch_sitemap(
+            base_url, client, parse_robots_sitemaps(robots_txt),
+            robots_checker.can_fetch if robots_checker else lambda url: True,
+        )
         child_sitemaps: list[str] = []
         children = parse_sitemap_index(sitemap_xml) if sitemap_xml else []
         if children:  # sitemap index (Yoast/WordPress): follow it one level, same delay + robots

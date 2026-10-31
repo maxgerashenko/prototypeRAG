@@ -168,6 +168,20 @@ def _round_up_crawl_delays(robots_txt: str) -> str:
     return _FRACTIONAL_CRAWL_DELAY_RE.sub(lambda m: f"{m.group(1)}{math.ceil(float(m.group(2)))}", robots_txt)
 
 
+def parse_robots_sitemaps(robots_txt: str | None) -> list[str]:
+    """URLs of the `Sitemap:` lines in a robots.txt body, in order, without duplicates.
+    The directive is independent of user-agent groups, so it can appear anywhere."""
+    urls: list[str] = []
+    for line in (robots_txt or "").splitlines():
+        line = line.split("#", 1)[0].strip()
+        key, sep, value = line.partition(":")
+        if sep and key.strip().lower() == "sitemap":
+            value = value.strip()
+            if value.startswith(("http://", "https://")) and value not in urls:
+                urls.append(value)
+    return urls
+
+
 class RobotsChecker:
     """Wraps stdlib robotparser over an already-fetched robots.txt body."""
 
