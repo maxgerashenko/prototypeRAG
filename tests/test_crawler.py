@@ -855,11 +855,18 @@ def test_assign_timezones_uses_profile_address_for_a_default_location_without_on
 # --- PDFs + robots.txt Crawl-delay (plan/01-crawler.md tasks) -------------------------
 
 
-def _text_pdf(lines: list[str], title: str | None = None) -> bytes:
-    """A minimal valid one-page PDF with `lines` as text (no PDF writer in the deps)."""
-    ops = ["BT", "/F1 12 Tf", "14 TL", "72 720 Td"]
-    for line in lines:
-        ops += [f"({line}) Tj", "T*"]
+def _text_pdf(lines: list[str], title: str | None = None, placed: list[tuple[int, int, str]] | None = None) -> bytes:
+    """A minimal valid one-page PDF with `lines` as text (no PDF writer in the deps).
+    `placed` = (x, y, text) items drawn at absolute positions instead, to build a table
+    or a two-column layout."""
+    if placed is not None:
+        ops = ["BT", "/F1 12 Tf"]
+        for x, y, text in placed:
+            ops += [f"1 0 0 1 {x} {y} Tm", f"({text}) Tj"]
+    else:
+        ops = ["BT", "/F1 12 Tf", "14 TL", "72 720 Td"]
+        for line in lines:
+            ops += [f"({line}) Tj", "T*"]
     stream = "\n".join([*ops, "ET"]).encode()
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -892,6 +899,31 @@ def test_extract_pdf_text_and_title():
     # no /Title metadata -> the file name, url-decoded
     assert pdf_title(_text_pdf(["x"]), "https://x.com/files/Bar%20Menu.pdf") == "Bar Menu.pdf"
     assert extract_pdf_text(b"not a pdf") == ""
+
+
+def _grid_pdf(rows: list[list[str]], col_x: list[int]) -> bytes:
+    return _text_pdf([], placed=[(col_x[c], 700 - 20 * r, cell) for r, row in enumerate(rows) for c, cell in enumerate(row)])
+
+
+def test_extract_pdf_text_keeps_table_rows_together():
+    """#135: pypdf put every cell on its own line; a price must stay next to its item."""
+    rows = [["Service", "Duration", "Price"], ["Skin fade", "45 min", "$45"], ["Beard trim", "20 min", "$20"]]
+    text = extract_pdf_text(_grid_pdf(rows, [72, 250, 350]))
+    lines = text.splitlines()
+    assert any("Skin fade" in ln and "45 min" in ln and "$45" in ln for ln in lines), text
+    assert any("Beard trim" in ln and "$20" in ln for ln in lines), text
+
+
+def test_extract_pdf_text_two_column_menu_keeps_item_with_price():
+    rows = [["Espresso", "$4", "Old Fashioned", "$14"], ["Cappuccino", "$5", "Negroni", "$13"]]
+    text = extract_pdf_text(_grid_pdf(rows, [72, 200, 330, 460]))
+    assert any("Negroni" in ln and "$13" in ln for ln in text.splitlines()), text
+    assert any("Espresso" in ln and "$4" in ln for ln in text.splitlines()), text
+
+
+def test_extract_pdf_text_scanned_pdf_returns_empty():
+    """A page with no text layer (scanned image) gives "" so the crawler skips it."""
+    assert extract_pdf_text(_text_pdf([])) == ""
 
 
 def test_fetch_document_decides_html_or_pdf_by_the_response(monkeypatch):

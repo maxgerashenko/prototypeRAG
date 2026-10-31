@@ -24,7 +24,7 @@ removing `<footer>` threw away the opening hours (V23).
 |---|---|---|
 | Company website | Menu, prices, services, hours, FAQ, contacts, about, policies | Crawl internal pages |
 | Google business listing | Stored: `place_id` only. Live lookup (display, never stored): name, address, phone, opening hours. No ratings/reviews (R9) | **Google Places API** (not scraping Google Maps — against ToS and breaks often) |
-| PDFs linked on the site | Menus, price lists, brochures | Download + extract text (`pypdf` / `pymupdf`) |
+| PDFs linked on the site | Menus, price lists, brochures | Download + extract text (MarkItDown (`markitdown[pdf]`, pdfminer.six; tables stay Markdown rows, DEC-51); `pypdf` only for the title) |
 | Owner uploads (later) | Anything missing from the site | Admin upload endpoint |
 
 ## Pipeline
