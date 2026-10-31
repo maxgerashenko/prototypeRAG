@@ -46,19 +46,43 @@ export const ChatIcon = ({ size = 15, stroke = 2 }: { size?: number; stroke?: nu
     <path d={CHAT} />
   </Icon>
 );
-export const ChevronRight = () => (
-  <Icon size={16} color="#8A919D">
+export const ChevronRight = ({ size = 16, color = "#8A919D", stroke = 2 }: {
+  size?: number; color?: string; stroke?: number;
+}) => (
+  <Icon size={size} color={color} stroke={stroke}>
     <polyline points="9 18 15 12 9 6" />
   </Icon>
 );
-export const ChevronDown = () => (
-  <Icon size={16} color="#8A919D" stroke={2.4}>
+export const ChevronDown = ({ size = 16, color = "#8A919D", stroke = 2.4 }: {
+  size?: number; color?: string; stroke?: number;
+}) => (
+  <Icon size={size} color={color} stroke={stroke}>
     <polyline points="6 9 12 15 18 9" />
   </Icon>
 );
-export const ChevronLeft =() => (
-  <Icon size={22}>
+export const ChevronLeft = ({ size = 22, stroke = 2 }: { size?: number; stroke?: number }) => (
+  <Icon size={size} stroke={stroke}>
     <polyline points="15 18 9 12 15 6" />
+  </Icon>
+);
+export const DoubleChevronLeft = () => (
+  <Icon size={16} stroke={2.4}>
+    <polyline points="11 17 6 12 11 7" />
+    <polyline points="18 17 13 12 18 7" />
+  </Icon>
+);
+export const DoubleChevronRight = () => (
+  <Icon size={16} stroke={2.4}>
+    <polyline points="13 17 18 12 13 7" />
+    <polyline points="6 17 11 12 6 7" />
+  </Icon>
+);
+export const CalendarIcon = ({ size = 16 }: { size?: number }) => (
+  <Icon size={size}>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
   </Icon>
 );
 export const PhoneIcon = ({ size = 20 }: { size?: number }) => (

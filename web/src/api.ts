@@ -240,6 +240,31 @@ export const listTwilioNumbers = () => getJson<TwilioNumbers>("/twilio/numbers")
 export const assignNumber = (businessId: string, number: string) =>
   sendJson<AssignResult>(`${bizUrl(businessId)}/number`, "PUT", { number });
 
+// --- bookings (app/api/bookings.py) ---
+
+export interface BookingItem {
+  id: string;
+  date: string; // YYYY-MM-DD, business-local
+  start_min: number; // minutes since local midnight
+  end_min: number;
+  name: string;
+  service: string | null;
+  party_size: number | null;
+  phone: string | null;
+  notes: string | null;
+  by_assistant: boolean; // booked on a call or chat (it has a conversation)
+}
+
+export interface Bookings {
+  timezone: string;
+  hours: { open: number; close: number } | null; // hours of the booking rules; null = none set
+  bookings: BookingItem[];
+}
+
+/** Confirmed bookings whose local start day is in [start, end] (YYYY-MM-DD, at most 62 days). */
+export const getBookings = (businessId: string, start: string, end: string) =>
+  getJson<Bookings>(`${bizUrl(businessId)}/bookings?start=${start}&end=${end}`);
+
 // --- Twilio call page (app/voice/twilio_routes.py) ---
 
 export interface TwilioToken {
