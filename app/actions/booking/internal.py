@@ -1,7 +1,7 @@
 """Internal booking backend: Postgres `bookings` + `booking_rules` (plan/04-actions.md).
 
 The first backend, no external dependency. `BookingBackend` is the interface a Google
-Calendar backend (DEC-48) will implement next.
+Calendar backend (DEC-48, google_calendar.py) implements too.
 
 Double-booking: `create` takes a per-business advisory lock inside its transaction, reads
 the day's confirmed bookings, applies the rules, and inserts -- two calls for the same slot
