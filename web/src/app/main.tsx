@@ -22,3 +22,11 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+// Installable app: the service worker caches the app shell only (web/public/sw.js). Production
+// build only — in `npm run dev` it would cache Vite's modules and hide edits.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/web/sw.js", { scope: "/web/" }).catch(() => {});
+  });
+}

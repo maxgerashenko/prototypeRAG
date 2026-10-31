@@ -370,6 +370,13 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **Hands-free calls on mobile** (#114): on a phone or tablet browser (Safari, Chrome) the voice app
   disables push-to-talk and uses `mode: "vad"` (mic always open, server VAD); desktop keeps push-to-talk. Watch echo on the phone
   speaker (#83) and the VAD-only silence re-prompt (V17)
+- [ ] **Home-screen app on iPhone** (PWA, this thread): `npm run build`, serve over HTTPS (ngrok URL, Safari needs it
+  for the service worker), open `/web/` in Safari → Share → Add to Home Screen. Check: icon and name "Voice" look right;
+  it opens full-screen with no Safari bars; the status bar text is not covered by the title and the Call button clears
+  the home indicator; focusing the search box does not zoom; a call works (mic permission prompt, hands-free VAD mode,
+  #114) and audio plays; after one online load, airplane mode opens the app shell with its error banner instead of a
+  blank page; rebuild + reopen picks up the new version. Known iOS limits: the mic prompt may reappear on each
+  launch; a call stops if the app is backgrounded or the screen locks
 - [ ] **Real call through the React app** (`/web/`, push-to-talk): STT/TTS + LM Studio end
   to end — the open task above. Steps:
   - [ ] `gcloud auth application-default login` (Speech-to-Text and Text-to-Speech
