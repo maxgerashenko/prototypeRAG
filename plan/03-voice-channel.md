@@ -173,7 +173,7 @@ Re-check each item once its environment exists, then tick it or turn it into a t
 | V3 | `finish()` waits up to 5 s, then silently uses the interim text | Potential | Log line "STT final result not in…" | Lower timeout; tune VAD `end_silence_ms` |
 | V4 | `STT_MODEL=latest_short` vs `phone_call` on 8 kHz μ-law audio — accuracy unknown | Potential | Same questions via mic and via Twilio, compare transcripts | Per-transport STT model |
 | V5 | `TTS_VOICE=en-US-Neural2-F` may be retired/renamed; TTS may not return the exact requested rate (8000/16000) → `ValueError` | Potential | First TTS call at both rates | Pick a current voice (Chirp 3 HD?); resample instead of failing |
-| V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Real | Time from connect to first audio | Cache greeting audio per business (onboarding) |
+| V6 | Greeting is synthesized at every call start, not pre-generated (DEC-17) → caller waits one TTS round trip | Fixed in code 2026-10-28 (#74): the standard greeting is stored per business in `greeting_audio` (migration 0010) at both call sample rates — generated at the end of a crawl (`python -m app.voice.greeting_cache --business-id …` re-runs it) or on the first call that misses; read back after a restart. Live timing check pending | "Test on Mac" below | Per-business audio for the "Welcome back" line is not cached (new text every call) |
 | V7 | Missing credentials surface only after ~3 s (auth probes the metadata server), and again on every turn | Real | Seen in smoke test | Check ADC once at startup / fail fast |
 | V8 | STT is fixed to `VOICE_LANGUAGE`, but the prompt says "answer in the caller's language" — a non-English caller won't be transcribed | Fixed in code 2026-10-28 (#75): `STT_ALTERNATIVE_LANGUAGES` (comma list, max 3) → `alternative_language_codes`; empty by default. Live check pending | Set it, e.g. `es-US,ru-RU`, ask a question in that language | Language per business if detection is too unreliable |
 
@@ -328,7 +328,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 - [x] Silence re-prompt (~6 s) and polite hang-up, end the call after the caller's goodbye (V17) — unit tests with fakes; live check under "Test on Mac"
 - [x] Filler while a tool runs: dropped 2026-10-19 (#40) — the T1 working-sound ticks are enough, no spoken "one moment"
 - [x] Called number / TwiML App → business_id mapping from Postgres (`To` in `businesses.phone_numbers`; Voice SDK `business_id` parameter)
-- [x] Call transfer + take-a-message fallback (#50): `transfer_to_human` and `take_message` tools (`app/actions/transfer.py`, `messages.py`); the session hangs up after the bot's last sentence, Twilio continues at the `<Redirect>` after `<Connect>` → `POST /twilio/transfer` dials `businesses.settings.transfer_number`; not answered → voicemail recorded into `messages_for_owner` (migration 0009). Tested with fakes; live check under "Test on Mac"
+- [x] Call transfer + take-a-message fallback (#50): `transfer_to_human` and `take_message` tools (`app/actions/transfer.py`, `messages.py`); the session hangs up after the bot's last sentence, Twilio continues at the `<Redirect>` after `<Connect>` → `POST /twilio/transfer` dials `businesses.settings.transfer_number`; not answered → voicemail recorded into `messages_for_owner` (migration 0010). Tested with fakes; live check under "Test on Mac"
 - [x] Transcript saved to `messages` per turn (survives a dropped call), `ended_at` set on hang-up
 - [x] Summary runs in the Twilio status callback (DEC-24) — callback built (`POST /twilio/status`, sets `ended_at`); summary checked live 2026-10-21 (see "Post-call summary" below)
 - [x] Measure latency per stage and log it per turn (`latency` event + log: stt, tool, first sentence, first audio)
@@ -340,6 +340,11 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
+
+- [ ] **Pre-generated greeting (V6, #74)**: `uv run alembic upgrade head`, then `uv run python -m app.voice.greeting_cache
+  --business-id <pilot id>` (prints `generated: 2`; again → `0`). Call from `/web/` and the phone: the greeting
+  starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
+  TTS). Restart the app and call again — still instant. Change `TTS_VOICE` → one slow call, then instant.
 
 - [ ] **Tool loop in text chat (#51)**: with `google/gemma-4-12b` loaded, `POST /chat` and `GET /chat/stream` on the pilot with a question that makes the model call `search_business_info` (e.g. "Do you have parking?"): the answer arrives, no error, `llm chat` log lines show `tool_calls=1` then a text round. Then a plain greeting (no tool call) still answers. Repeat in the voice app (`/web/`) to confirm the voice loop still works after the shared-tool change.
 - [ ] **V29 (#109)** Voice prompt rule added 2026-10-28: re-ask on a call "What types of sauna sessions do you have?" and "What are your hours?" — no mention of "the profile"; area hours (e.g. Rooftop Pool) are labelled as that area's. Also try STT phrase hints per business (sauna, Aufguss, banya) on Twilio audio, or note the result under #73

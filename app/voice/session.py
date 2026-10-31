@@ -51,12 +51,12 @@ from app.actions.transfer import TRANSFER_STARTED
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
-from app.ingest.profile import is_placeholder_name
 from app.llm import get_async_chat_client
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import format_profile, format_summary
-from app.voice import tts
+from app.voice import greeting_cache, tts
 from app.voice.audio import working_sound
+from app.voice.greeting_cache import greeting_text, voice_name
 from app.voice.stt import TurnTranscriber
 from app.voice.tools import TOOLS, run_tool
 from app.voice.vad import TurnDetector
@@ -83,7 +83,7 @@ SILENCE_GOODBYE_TEXT = "I haven't heard anything, so I'll end the call now. Than
 
 # T4: the standard greeting's audio per (text, sample rate, voice, language), so a call
 # starts playing at once instead of after a TTS round trip. In-process only (lost on
-# restart); DEC-17 stores it at onboarding later. "Welcome back" greetings aren't cached:
+# restart); greeting_cache.py keeps the same audio in Postgres (V6). "Welcome back" greetings aren't cached:
 # they carry the earlier topic, so they are new text every time.
 _greeting_audio: dict[tuple, bytes] = {}
 
@@ -258,7 +258,7 @@ class CallSession:
         if self._topic is not None:
             greeting = f"Welcome back to {name}. I'm an AI assistant. Let's pick up where we left off: {self._topic}."
         else:
-            greeting = f"Hi, you've reached {name}. I'm an AI assistant. How can I help?"
+            greeting = greeting_text(name)
         self._reply_task = self._spawn(self._speak_fixed(greeting, cache=self._topic is None))
         if get_settings().voice_llm_warmup:
             self._warmup_task = asyncio.create_task(self._warm_up_llm())
@@ -548,10 +548,14 @@ class CallSession:
         settings = get_settings()
         key = (text, self.sample_rate, settings.tts_voice, settings.voice_language)
         audio = _greeting_audio.get(key) if cache else None
+        if audio is None and cache:
+            audio = await asyncio.to_thread(self._load_cached_audio, key)
         if audio is None:
             audio = await asyncio.to_thread(self._synthesize, text, self.sample_rate)
             if cache:
-                _greeting_audio[key] = audio
+                await asyncio.to_thread(self._store_cached_audio, key, audio)
+        if cache:
+            _greeting_audio[key] = audio
         await self._play(audio)
         if history:
             self._history.append({"role": "assistant", "content": text})
@@ -688,14 +692,21 @@ class CallSession:
                 self._system_prompt += f"\n\n{locations_text}"  # DEC-49
             if summary_text := format_summary(session.get(BusinessSummary, self.business_id)):
                 self._system_prompt += f"\n\n{summary_text}"
-            # A3 (plan/07-knowledge-quality.md §3): business.name is now the brand
-            # ("Bathhouse"), kept in sync from the site's og:site_name on every crawl
-            # (app/ingest/run.py) -- preferred over business_profile.name, which still
-            # holds the old LLM-extracted "Bathhouse Williamsburg" (profile table is
-            # retired once the facts/location card replaces it, plan 07 §5.5).
-            if not is_placeholder_name(business.name):
-                return business.name
-            return (profile.name if profile and profile.name else None) or business.name
+            return voice_name(business, profile)
+
+    def _load_cached_audio(self, key: tuple) -> bytes | None:
+        """V6: the stored audio, if any. A database error only costs the TTS round trip."""
+        try:
+            return greeting_cache.load(self.business_id, *key)
+        except Exception:
+            log.warning("greeting cache read failed", exc_info=True)
+            return None
+
+    def _store_cached_audio(self, key: tuple, audio: bytes) -> None:
+        try:
+            greeting_cache.store(self.business_id, *key, audio)
+        except Exception:
+            log.warning("greeting cache write failed", exc_info=True)
 
     def _save_message(self, role: str, content: str) -> None:
         with tenant_session(self.business_id) as session:

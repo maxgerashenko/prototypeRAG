@@ -20,7 +20,8 @@ from sqlalchemy import delete, select
 
 from app.db import tenant_session
 from app.db.models import Business, Chunk, Conversation, CustomReply, Message
-from app.voice import session as session_mod
+from app.config import get_settings
+from app.voice import greeting_cache, session as session_mod
 from app.voice.session import CallSession, speakable, split_sentences
 
 FIXTURES = Path(__file__).parent / "fixtures" / "voice"
@@ -796,6 +797,75 @@ def test_greeting_audio_is_synthesized_once_per_text_and_rate(business, monkeypa
     run_async(run_again())
     assert calls[-1].startswith("Welcome back to Zebra Spa.")
     assert len(session_mod._greeting_audio) == 1
+
+
+def _call_once(business, send_audio, send_event, synthesize):
+    s = CallSession(business, RATE, send_audio, send_event, synthesize=synthesize)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+
+
+def test_greeting_audio_survives_a_restart_via_the_database(business, monkeypatch):
+    """V6: the in-process cache is lost on restart; the stored audio is not."""
+    calls: list[str] = []
+
+    def counting_synthesize(text, rate):
+        calls.append(text)
+        return fake_synthesize(text, rate)
+
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+    _call_once(business, s._send_audio, s._send_event, counting_synthesize)
+    session_mod._greeting_audio.clear()  # "restart"
+    _call_once(business, s._send_audio, s._send_event, counting_synthesize)
+    assert len(calls) == 1 and len(audio_out) == 2 and audio_out[0] == audio_out[1]
+
+
+def test_pregenerated_greeting_needs_no_tts_at_call_start(business, monkeypatch):
+    calls: list[tuple] = []
+
+    def counting_synthesize(text, rate):
+        calls.append((text, rate))
+        return fake_synthesize(text, rate)
+
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+    assert greeting_cache.pregenerate(business, counting_synthesize, rates=(RATE, 16000)) == 2
+    assert greeting_cache.pregenerate(business, counting_synthesize, rates=(RATE, 16000)) == 0  # idempotent
+    assert [r for _, r in calls] == [RATE, 16000]
+    calls.clear()
+    _call_once(business, s._send_audio, s._send_event, counting_synthesize)
+    assert calls == [] and len(audio_out) == 1
+
+
+def test_changed_voice_is_a_cache_miss(business, monkeypatch):
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+    greeting_cache.pregenerate(business, fake_synthesize, rates=(RATE,))
+    session_mod._greeting_audio.clear()
+    monkeypatch.setattr(get_settings(), "tts_voice", "en-US-Other-Voice")
+    calls: list[str] = []
+
+    def counting_synthesize(text, rate):
+        calls.append(text)
+        return fake_synthesize(text, rate)
+
+    _call_once(business, s._send_audio, s._send_event, counting_synthesize)
+    assert len(calls) == 1
+
+
+def test_greeting_cache_database_error_falls_back_to_tts(business, monkeypatch):
+    s, audio_out, _ = _make_session(business, FakeLLM(), monkeypatch)
+
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(greeting_cache, "load", boom)
+    monkeypatch.setattr(greeting_cache, "store", boom)
+    _call_once(business, s._send_audio, s._send_event, fake_synthesize)
+    assert len(audio_out) == 1
 
 
 @pytest.mark.parametrize("rate", [8000, 16000])
