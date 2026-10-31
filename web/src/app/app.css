@@ -25,6 +25,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); }
+html { -webkit-text-size-adjust: 100%; }
 button { font-family: inherit; }
 a { color: var(--bot); }
 a:hover { color: var(--bot-light); }
@@ -59,6 +60,12 @@ a:hover { color: var(--bot-light); }
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  /* installed on the iPhone home screen the page runs under the status bar and home indicator
+     (viewport-fit=cover + black-translucent): keep content inside the safe area. All 0 in a browser tab. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
 }
 @media (min-width: 520px) {
   .vapp { border-left: 1px solid var(--divider); border-right: 1px solid var(--divider); }
@@ -73,7 +80,7 @@ a:hover { color: var(--bot-light); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---------- shared bits ---------- */
-.footer { padding: 14px 20px 30px; border-top: 1px solid var(--divider); background: var(--bg); }
+.footer { padding: 14px 20px max(30px, calc(env(safe-area-inset-bottom) + 12px)); border-top: 1px solid var(--divider); background: var(--bg); }
 .btn-pill {
   width: 100%; height: 56px; border-radius: 28px; border: 0;
   display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -423,7 +430,7 @@ a:hover { color: var(--bot-light); }
 }
 .phone-caller svg { color: var(--call); flex-shrink: 0; }
 .call-controls .btn-pill { width: auto; padding: 0 28px; flex-shrink: 0; }
-.phone-live { position: absolute; left: 16px; right: 16px; bottom: 104px; z-index: 5; }
+.phone-live { position: absolute; left: 16px; right: 16px; bottom: calc(104px + env(safe-area-inset-bottom)); z-index: 5; }
 .phone-live .call-btn { box-shadow: 0 6px 24px #0008; }
 .phone-live-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.15; }
 .phone-live-text .mono-font { font-size: 17px; font-weight: 800; letter-spacing: .02em; }
