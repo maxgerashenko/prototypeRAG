@@ -12,7 +12,7 @@ caller's turn, and their calls already show in the voice-turn timing log.
 import json
 import logging
 
-from app.actions.registry import ActionContext, get_tool
+from app.actions.registry import ActionContext, enabled_tool_names, get_tool
 from app.db import tenant_session
 from app.db.models import ActionLog
 
@@ -35,6 +35,8 @@ def execute(ctx: ActionContext, name: str, arguments: str | dict) -> str:
     tool = get_tool(name)
     if tool is None:
         return f"Error: unknown tool {name!r}."
+    if tool.optional and name not in enabled_tool_names(ctx.business_id):
+        return f"Error: {name} is not available for this business."  # the model may call tools it was never offered
     if isinstance(arguments, str):
         try:
             arguments = json.loads(arguments or "{}")

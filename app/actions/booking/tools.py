@@ -8,8 +8,8 @@ without it (text chat) is the number the model passes used, and it must be a ful
 international number. There is no SMS confirmation: the model reads the reference back to the
 caller (SMS was dropped from #52, see plan/04-actions.md).
 
-Not wired into the live voice loop yet: `app/voice/tools.py` doesn't import this module,
-and the per-business enabled-tools setting is part of that wiring (plan/04 tasks).
+All three are `optional`: offered (chat and voice) and executable only for businesses
+whose `settings["enabled_tools"]` lists them (#151). `app/voice/tools.py` imports this module.
 """
 
 import re
@@ -123,6 +123,7 @@ register(Tool(
     parameters={"date": _DATE, "time": _TIME, "party_size": _PARTY, "service": _SERVICE},
     required=("date", "time"),
     handler=check_availability,
+    optional=True,
 ))
 register(Tool(
     name="create_booking",
@@ -139,6 +140,7 @@ register(Tool(
     required=("date", "time", "name"),
     side_effect=True,
     handler=create_booking,
+    optional=True,
 ))
 register(Tool(
     name="cancel_booking",
@@ -150,4 +152,5 @@ register(Tool(
     required=("reference",),
     side_effect=True,
     handler=cancel_booking,
+    optional=True,
 ))

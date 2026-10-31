@@ -11,8 +11,9 @@ business logic. Part 4 action tools (bookings, take_message, transfer_to_human, 
 import uuid
 
 from app.actions import messages, transfer  # noqa: F401  (importing registers the tools)
+from app.actions.booking import tools as booking_tools  # noqa: F401  (optional tools, #151)
 from app.actions.executor import execute
-from app.actions.registry import TOOLS, ActionContext, Tool, register
+from app.actions.registry import TOOLS, ActionContext, Tool, enabled_tool_names, register, tools_for
 from app.db import tenant_session
 from app.rag.location import default_location_id
 from app.rag.prompt import format_chunks
@@ -49,7 +50,7 @@ register(Tool(
     ),
 ))
 
-__all__ = ["TOOLS", "run_tool", "search_business_info"]
+__all__ = ["TOOLS", "enabled_tool_names", "run_tool", "search_business_info", "tools_for"]
 
 
 def run_tool(
