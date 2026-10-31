@@ -158,7 +158,7 @@ test.describe("1 · pick a business", () => {
     await expect(button).toHaveAttribute("aria-pressed", "true");
     await expect(button).toHaveAttribute("aria-expanded", "true");
     await expect(bakery).toHaveClass(/\bon\b/);
-    await expect(bakery.locator(".radio svg")).toBeVisible();
+    await expect(bakery.locator(".radio")).toHaveCount(0);
     await expect(bakery.getByText("Recent conversations")).toBeVisible();
     const rows = bakery.locator(".recent-row");
     await expect(rows).toHaveCount(3);

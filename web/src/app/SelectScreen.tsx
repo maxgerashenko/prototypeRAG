@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
-import { CheckIcon, ChevronRight, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
+import { ChevronDown, ChevronRight, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
 import { SkeletonGate } from "./PullIndicator";
 import { SourceBadge } from "./SourceIcon";
 import { chatsLabel, fmtClock, fmtPhone, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
@@ -130,7 +130,7 @@ export function SelectScreen(p: Props) {
                     </div>
                   )}
                 </div>
-                <div className="radio">{on && <CheckIcon />}</div>
+                <span className="biz-chev"><ChevronDown /></span>
               </button>
 
               {on && (
