@@ -1,10 +1,11 @@
 import { useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
-import { ChevronDown, ChevronRight, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
+import { ChevronDown, ChevronRight, GearIcon, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
 import { SkeletonGate } from "./PullIndicator";
 import { SourceBadge } from "./SourceIcon";
 import { chatsLabel, fmtClock, fmtPhone, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
+import { settingsHint } from "./settings";
 
 const RECENT = 3;
 
@@ -20,6 +21,9 @@ interface Props {
   onOpen: (bizId: string, convoId: string) => void;
   onSeeAll: (bizId: string) => void;
   onCall: (bizId: string) => void;
+  onSettings: (bizId: string) => void;
+  /** Whether the open business's greeting audio is cached; null while it loads. */
+  greetingCached: boolean | null;
   /** The main Twilio number (shown as the title); null keeps the plain header. */
   mainNumber: string | null;
   onRetry: () => void;
@@ -64,7 +68,7 @@ export function SelectScreen(p: Props) {
           </h1>
           <p data-testid="num-note">
             {holder ? <>Calls to this number reach <strong>{holder.name}</strong>. </> : "No business has this number yet. "}
-            Pick a business below to point the number at it. On a phone, tap the number to call; the
+            Change which business it reaches in that business's Settings. On a phone, tap the number to call; the
             button at the bottom calls from this browser.
           </p>
         </div>
@@ -135,6 +139,14 @@ export function SelectScreen(p: Props) {
 
               {on && (
                 <div className="recent">
+                  <button className="set-row" data-testid="settings-row" onClick={() => p.onSettings(b.id)}>
+                    <span className="set-row-icon"><GearIcon /></span>
+                    <span className="set-row-text">
+                      <span className="set-row-title">Business settings</span>
+                      <span className="set-row-hint">{settingsHint(b.phone_numbers, p.greetingCached)}</span>
+                    </span>
+                    <ChevronRight />
+                  </button>
                   <div className="recent-head">
                     <span>Recent conversations</span>
                     <span>{countLabel}</span>

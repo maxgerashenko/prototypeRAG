@@ -137,75 +137,6 @@ def test_assign_main_number_errors(settings, main_number, business, monkeypatch)
     assert client.post(f"/businesses/{business}/main-number").status_code == 503
 
 
-# --- assign any account number: GET /twilio/numbers, PUT/DELETE /businesses/{id}/numbers (#147) ---
-
-SPARE = "+15552223333"
-
-
-class FakeIncomingNumbers:
-    def list(self):
-        return [SimpleNamespace(phone_number=SPARE, friendly_name="Spare"),
-                SimpleNamespace(phone_number=NUMBER, friendly_name=None)]
-
-
-@pytest.fixture
-def fake_twilio(monkeypatch):
-    from app.voice import twilio_numbers
-    monkeypatch.setattr(twilio_numbers, "get_client",
-                        lambda: SimpleNamespace(incoming_phone_numbers=FakeIncomingNumbers()))
-
-
-def test_list_account_numbers_marks_holders(fake_twilio, business):
-    body = TestClient(app).get("/twilio/numbers").json()
-    assert body["configured"] is True
-    by_number = {n["number"]: n for n in body["numbers"]}
-    assert by_number[SPARE]["business_id"] is None and by_number[SPARE]["label"] == "Spare"
-    assert by_number[NUMBER]["business_id"] == str(business)
-    assert by_number[NUMBER]["business_name"] == "Zebra Spa" and by_number[NUMBER]["label"] == NUMBER
-
-
-def test_list_account_numbers_without_credentials(monkeypatch):
-    from app.voice import twilio_numbers
-    monkeypatch.setattr(twilio_numbers, "get_settings",
-                        lambda: get_settings().model_copy(update={"twilio_account_sid": "", "twilio_auth_token": ""}))
-    body = TestClient(app).get("/twilio/numbers").json()
-    assert body["configured"] is False and body["numbers"] == [] and "not set" in body["message"]
-
-
-def test_assign_number_replaces_numbers_and_routes_calls(settings, fake_twilio, business, other_business):
-    client = TestClient(app)
-    r = client.put(f"/businesses/{other_business}/numbers", json={"number": SPARE})
-    assert r.status_code == 200 and r.json()["taken_from"] is None
-    assert _phones(other_business) == [SPARE] and _phones(business) == [NUMBER]
-    _, params = _stream_params(_post(client, "/twilio/voice", {"CallSid": "CA7", "To": SPARE}).text)
-    assert params["business_id"] == str(other_business)
-
-
-def test_assign_number_held_by_another_moves_it(fake_twilio, business, other_business):
-    r = TestClient(app).put(f"/businesses/{other_business}/numbers", json={"number": NUMBER})
-    assert r.status_code == 200 and r.json()["taken_from"] == "Zebra Spa"
-    assert _phones(business) == [] and _phones(other_business) == [NUMBER]
-
-
-def test_assign_number_errors(fake_twilio, business, monkeypatch):
-    client = TestClient(app)
-    assert client.put(f"/businesses/{business}/numbers", json={"number": "+15559999999"}).status_code == 422
-    assert client.put(f"/businesses/{uuid.uuid4()}/numbers", json={"number": SPARE}).status_code == 404
-    from app.voice import twilio_numbers
-
-    def no_credentials():
-        raise twilio_numbers.TwilioNotConfigured("TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are not set")
-    monkeypatch.setattr(twilio_numbers, "get_client", no_credentials)
-    assert client.put(f"/businesses/{business}/numbers", json={"number": SPARE}).status_code == 503
-
-
-def test_unassign_numbers(business):
-    client = TestClient(app)
-    assert client.delete(f"/businesses/{business}/numbers").status_code == 200
-    assert _phones(business) == []
-    assert client.delete(f"/businesses/{uuid.uuid4()}/numbers").status_code == 404
-
-
 # --- webhook ------------------------------------------------------------------------
 
 def test_phone_call_maps_dialled_number_to_business(settings, business):
@@ -368,10 +299,11 @@ def _start(business_id, call_sid, token):
 def greeting_long_synthesize(text: str, sample_rate: int) -> bytes:
     """3 s greeting, so the caller can talk over it; a 50 ms answer plays out before the
     hang-up, so it is saved whole (B2 saves only the sentences the caller heard)."""
-    return (fake_synthesize if text.startswith("Hi,") else short_synthesize)(text, sample_rate)
+    return (fake_synthesize if text.startswith("Hi, I am an AI") else short_synthesize)(text, sample_rate)
 
 
 def test_media_stream_full_call(settings, business, monkeypatch):
+    session_mod._greeting_audio.clear()  # the opening text is the same for every business (DEC-53)
     monkeypatch.setattr(session_mod, "get_async_chat_client", lambda: AnswerLLM())
     monkeypatch.setattr(ws_mod, "CallSession", functools.partial(
         CallSession, transcriber_factory=FakeTranscriber, synthesize=greeting_long_synthesize))

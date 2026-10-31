@@ -124,6 +124,8 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `blocked` labels (stage = milestone prefix); blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
 | DEC-50 | Stage order: multi-business before cloud (supersedes DEC-27's order) | Stage 2 = multi-business (milestone `S2 · M6 Multi-business`), stage 3 = cloud (`S3 · M7 Cloud`); `S3 · M8 Profitable scale` unchanged | 1 · 2 · 3 | ✅ |
 | DEC-51 | Keep our crawler; use MarkItDown for PDF text (issue #116) | `app/ingest/` stays (Scrapy found the same pages and has no priority/cap logic or extraction); add robots.txt `Sitemap:` lines to discovery; PDF extraction moves from `pypdf` page text to MarkItDown (`markitdown[pdf]`, pdfminer.six) because it keeps tables as Markdown rows; scanned PDFs still need OCR | 1 | ✅ (comparison [done 2026-10-28](comparison-scrapy-markitdown.md); follow-up issues open) |
+| DEC-52 | Phone numbers are assigned per business in Settings (user decision 2026-10-31, #147) | Settings lists the Twilio account's numbers (`GET /twilio/numbers`) and `PUT /businesses/{id}/number` moves one to the business (off any other holder); numbers held by another business are shown as "Used by X" with a *Move* action, not hidden; opening a card no longer moves the main number (`App.tsx` `assignMainNumber` removed, `/main-number` endpoints unused). Only numbers the account owns can be assigned; buying one stays out (DEC-34) | 1 | ✅ |
+| DEC-53 | The greeting always starts with a fixed AI disclosure (user decision 2026-10-31, #145) | The spoken opening = fixed sentence "Hi, I am an AI assistant." + the owner's greeting text (nothing more when empty; a copy of the sentence typed by the owner is dropped) — wording changed 2026-10-31; the owner edits only the second part and the Settings screen shows a hint below the input saying the first sentence is added. Keeps the R15/DEC-17 disclosure without rejecting text. Greeting text lives in `businesses.settings.greeting` (no migration); audio cached per final text (`greeting_audio`) | 1 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
@@ -834,6 +836,27 @@ Consequences: GitHub milestones renamed `S2 · M6 Multi-business` (was S3 · M7)
 (was S2 · M6); issues stay with their milestone. Plan-file *headings and milestone table* are
 updated; other "stage 2/3" mentions inside the part files (05, 06, DEVELOPMENT_PLAN, DRIVERS
 tables) still use the old numbering until each part is picked up — follow-up.
+
+### DEC-52 — Phone numbers are assigned per business in Settings (stage 1)
+
+Issue #147. Before this, `/web/` moved one main number to whichever business was opened (code only, never recorded); DEC-34/DEC-43 already model one number per business.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| A. Keep auto-move; Settings only shows the number | No backend for numbers | Choose/Change can't work; routing silently changes on every card open | ❌ |
+| B. Assign per business in Settings; opening a card no longer moves it | Matches the design, DEC-34/43; explicit, so real callers are never re-routed silently | With one trial number it is 3 taps to move it | ✅ |
+| C. Both | Keeps the dev shortcut | Two ways to change routing that fight each other | ❌ |
+
+Sub-decision: numbers used by another business are shown ("Used by X", action *Move*), not hidden as in the design, because with a single trial number hiding makes the picker empty. Assigning in our DB does not set the number's Voice URL at Twilio (the picker flags numbers not routed to this app). OPEN-21 (number to location) stays stage 3.
+
+### DEC-53 — The greeting always starts with a fixed AI disclosure (stage 1)
+
+Issue #145; driver R15/DEC-17 (legal priority).
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| Reject text without "AI" (422) | Simple | The design's sample ("virtual assistant") is rejected; owner must remember the rule | ❌ |
+| Fixed sentence "Hi, I am an AI assistant." prepended to the owner's text, hint under the input, disclosure alone if empty | Disclosure can't be removed or forgotten; no validation errors | Greeting is a little longer | ✅ |
 
 ### DEC-51 — Keep our crawler, use MarkItDown for PDF text (stage 1)
 

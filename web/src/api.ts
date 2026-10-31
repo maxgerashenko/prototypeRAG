@@ -1,4 +1,5 @@
 // Shapes of the backend's JSON — app/api/chat.py, app/api/businesses.py, app/api/conversations.py,
+// app/api/business_settings.py, app/voice/twilio_numbers.py,
 // app/voice/browser_ws.py, app/voice/twilio_routes.py, app/voice/call_feed.py.
 
 export interface Source {
@@ -150,39 +151,6 @@ export async function setMainNumber(businessId: string, assign: boolean): Promis
   }
 }
 
-/** One of the account's Twilio numbers and the business holding it, if any (GET /twilio/numbers, #147). */
-export interface AccountNumber {
-  number: string;
-  label: string;
-  business_id: string | null;
-  business_name: string | null;
-}
-
-/** `configured: false` (no Twilio credentials) comes with an empty list and an explaining `message`. */
-export const listAccountNumbers = () =>
-  getJson<{ configured: boolean; message: string | null; numbers: AccountNumber[] }>("/twilio/numbers");
-
-/**
- * Give the business one of the account's numbers (stage 1: one per business). A number held by
- * another business is moved: it leaves that business, whose name comes back as `takenFrom`.
- * Used by the Settings screen (#144); a number of null takes the business's numbers off.
- */
-export async function assignNumber(businessId: string, number: string | null): Promise<{ takenFrom: string | null }> {
-  const url = `/businesses/${encodeURIComponent(businessId)}/numbers`;
-  const res = number === null
-    ? await fetch(url, { method: "DELETE" })
-    : await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ number }),
-      });
-  const body = (await res.json().catch(() => ({}))) as { detail?: string; taken_from?: string | null };
-  if (!res.ok) {
-    throw new Error(body.detail ?? `HTTP ${res.status}`);
-  }
-  return { takenFrom: body.taken_from ?? null };
-}
-
 export const listBusinesses = () => getJson<Business[]>("/businesses");
 
 export const listConversations = (businessId: string) =>
@@ -192,6 +160,85 @@ export const getConversation = (businessId: string, conversationId: string) =>
   getJson<ConversationDetail>(
     `/businesses/${encodeURIComponent(businessId)}/conversations/${encodeURIComponent(conversationId)}`,
   );
+
+// --- business settings (app/api/business_settings.py, app/voice/twilio_numbers.py) ---
+
+/** `text` is the owner's part only ("" = only the disclosure); the spoken opening always starts with "Hi, I am an AI assistant." (DEC-53). */
+export interface GreetingStatus {
+  text: string;
+  is_default: boolean;
+  full_text?: string; // what is spoken: the disclosure + text
+  cached: boolean; // audio exists for both sample rates
+  cached_at: string | null; // ISO time
+  max_length: number;
+  cache_error?: string | null; // PUT only: the text is saved but the TTS failed
+}
+
+export interface TopQuestion {
+  question: string;
+  count: number;
+  percent: number;
+  answer: string | null;
+}
+
+export interface TopQuestions {
+  total_questions: number;
+  conversations: number;
+  days: number;
+  questions: TopQuestion[];
+}
+
+/** A number of the Twilio account; `business_id`/`business_name` say which business holds it (DEC-52). */
+export interface TwilioNumber {
+  number: string;
+  friendly_name: string;
+  voice: boolean;
+  sms: boolean;
+  routed: boolean; // its Voice URL points at this app
+  business_id: string | null;
+  business_name: string | null;
+}
+
+export interface TwilioNumbers {
+  numbers: TwilioNumber[];
+  error: string | null;
+}
+
+export interface AssignResult {
+  business_id: string;
+  phone_numbers: string[];
+  moved_from: string[];
+}
+
+/** Send JSON; a failure carries the server's `detail` when it is a string (e.g. the 422 text). */
+async function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { detail?: unknown };
+    throw new Error(typeof err.detail === "string" ? err.detail : `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+const bizUrl = (businessId: string) => `/businesses/${encodeURIComponent(businessId)}`;
+
+export const getGreeting = (businessId: string) => getJson<GreetingStatus>(`${bizUrl(businessId)}/greeting`);
+
+export const saveGreeting = (businessId: string, text: string) =>
+  sendJson<GreetingStatus>(`${bizUrl(businessId)}/greeting`, "PUT", { text });
+
+export const getTopQuestions = (businessId: string, limit = 5, days = 30) =>
+  getJson<TopQuestions>(`${bizUrl(businessId)}/top-questions?limit=${limit}&days=${days}`);
+
+export const listTwilioNumbers = () => getJson<TwilioNumbers>("/twilio/numbers");
+
+/** Give this business the number; any other business loses it (DEC-52). */
+export const assignNumber = (businessId: string, number: string) =>
+  sendJson<AssignResult>(`${bizUrl(businessId)}/number`, "PUT", { number });
 
 // --- Twilio call page (app/voice/twilio_routes.py) ---
 

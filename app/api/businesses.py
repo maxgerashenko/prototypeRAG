@@ -10,7 +10,6 @@ from app.config import get_settings
 from app.db.session import SessionLocal
 from app.db.models import Business, BusinessProfile, Location, Message
 from app.ingest.profile import is_placeholder_name
-from app.voice.twilio_numbers import TwilioNotConfigured, list_account_numbers
 
 router = APIRouter()
 
@@ -101,52 +100,5 @@ def unassign_main_number(business_id: uuid.UUID) -> dict:
             update(Business).where(Business.id == business_id)
             .values(phone_numbers=func.array_remove(Business.phone_numbers, number))
         )
-        session.commit()
-    return {"business_id": business_id, "number": None}
-
-
-# --- assign any of the account's numbers (issue #147) -----------------------------------
-
-class AssignNumber(BaseModel):
-    number: str
-
-
-@router.put("/businesses/{business_id}/numbers")
-def assign_number(business_id: uuid.UUID, body: AssignNumber) -> dict:
-    """Give this business one of the account's Twilio numbers. Stage 1 = one number per
-    business (OPEN-21), so it replaces the business's numbers. A dialled number must find exactly
-    one business, so a number held by another business is taken off it and moved here (the
-    response's `taken_from` names that business)."""
-    number = body.number.strip()
-    try:
-        owned = {n.number for n in list_account_numbers()}
-    except TwilioNotConfigured as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except Exception:
-        raise HTTPException(status_code=502, detail="Could not list the Twilio numbers")
-    if number not in owned:
-        raise HTTPException(status_code=422, detail="not a number on this Twilio account")
-    with SessionLocal() as session:
-        if session.get(Business, business_id) is None:
-            raise HTTPException(status_code=404, detail="business not found")
-        holder = session.execute(
-            select(Business.id, Business.name).where(Business.id != business_id, number == any_(Business.phone_numbers))
-        ).first()
-        session.execute(
-            update(Business).where(Business.id != business_id, number == any_(Business.phone_numbers))
-            .values(phone_numbers=func.array_remove(Business.phone_numbers, number))
-        )
-        session.execute(update(Business).where(Business.id == business_id).values(phone_numbers=[number]))
-        session.commit()
-    return {"business_id": business_id, "number": number, "taken_from": holder.name if holder else None}
-
-
-@router.delete("/businesses/{business_id}/numbers")
-def unassign_numbers(business_id: uuid.UUID) -> dict:
-    """Take all numbers off this business; calls to them then hear "not in service"."""
-    with SessionLocal() as session:
-        if session.get(Business, business_id) is None:
-            raise HTTPException(status_code=404, detail="business not found")
-        session.execute(update(Business).where(Business.id == business_id).values(phone_numbers=[]))
         session.commit()
     return {"business_id": business_id, "number": None}

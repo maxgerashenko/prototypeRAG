@@ -13,8 +13,7 @@
 - POST /twilio/transfer-result  `<Dial action>`: nobody answered → voicemail prompt.
 - POST /twilio/voicemail  `<Record action>`: stores the recording as a message for the owner.
 - GET /twilio/token    Voice SDK access token for `web/call.html` (mode B).
-- GET /twilio/numbers  The account's Twilio numbers with the business holding each (#147);
-  the assign call is `PUT /businesses/{id}/numbers` (app/api/businesses.py).
+- GET /twilio/numbers  The account's numbers: app/voice/twilio_numbers.py (Settings picker, #147).
 - GET /twilio/number   The main number (`TWILIO_PHONE_NUMBER`), or null when not set; the
   voice app assigns it to a business (app/api/businesses.py).
 
@@ -50,7 +49,6 @@ from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, Conversation, MessageForOwner
 from app.db.session import SessionLocal
-from app.voice.twilio_numbers import TwilioNotConfigured, list_account_numbers
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -251,28 +249,6 @@ async def twilio_status(request: Request) -> Response:
 @router.get("/twilio/number")
 def twilio_number() -> dict:
     return {"number": get_settings().twilio_phone_number or None}
-
-
-@router.get("/twilio/numbers")
-def twilio_numbers() -> dict:
-    """The account's Twilio numbers, each with the business holding it (or null). Without
-    credentials: an empty list and a message, not an error (the Settings screen shows it)."""
-    try:
-        found = list_account_numbers()
-    except TwilioNotConfigured as e:
-        return {"configured": False, "message": str(e), "numbers": []}
-    except Exception as e:  # Twilio REST error: bad credentials, network
-        log.warning("listing twilio numbers failed: %s", e)
-        raise HTTPException(status_code=502, detail="Could not list the Twilio numbers")
-    holders: dict[str, dict] = {}
-    with SessionLocal() as session:
-        for bid, name, phones in session.execute(select(Business.id, Business.name, Business.phone_numbers)).all():
-            for p in phones:
-                holders.setdefault(p, {"business_id": bid, "business_name": name})
-    return {"configured": True, "message": None, "numbers": [
-        {"number": n.number, "label": n.label, **holders.get(n.number, {"business_id": None, "business_name": None})}
-        for n in found
-    ]}
 
 
 @router.get("/twilio/token")

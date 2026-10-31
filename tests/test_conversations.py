@@ -121,7 +121,7 @@ def test_continue_from_loads_history_and_greets_with_topic(two_businesses, monke
 
     events.clear()
     s = run_async(run(convs["other"]))  # another business's conversation: ignored
-    assert events[0]["text"].startswith("Hi, you've reached Alpha Spa.")
+    assert events[0]["text"].startswith("Hi, I am an AI assistant.")
     assert s._history == [{"role": "assistant", "content": events[0]["text"]}]
 
 
