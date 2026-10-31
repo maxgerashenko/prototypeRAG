@@ -347,7 +347,7 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   TTS). Restart the app and call again — still instant. Change `TTS_VOICE` → one slow call, then instant.
 
 - [ ] **Tool loop in text chat (#51)**: with `google/gemma-4-12b` loaded, `POST /chat` and `GET /chat/stream` on the pilot with a question that makes the model call `search_business_info` (e.g. "Do you have parking?"): the answer arrives, no error, `llm chat` log lines show `tool_calls=1` then a text round. Then a plain greeting (no tool call) still answers. Repeat in the voice app (`/web/`) to confirm the voice loop still works after the shared-tool change.
-- [ ] **Booking conversations with a real model (#55)**: once the booking tools are wired into the chat/voice tool list (#151), with `google/gemma-4-12b` (and later Gemini) loaded, play the scripts in `tests/test_booking_conversations.py` by hand in `/web/chat.html` or on a call: happy path, a closed day, a full slot, a change of mind before saying yes, a cancellation. Check the model checks availability first, reads details back before `confirmed=true`, reads the reference aloud, and never books after a "no". Record failures under "Known problems"
+- [ ] **Booking conversations with a real model (#55)**: the booking tools are wired in (#151) but off by default: first `UPDATE businesses SET settings = settings || '{"enabled_tools": ["check_availability", "create_booking", "cancel_booking"]}' WHERE id = '...'` (new calls/requests pick it up; no restart). Check that a business without the setting gets no booking tools. With `google/gemma-4-12b` (and later Gemini) loaded, play the scripts in `tests/test_booking_conversations.py` by hand in `/web/chat.html` or on a call: happy path, a closed day, a full slot, a change of mind before saying yes, a cancellation. Check the model checks availability first, reads details back before `confirmed=true`, reads the reference aloud, and never books after a "no". Record failures under "Known problems"
 - [ ] **V29 (#109)** Voice prompt rule added 2026-10-28: re-ask on a call "What types of sauna sessions do you have?" and "What are your hours?" — no mention of "the profile"; area hours (e.g. Rooftop Pool) are labelled as that area's. Also try STT phrase hints per business (sauna, Aufguss, banya) on Twilio audio, or note the result under #73
 - [ ] **V28 / #108 latency with `SEARCH_TOP_N=5`**: run the eval set (the three "Till what time…" / "When do you close?" questions must pass), then a phone or `/web/` call asking "Till what time are you working?" → business hours (midnight), not the Rooftop Pool's. Compare the latency line with the V16 figure (~3.7 s post-search LLM time with 5); if too slow, set `SEARCH_TOP_N` back to 3 and fill an hours fact (#41) instead
 - [ ] **Call transfer + voicemail (#50)**: `uv run alembic upgrade head` (0009); set the transfer number on the business:
@@ -364,12 +364,19 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   `+` line true to its quote, nothing missed, rejections sensible; the site-chrome page
   must yield the "7 days a week 8am to 11:30pm" hours fact. Pick the model → `FACTS_LLM_MODEL`
   in `.env`, then run without `--dry-run` and check `--report conflicts`.
-- [ ] **Google Calendar booking backend (#105)**: in Google Cloud create a service account and a JSON key (outside the repo); share the owner's (test) calendar with the account's email ("Make changes to events"). In `.env`: `BOOKING_BACKEND=google_calendar`, `GOOGLE_CALENDAR_ID=<calendar id>`, `GOOGLE_CALENDAR_CREDENTIALS_FILE=<path>`. Then (1) `check_availability` for a free slot → Available; add an owner entry by hand in Google Calendar over that time → Not available with alternatives; (2) `create_booking` → an event appears with name, phone, service and reference, and `bookings.external_ref` holds its id; (3) `cancel_booking` with the reference and phone → event disappears, row `cancelled`; (4) unshare the calendar (or break the key path) → the bot says the calendar can't be reached and nothing is booked. The booking tools are not in the live voice loop yet, so run them via `POST /chat` or the executor until they are wired
+- [ ] **Google Calendar booking backend (#105)**: in Google Cloud create a service account and a JSON key (outside the repo); share the owner's (test) calendar with the account's email ("Make changes to events"). In `.env`: `BOOKING_BACKEND=google_calendar`, `GOOGLE_CALENDAR_ID=<calendar id>`, `GOOGLE_CALENDAR_CREDENTIALS_FILE=<path>`. Then (1) `check_availability` for a free slot → Available; add an owner entry by hand in Google Calendar over that time → Not available with alternatives; (2) `create_booking` → an event appears with name, phone, service and reference, and `bookings.external_ref` holds its id; (3) `cancel_booking` with the reference and phone → event disappears, row `cancelled`; (4) unshare the calendar (or break the key path) → the bot says the calendar can't be reached and nothing is booked. Enable the booking tools for the business first (see the #55 item), then test in `/web/chat.html` or on a call
 - [ ] **Twilio playback marks (#76, V11/V26)**: on a real call (Voice SDK or phone), interrupt the bot
   right as a sentence ends and again just after it stops — no false barge-in, first word not swallowed
 - [ ] **Hands-free calls on mobile** (#114): on a phone or tablet browser (Safari, Chrome) the voice app
   disables push-to-talk and uses `mode: "vad"` (mic always open, server VAD); desktop keeps push-to-talk. Watch echo on the phone
   speaker (#83) and the VAD-only silence re-prompt (V17)
+- [ ] **Home-screen app on iPhone** (PWA, this thread): `npm run build`, serve over HTTPS (ngrok URL, Safari needs it
+  for the service worker), open `/web/` in Safari → Share → Add to Home Screen. Check: icon and name "Voice" look right;
+  it opens full-screen with no Safari bars; the status bar text is not covered by the title and the Call button clears
+  the home indicator; focusing the search box does not zoom; a call works (mic permission prompt, hands-free VAD mode,
+  #114) and audio plays; after one online load, airplane mode opens the app shell with its error banner instead of a
+  blank page; rebuild + reopen picks up the new version. Known iOS limits: the mic prompt may reappear on each
+  launch; a call stops if the app is backgrounded or the screen locks
 - [ ] **Real call through the React app** (`/web/`, push-to-talk): STT/TTS + LM Studio end
   to end — the open task above. Steps:
   - [ ] `gcloud auth application-default login` (Speech-to-Text and Text-to-Speech
@@ -391,8 +398,7 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **Booking backend (#52)**: `uv run alembic upgrade head` (0011, needs pgvector Postgres),
   then `uv run pytest tests/test_booking.py` (cloud ran it only on a Postgres without pgvector,
   with the booking tables created from the models and migration 0011 compared to them). The
-  booking tools are not wired into the live call yet, so there is no call-level check until the
-  tool-calling loop task is done
+  call-level check is the "Booking conversations with a real model (#55)" item below (enable the tools first, #151)
 - [x] **V7** Run the server with ADC removed (`gcloud auth application-default revoke`
   or `GOOGLE_APPLICATION_CREDENTIALS=/nonexistent`): one startup warning, the first call
   shows the "run gcloud auth application-default login" error at once, no ~3 s stall per turn
@@ -471,6 +477,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   - [ ] V20: a voice turn and `/chat` with `*_REASONING_EFFORT=none` against the Gemini
     model — accepted or 400? If rejected, set the value it accepts and note it here
   - [ ] Booking tests (after M5) against Gemini; record results under "Known problems"
+- [ ] **Assign a number (#147)**: with the real Twilio credentials in `.env`, `GET /twilio/numbers` lists the
+  account's numbers (curl, or the Settings screen once #144 lands). `PUT /businesses/<id>/numbers` with `{"number": "+1…"}`
+  returns 200; the same number for a second business moves it (the first loses it, `taken_from` names it). Then call the number from a
+  phone: the bot answers as that business, and the old business's number no longer reaches it. `DELETE` → "not in service".
 
 ## Notes
 

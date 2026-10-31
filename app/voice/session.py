@@ -53,12 +53,12 @@ from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
 from app.llm import get_async_chat_client
 from app.rag.location import default_location_id, format_locations
-from app.rag.prompt import format_profile, format_summary
+from app.rag.prompt import format_profile, format_summary, tools_prompt
 from app.voice import greeting_cache, tts
 from app.voice.audio import working_sound
 from app.voice.greeting_cache import business_greeting, voice_name
 from app.voice.stt import TurnTranscriber
-from app.voice.tools import TOOLS, run_tool
+from app.voice.tools import TOOLS, enabled_tool_names, run_tool, tools_for
 from app.voice.vad import TurnDetector
 from sqlalchemy import select
 
@@ -246,6 +246,7 @@ class CallSession:
         self._transfer_pending = False  # transfer_to_human succeeded: hang up (Twilio dials) after the reply
         self._history: list[dict] = []
         self._system_prompt = ""
+        self._tools: list[dict] = TOOLS  # per business from _load_business (#151)
         self.conversation_id: uuid.UUID | None = None
         self._opening = ""  # the standard greeting, set by _load_business
 
@@ -477,7 +478,7 @@ class CallSession:
             round_start = len(spoken)
             settings = get_settings()
             stream = await client.chat.completions.create(
-                model=settings.llm_model, messages=messages, tools=TOOLS, stream=True,
+                model=settings.llm_model, messages=messages, tools=self._tools, stream=True,
                 reasoning_effort=settings.voice_reasoning_effort,
             )
             buffer = ""
@@ -600,7 +601,7 @@ class CallSession:
         try:
             await get_async_chat_client().chat.completions.create(
                 model=settings.llm_model, messages=[{"role": "system", "content": self._system_prompt}, *self._history],
-                tools=TOOLS, max_tokens=1, reasoning_effort=settings.voice_reasoning_effort,
+                tools=self._tools, max_tokens=1, reasoning_effort=settings.voice_reasoning_effort,
             )
         except Exception:
             log.warning("LLM warm-up failed", exc_info=True)
@@ -646,6 +647,8 @@ class CallSession:
     # --- database (sync, run in a thread) --------------------------------------------
 
     def _load_business(self) -> str:
+        enabled = enabled_tool_names(self.business_id)  # #151: optional tools this business turned on
+        self._tools = tools_for(self.business_id)
         with tenant_session(self.business_id) as session:
             business = session.get(Business, self.business_id)
             if business is None:
@@ -687,6 +690,8 @@ class CallSession:
             self._system_prompt = (
                 f"{VOICE_SYSTEM_PROMPT}\n\nCurrent local time at the business: {now}\n\n{format_profile(profile)}"
             )
+            if booking_text := tools_prompt(enabled):
+                self._system_prompt += f"\n\n{booking_text}"
             if locations_text := format_locations(
                 session, self.business_id, default_location_id(session, self.business_id)
             ):

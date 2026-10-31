@@ -13,6 +13,7 @@
 - POST /twilio/transfer-result  `<Dial action>`: nobody answered → voicemail prompt.
 - POST /twilio/voicemail  `<Record action>`: stores the recording as a message for the owner.
 - GET /twilio/token    Voice SDK access token for `web/call.html` (mode B).
+- GET /twilio/numbers  The account's numbers: app/voice/twilio_numbers.py (Settings picker, #147).
 - GET /twilio/number   The main number (`TWILIO_PHONE_NUMBER`), or null when not set; the
   voice app assigns it to a business (app/api/businesses.py).
 

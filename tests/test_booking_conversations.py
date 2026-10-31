@@ -33,7 +33,7 @@ CALLER = "+15550100100"
 def business_id():
     bid = uuid.uuid4()
     with tenant_session(bid) as s:
-        s.add(Business(id=bid, name="Spa", timezone="America/New_York"))
+        s.add(Business(id=bid, name="Spa", timezone="America/New_York", settings={"enabled_tools": ["check_availability", "create_booking", "cancel_booking"]}))
         s.flush()
         s.add(BookingRule(business_id=bid, slot_minutes=60, capacity=1, max_party_size=6, hours=OPEN_9_21))
     yield bid

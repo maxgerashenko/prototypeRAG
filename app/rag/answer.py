@@ -10,7 +10,7 @@ from app.llm import get_chat_client
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import build_prompt
 from app.rag.retrieve import RetrievedChunk, retrieve
-from app.voice.tools import TOOLS, run_tool
+from app.voice.tools import enabled_tool_names, run_tool, tools_for
 
 MAX_TOOL_ROUNDS = 3  # LLM → tool → LLM ... before giving up on a turn (same cap as voice)
 GIVE_UP_ANSWER = "Sorry, I couldn't finish that. Can I take a message?"
@@ -32,6 +32,7 @@ def prepare_prompt(
     Shared by answering and `/debug/prompt`, so the debug view shows exactly what the
     model gets. The DB transaction closes here — it isn't held open during generation.
     """
+    enabled = enabled_tool_names(business_id)
     with tenant_session(business_id) as session:
         profile = session.get(BusinessProfile, business_id)
         summary = session.get(BusinessSummary, business_id)
@@ -39,7 +40,7 @@ def prepare_prompt(
         chunks = retrieve(session, business_id, question, top_n, location_id=location_id)
         messages = build_prompt(
             profile, chunks, history or [], question, summary,
-            locations=format_locations(session, business_id, location_id),
+            locations=format_locations(session, business_id, location_id), enabled_tools=enabled,
         )
     return profile, chunks, messages
 
@@ -75,10 +76,11 @@ def answer_question(
     prompt = list(messages)  # `messages` grows with tool turns; the debug view shows the prompt as sent first
     settings = get_settings()
     client = get_chat_client()
+    tools = tools_for(business_id)  # #151: bookings only for businesses that enabled them
     answer = GIVE_UP_ANSWER
     for _ in range(MAX_TOOL_ROUNDS):
         response = client.chat.completions.create(
-            model=settings.llm_model, messages=messages, tools=TOOLS,
+            model=settings.llm_model, messages=messages, tools=tools,
             reasoning_effort=settings.chat_reasoning_effort,
         )
         message = response.choices[0].message
@@ -104,9 +106,10 @@ def stream_answer(
 
     settings = get_settings()
     client = get_chat_client()
+    tools = tools_for(business_id)
     for _ in range(MAX_TOOL_ROUNDS):
         stream = client.chat.completions.create(
-            model=settings.llm_model, messages=messages, tools=TOOLS, stream=True,
+            model=settings.llm_model, messages=messages, tools=tools, stream=True,
             reasoning_effort=settings.chat_reasoning_effort,
         )
         text = ""
