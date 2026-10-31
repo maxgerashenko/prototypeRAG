@@ -28,10 +28,11 @@ from app.ingest.discover import (
     is_pdf_url,
     is_skippable,
     normalize_url,
+    parse_robots_sitemaps,
     prioritize,
     same_domain,
 )
-from app.ingest.fetch import extract_pdf_text, fetch_document, pdf_title
+from app.ingest.fetch import extract_pdf_text, fetch_document, fetch_sitemap, pdf_title
 from app.ingest.identity import domain_of, site_root
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 
@@ -1009,3 +1010,51 @@ def test_crawl_business_stores_linked_pdfs_and_honours_crawl_delay(monkeypatch):
         assert summary2["deleted_pages"] == 0 and summary2["pages_changed"] == 0
     finally:
         _cleanup_business(bid)
+
+
+ROBOTS_NON_DEFAULT = """User-agent: *
+Disallow: /private/
+Sitemap: https://x.test/wp-sitemap.xml  # trailing comment
+sitemap: https://x.test/wp-sitemap.xml
+Sitemap: https://other.test/sitemap.xml
+Sitemap: https://x.test/private/sitemap.xml
+Sitemap: not-a-url
+"""
+
+
+def test_parse_robots_sitemaps_reads_every_line_once():
+    assert parse_robots_sitemaps(ROBOTS_NON_DEFAULT) == [
+        "https://x.test/wp-sitemap.xml",
+        "https://other.test/sitemap.xml",
+        "https://x.test/private/sitemap.xml",
+    ]
+    assert parse_robots_sitemaps(None) == []
+
+
+def _sitemap_client(routes: dict[str, str], seen: list[str]) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        body = routes.get(str(request.url))
+        return httpx.Response(200, text=body) if body is not None else httpx.Response(404)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client._crawl_delay = 0
+    return client
+
+
+def test_fetch_sitemap_uses_robots_declared_path_not_default():
+    seen: list[str] = []
+    client = _sitemap_client({"https://x.test/wp-sitemap.xml": "<urlset/>"}, seen)
+    declared = parse_robots_sitemaps(ROBOTS_NON_DEFAULT)
+    checker = RobotsChecker(ROBOTS_NON_DEFAULT)
+    assert fetch_sitemap("https://x.test", client, declared, checker.can_fetch) == "<urlset/>"
+    # other domain and robots-disallowed declarations are never requested
+    assert seen == ["https://x.test/wp-sitemap.xml"]
+
+
+def test_fetch_sitemap_falls_back_to_default_path():
+    seen: list[str] = []
+    client = _sitemap_client({"https://x.test/sitemap.xml": "<urlset/>"}, seen)
+    assert fetch_sitemap("https://x.test", client, ["https://x.test/gone.xml"]) == "<urlset/>"
+    assert seen == ["https://x.test/gone.xml", "https://x.test/sitemap.xml"]
+    assert fetch_sitemap("https://x.test", _sitemap_client({}, [])) is None

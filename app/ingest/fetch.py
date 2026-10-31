@@ -83,14 +83,29 @@ def fetch_robots_txt(base_url: str, client: httpx.Client) -> str | None:
     return response.text if response.status_code == 200 else None
 
 
-def fetch_sitemap(base_url: str, client: httpx.Client) -> str | None:
-    """GET `<scheme>://<netloc>/sitemap.xml`. None on any failure or non-200 — never raises."""
+def fetch_sitemap(
+    base_url: str,
+    client: httpx.Client,
+    declared_urls: list[str] | None = None,
+    can_fetch: Callable[[str], bool] = lambda url: True,
+) -> str | None:
+    """The first sitemap that answers 200: the `Sitemap:` URLs declared in robots.txt
+    (`declared_urls`; same domain as `base_url` and allowed by `can_fetch` only, each
+    request preceded by the crawl delay), then `<scheme>://<netloc>/sitemap.xml`.
+    None when none works -- never raises."""
     parsed = urlparse(base_url)
-    try:
-        response = client.get(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml", headers=REQUEST_HEADERS)
-    except httpx.HTTPError:
-        return None
-    return response.text if response.status_code == 200 else None
+    default = f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
+    candidates = [u for u in (declared_urls or []) if u != default and same_domain(u, base_url) and can_fetch(u)]
+    for i, url in enumerate(candidates + [default]):
+        if i:
+            time.sleep(client._crawl_delay)
+        try:
+            response = client.get(url, headers=REQUEST_HEADERS)
+        except httpx.HTTPError:
+            continue
+        if response.status_code == 200:
+            return response.text
+    return None
 
 
 # a big WordPress site lists a dozen or so child sitemaps; more than this is not a small
