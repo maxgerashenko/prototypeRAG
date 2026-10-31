@@ -19,10 +19,12 @@ import {
   type ConversationSummary,
 } from "../api";
 import { CallScreen, ConnectingScreen, EndedScreen, PhoneCallScreen } from "./CallScreens";
+import { BookingsScreen } from "./BookingsScreen";
 import { ConversationsScreen } from "./ConversationsScreen";
 import { SelectScreen } from "./SelectScreen";
 import { SettingsScreen } from "./SettingsScreen";
 import { TranscriptScreen } from "./TranscriptScreen";
+import { useBookings } from "./useBookings";
 import { useBusinessSettings } from "./useBusinessSettings";
 import { useVoiceCall } from "./useVoiceCall";
 import { PhoneIcon } from "./icons";
@@ -41,7 +43,7 @@ export interface Loadable<T> {
   error?: string;
 }
 
-type Stage = "select" | "settings" | "convos" | "transcript" | "connecting" | "call" | "ended" | "phone" | "phoneEnded";
+type Stage = "select" | "settings" | "bookings" | "convos" | "transcript" | "connecting" | "call" | "ended" | "phone" | "phoneEnded";
 
 interface TranscriptRef {
   bizId: string;
@@ -125,6 +127,10 @@ export function App() {
   }, []);
   const settings = useBusinessSettings(selId, stage === "settings", onAssigned);
 
+  const bookings = useBookings(selId, stage === "bookings");
+  const refreshToday = useRef(bookings.refreshToday);
+  refreshToday.current = bookings.refreshToday;
+
   const openConversation = (bizId: string, convoId: string, returnTo: TranscriptRef["returnTo"]) => {
     const req = ++detailReq.current;
     // Opening a conversation counts as seeing it: drop its NEW mark however the user leaves.
@@ -171,6 +177,11 @@ export function App() {
     else setStage("select");
   };
 
+  // Back from Bookings: the booking sheet closes first, then the calendar
+  const leaveBookings = () => {
+    if (!bookings.closeOverlay()) setStage("select");
+  };
+
   const cancelCall = () => {
     setStage("select");
     voice.hangUp();
@@ -193,6 +204,7 @@ export function App() {
     }
     if (stage === "call" && call.phase === "ended") {
       loadBusinesses();
+      refreshToday.current();
       if (callBizId) loadConvos(callBizId);
       if (call.endCode === 4404) {
         setBanner(closeMessage(call.endCode, call.endReason));
@@ -217,6 +229,7 @@ export function App() {
   useEffect(() => {
     if (stage !== "phone" || !phone || phone.state.phase !== "ended") return;
     loadBusinesses();
+    refreshToday.current();
     loadConvos(phone.info.business_id);
     const { conversationId } = phone.state;
     if (conversationId && callerSpoke(phone.state)) setNewIds((prev) => new Set(prev).add(conversationId));
@@ -250,10 +263,13 @@ export function App() {
       else if (stage === "convos" && selId) startCall(selId);
       else if (stage === "transcript" && transcript) startCall(transcript.bizId, transcript.convoId);
       else if (stage === "call") voice.pttDown();
+    } else if (down && stage === "bookings" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      if (!bookings.selected) bookings.onShiftDay(e.key === "ArrowLeft" ? -1 : 1);
     } else if (down && e.key === "Escape") {
       if (stage === "connecting") cancelCall();
       else if (stage === "call") voice.hangUp();
       else if (stage === "settings") leaveSettings();
+      else if (stage === "bookings") leaveBookings();
       else if (stage === "convos") setStage("select");
       else if (stage === "transcript" && transcript) setStage(transcript.returnTo);
       else if (stage === "ended") backToConversations();
@@ -304,6 +320,7 @@ export function App() {
   // swipe right = the screen's Back button (mobile). Off on the picker and during a call of our own.
   const goBack: (() => void) | null =
     stage === "settings" ? leaveSettings
+    : stage === "bookings" ? leaveBookings
     : stage === "convos" ? () => setStage("select")
     : stage === "transcript" && transcript ? () => setStage(transcript.returnTo)
     : stage === "ended" ? backToConversations
@@ -358,6 +375,11 @@ export function App() {
             setSelId(bizId);
             setStage("settings");
           }}
+          onBookings={(bizId) => {
+            setSelId(bizId);
+            setStage("bookings");
+          }}
+          todayBookings={bookings.todayCount}
           greetingCached={settings.greetingCached}
           mainNumber={mainNumber}
           onRetry={loadBusinesses}
@@ -369,6 +391,10 @@ export function App() {
 
       {stage === "settings" && selId && (
         <SettingsScreen biz={fallbackBiz(selId)} {...settings} onBack={leaveSettings} />
+      )}
+
+      {stage === "bookings" && selId && (
+        <BookingsScreen biz={fallbackBiz(selId)} {...bookings} onBack={leaveBookings} />
       )}
 
       {stage === "convos" && selId && (

@@ -1,11 +1,12 @@
 import { useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
-import { ChevronDown, ChevronRight, GearIcon, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
+import { CalendarIcon, ChevronDown, ChevronRight, GearIcon, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
 import { SkeletonGate } from "./PullIndicator";
 import { SourceBadge } from "./SourceIcon";
 import { chatsLabel, fmtClock, fmtPhone, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
 import { settingsHint } from "./settings";
+import { bookingsHint } from "./bookings";
 
 const RECENT = 3;
 
@@ -22,6 +23,9 @@ interface Props {
   onSeeAll: (bizId: string) => void;
   onCall: (bizId: string) => void;
   onSettings: (bizId: string) => void;
+  onBookings: (bizId: string) => void;
+  /** Bookings today for the open business; null while unknown. */
+  todayBookings: number | null;
   /** Whether the open business's greeting audio is cached; null while it loads. */
   greetingCached: boolean | null;
   /** The main Twilio number (shown as the title); null keeps the plain header. */
@@ -144,6 +148,14 @@ export function SelectScreen(p: Props) {
                     <span className="set-row-text">
                       <span className="set-row-title">Business settings</span>
                       <span className="set-row-hint">{settingsHint(b.phone_numbers, p.greetingCached)}</span>
+                    </span>
+                    <ChevronRight />
+                  </button>
+                  <button className="set-row" data-testid="bookings-row" onClick={() => p.onBookings(b.id)}>
+                    <span className="set-row-icon call"><CalendarIcon /></span>
+                    <span className="set-row-text">
+                      <span className="set-row-title">Bookings</span>
+                      <span className="set-row-hint">{bookingsHint(p.todayBookings)}</span>
                     </span>
                     <ChevronRight />
                   </button>
