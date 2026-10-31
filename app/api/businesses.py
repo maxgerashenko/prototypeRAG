@@ -109,15 +109,14 @@ def unassign_main_number(business_id: uuid.UUID) -> dict:
 
 class AssignNumber(BaseModel):
     number: str
-    # the number is held by another business: refused (409) unless the owner confirmed
-    reassign: bool = False
 
 
 @router.put("/businesses/{business_id}/numbers")
 def assign_number(business_id: uuid.UUID, body: AssignNumber) -> dict:
     """Give this business one of the account's Twilio numbers. Stage 1 = one number per
     business (OPEN-21), so it replaces the business's numbers. A dialled number must find exactly
-    one business, so a number held by another business is only moved with `reassign`."""
+    one business, so a number held by another business is taken off it and moved here (the
+    response's `taken_from` names that business)."""
     number = body.number.strip()
     try:
         owned = {n.number for n in list_account_numbers()}
@@ -133,8 +132,6 @@ def assign_number(business_id: uuid.UUID, body: AssignNumber) -> dict:
         holder = session.execute(
             select(Business.id, Business.name).where(Business.id != business_id, number == any_(Business.phone_numbers))
         ).first()
-        if holder is not None and not body.reassign:
-            raise HTTPException(status_code=409, detail=f"{number} is used by {holder.name}")
         session.execute(
             update(Business).where(Business.id != business_id, number == any_(Business.phone_numbers))
             .values(phone_numbers=func.array_remove(Business.phone_numbers, number))

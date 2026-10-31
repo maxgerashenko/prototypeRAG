@@ -163,32 +163,24 @@ export const listAccountNumbers = () =>
   getJson<{ configured: boolean; message: string | null; numbers: AccountNumber[] }>("/twilio/numbers");
 
 /**
- * Give the business one of the account's numbers (stage 1: one per business). If another business
- * holds it the server answers 409 with who — ask the owner, then call again with `reassign: true`.
+ * Give the business one of the account's numbers (stage 1: one per business). A number held by
+ * another business is moved: it leaves that business, whose name comes back as `takenFrom`.
  * Used by the Settings screen (#144); a number of null takes the business's numbers off.
  */
-export async function assignNumber(
-  businessId: string,
-  number: string | null,
-  reassign = false,
-): Promise<{ conflict: string | null }> {
+export async function assignNumber(businessId: string, number: string | null): Promise<{ takenFrom: string | null }> {
   const url = `/businesses/${encodeURIComponent(businessId)}/numbers`;
   const res = number === null
     ? await fetch(url, { method: "DELETE" })
     : await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ number, reassign }),
+        body: JSON.stringify({ number }),
       });
-  if (res.status === 409) {
-    const body = (await res.json().catch(() => ({}))) as { detail?: string };
-    return { conflict: body.detail ?? "number is used by another business" };
-  }
+  const body = (await res.json().catch(() => ({}))) as { detail?: string; taken_from?: string | null };
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { detail?: string };
     throw new Error(body.detail ?? `HTTP ${res.status}`);
   }
-  return { conflict: null };
+  return { takenFrom: body.taken_from ?? null };
 }
 
 export const listBusinesses = () => getJson<Business[]>("/businesses");

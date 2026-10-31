@@ -473,7 +473,7 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   - [ ] Booking tests (after M5) against Gemini; record results under "Known problems"
 - [ ] **Assign a number (#147)**: with the real Twilio credentials in `.env`, `GET /twilio/numbers` lists the
   account's numbers (curl, or the Settings screen once #144 lands). `PUT /businesses/<id>/numbers` with `{"number": "+1…"}`
-  returns 200; the same number for a second business returns 409 until `"reassign": true`. Then call the number from a
+  returns 200; the same number for a second business moves it (the first loses it, `taken_from` names it). Then call the number from a
   phone: the bot answers as that business, and the old business's number no longer reaches it. `DELETE` → "not in service".
 
 ## Notes

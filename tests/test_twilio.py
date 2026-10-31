@@ -181,12 +181,8 @@ def test_assign_number_replaces_numbers_and_routes_calls(settings, fake_twilio, 
     assert params["business_id"] == str(other_business)
 
 
-def test_assign_number_held_by_another_needs_confirmation(fake_twilio, business, other_business):
-    client = TestClient(app)
-    r = client.put(f"/businesses/{other_business}/numbers", json={"number": NUMBER})
-    assert r.status_code == 409 and "Zebra Spa" in r.json()["detail"]
-    assert _phones(business) == [NUMBER] and _phones(other_business) == ["+15557770000"]
-    r = client.put(f"/businesses/{other_business}/numbers", json={"number": NUMBER, "reassign": True})
+def test_assign_number_held_by_another_moves_it(fake_twilio, business, other_business):
+    r = TestClient(app).put(f"/businesses/{other_business}/numbers", json={"number": NUMBER})
     assert r.status_code == 200 and r.json()["taken_from"] == "Zebra Spa"
     assert _phones(business) == [] and _phones(other_business) == [NUMBER]
 
