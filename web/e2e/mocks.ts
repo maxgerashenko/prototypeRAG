@@ -3,7 +3,7 @@
 
 import type { Page, Request, Route, WebSocketRoute } from "@playwright/test";
 import type {
-  Business, ConversationDetail, ConversationSource, ConversationSummary, GreetingStatus, TopQuestions, TwilioNumbers, VoiceEvent,
+  Business, BookingItem, ConversationDetail, ConversationSource, ConversationSummary, GreetingStatus, TopQuestions, TwilioNumbers, VoiceEvent,
 } from "../src/api";
 
 const MIN = 60_000;
@@ -35,11 +35,19 @@ export function summary(c: ConversationDetail): ConversationSummary {
   return { ...rest, preview, message_count: messages.length };
 }
 
+/** A confirmed booking, shaped like app/api/bookings.py (60 min at 10:00 on 2026-11-05 unless overridden). */
+export function booking(over: Partial<BookingItem> = {}): BookingItem {
+  return {
+    id: "bk1", date: "2026-11-05", start_min: 600, end_min: 660, name: "Ann Lee", service: "Haircut",
+    party_size: null, phone: null, notes: null, by_assistant: false, ...over,
+  };
+}
+
 export interface ApiState {
   businesses: Business[];
   conversations: Record<string, ConversationDetail[]>;
   /** Make an endpoint fail: "businesses" | "conversations" | "detail" | "greeting" | "greeting-save" |
-   * "questions" | "numbers" | "assign". */
+   * "questions" | "numbers" | "assign" | "bookings". */
   fail: Set<string>;
   /** Hold an endpoint's answer for this many ms (same keys as `fail`). */
   delay: Record<string, number>;
@@ -49,13 +57,19 @@ export interface ApiState {
   /** GET /twilio/numbers; assigning moves `business_id`/`business_name` like PUT /businesses/{id}/number. */
   numbers: TwilioNumbers;
   requests: string[];
+  /** GET /businesses/{id}/bookings: every request as path + query. */
+  bookingRequests: string[];
+  /** Confirmed bookings of every business; the route returns those inside ?start&end. */
+  bookings: BookingItem[];
+  /** Opening hours of the booking rules; null = none set. */
+  bookingHours: { open: number; close: number } | null;
   /** GET /twilio/number; null = TWILIO_PHONE_NUMBER not set. */
   mainNumber: string | null;
 }
 
 export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise<ApiState> {
   const api: ApiState = {
-    businesses: [], conversations: {}, fail: new Set(), delay: {}, requests: [], mainNumber: null,
+    businesses: [], conversations: {}, fail: new Set(), delay: {}, requests: [], bookingRequests: [], bookings: [], bookingHours: null, mainNumber: null,
     greeting: { text: "", is_default: true, cached: false, cached_at: null, max_length: 300 },
     questions: { total_questions: 0, conversations: 0, days: 30, questions: [] },
     numbers: { numbers: [], error: null },
@@ -99,6 +113,15 @@ export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise
           api.greeting = { ...api.greeting, text, is_default: text === "", cached: true, cached_at: new Date().toISOString() };
         }
         return reply(route, "greeting-save", api.greeting);
+      }
+      if (sub === "bookings") {
+        const q = new URL(route.request().url());
+        api.bookingRequests.push(q.pathname + q.search);
+        const start = q.searchParams.get("start") ?? "", end = q.searchParams.get("end") ?? "";
+        return reply(route, "bookings", {
+          timezone: "America/New_York", hours: api.bookingHours,
+          bookings: api.bookings.filter((b) => b.date >= start && b.date <= end),
+        });
       }
       if (sub === "top-questions") return reply(route, "questions", api.questions);
       if (sub === "number") {
