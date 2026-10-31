@@ -150,6 +150,39 @@ export async function setMainNumber(businessId: string, assign: boolean): Promis
   }
 }
 
+/** One of the account's Twilio numbers and the business holding it, if any (GET /twilio/numbers, #147). */
+export interface AccountNumber {
+  number: string;
+  label: string;
+  business_id: string | null;
+  business_name: string | null;
+}
+
+/** `configured: false` (no Twilio credentials) comes with an empty list and an explaining `message`. */
+export const listAccountNumbers = () =>
+  getJson<{ configured: boolean; message: string | null; numbers: AccountNumber[] }>("/twilio/numbers");
+
+/**
+ * Give the business one of the account's numbers (stage 1: one per business). A number held by
+ * another business is moved: it leaves that business, whose name comes back as `takenFrom`.
+ * Used by the Settings screen (#144); a number of null takes the business's numbers off.
+ */
+export async function assignNumber(businessId: string, number: string | null): Promise<{ takenFrom: string | null }> {
+  const url = `/businesses/${encodeURIComponent(businessId)}/numbers`;
+  const res = number === null
+    ? await fetch(url, { method: "DELETE" })
+    : await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ number }),
+      });
+  const body = (await res.json().catch(() => ({}))) as { detail?: string; taken_from?: string | null };
+  if (!res.ok) {
+    throw new Error(body.detail ?? `HTTP ${res.status}`);
+  }
+  return { takenFrom: body.taken_from ?? null };
+}
+
 export const listBusinesses = () => getJson<Business[]>("/businesses");
 
 export const listConversations = (businessId: string) =>

@@ -471,6 +471,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   - [ ] V20: a voice turn and `/chat` with `*_REASONING_EFFORT=none` against the Gemini
     model — accepted or 400? If rejected, set the value it accepts and note it here
   - [ ] Booking tests (after M5) against Gemini; record results under "Known problems"
+- [ ] **Assign a number (#147)**: with the real Twilio credentials in `.env`, `GET /twilio/numbers` lists the
+  account's numbers (curl, or the Settings screen once #144 lands). `PUT /businesses/<id>/numbers` with `{"number": "+1…"}`
+  returns 200; the same number for a second business moves it (the first loses it, `taken_from` names it). Then call the number from a
+  phone: the bot answers as that business, and the old business's number no longer reaches it. `DELETE` → "not in service".
 
 ## Notes
 
