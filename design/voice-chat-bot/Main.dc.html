@@ -1,0 +1,1466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Voice chat bot</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0D0F14}
+a{color:#8AA4FF}a:hover{color:#B7C7FF}
+button{font-family:inherit}
+@keyframes vw-wave{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
+@keyframes vw-ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.85);opacity:0}}
+@keyframes vw-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes vw-slide{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+@keyframes vw-dot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+@keyframes vw-blink{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes vw-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+@keyframes vw-open{from{opacity:0;max-height:0;padding-top:0;padding-bottom:0}to{opacity:1;max-height:420px}}
+@keyframes vw-halo{0%{transform:scale(1);opacity:.55}100%{transform:scale(1.05,1.4);opacity:0}}
+@keyframes vw-spin{to{transform:rotate(360deg)}}
+@keyframes vw-fade{from{opacity:0}to{opacity:1}}
+@keyframes vw-sheet{from{transform:translateY(100%)}to{transform:none}}
+@keyframes vw-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes vw-pop{0%{transform:scale(.6);opacity:0}70%{transform:scale(1.08);opacity:1}100%{transform:scale(1)}}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #0D0F14; color: #F2F3F5; font-family: Manrope, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; position: relative">
+
+<!-- ============ 1. PICK A BUSINESS ============ -->
+<sc-if value="{{isSelect}}" hint-placeholder-val="{{ true }}">
+<div style="flex: 1; min-height: 0; display: flex; flex-direction: column; animation: vw-rise .3s ease-out">
+  <sc-if value="{{hasMainNumber}}" hint-placeholder-val="{{ true }}">
+  <div style="padding: 52px 20px 16px; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #8AA4FF; letter-spacing: 0.04em; text-transform: uppercase">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+      Call by phone
+    </div>
+    <h1 style="margin: 0; font-size: 30px; line-height: 1.15; font-weight: 800; letter-spacing: -0.02em">
+      <a href="{{mainTel}}" aria-label="Call {{mainNumber}}" style="color: {{call}}; text-decoration: none; white-space: nowrap">{{mainNumber}}</a>
+    </h1>
+    <p style="margin: 0; font-size: 15px; line-height: 1.45; color: #9AA1AD"><sc-if value="{{hasHolder}}" hint-placeholder-val="{{ true }}">Calls to this number reach <strong style="color: #F2F3F5">{{holderName}}</strong>. </sc-if><sc-if value="{{noHolder}}" hint-placeholder-val="{{ false }}">No business has this number yet. </sc-if>Pick a business below to point the number at it. On a phone, tap the number to call; the button at the bottom calls from this browser.</p>
+  </div>
+  </sc-if>
+  <sc-if value="{{noMainNumber}}" hint-placeholder-val="{{ false }}">
+  <div style="padding: 52px 20px 16px; display: flex; flex-direction: column; gap: 8px">
+    <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #8AA4FF; letter-spacing: 0.04em; text-transform: uppercase">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>
+      Voice assistant
+    </div>
+    <h1 style="margin: 0; font-size: 30px; line-height: 1.15; font-weight: 800; letter-spacing: -0.02em">Talk about a business, out loud</h1>
+    <p style="margin: 0; font-size: 15px; line-height: 1.45; color: #9AA1AD">Pick a business and call the assistant. Every call is saved as a chat you can read later.</p>
+  </div>
+  </sc-if>
+
+  <div style="padding: 0 20px 14px">
+    <label style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px; border-radius: 14px; background: #161920; border: 1px solid #262A33; color: #9AA1AD">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      <input aria-label="Search businesses" placeholder="Search businesses" value="{{query}}" onChange="{{onQuery}}" style="flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: #F2F3F5; font-size: 15px; font-family: inherit">
+    </label>
+  </div>
+
+  <div ref="{{listRef}}" style="flex: 1; min-height: 0; overflow-y: auto; padding: 2px 20px 16px; display: flex; flex-direction: column; gap: 8px">
+    <sc-for list="{{items}}" as="item" hint-placeholder-count="8">
+      <div ref="{{item.ref}}" style="{{item.cardStyle}}">
+        <button aria-pressed="{{item.pressed}}" aria-expanded="{{item.pressed}}" onClick="{{item.pick}}" style="width: 100%; box-sizing: border-box; min-height: 72px; padding: 12px 14px; border: 0; background: transparent; display: flex; align-items: center; gap: 14px; text-align: left; cursor: pointer; color: inherit">
+          <div style="{{item.monoStyle}}">{{item.mono}}</div>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+            <div style="font-size: 16px; font-weight: 700; color: #F2F3F5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{item.name}}</div>
+            <div style="font-size: 13px; color: #9AA1AD">{{item.domain}} · {{item.countLabel}}</div>
+            <sc-if value="{{item.hasNums}}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: {{call}}; min-width: 0">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{item.numsText}}</span>
+              </div>
+            </sc-if>
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A919D" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="{{item.chevStyle}}"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+
+        <sc-if value="{{item.selected}}" hint-placeholder-val="{{ false }}">
+          <div style="border-top: 1px solid #262A33; padding: 10px 8px 10px; display: flex; flex-direction: column; gap: 4px; overflow: hidden; animation: vw-open .4s ease-out">
+            <button onClick="{{item.openSettings}}" style="width: 100%; box-sizing: border-box; min-height: 52px; padding: 8px; margin-bottom: 6px; border: 1px solid #2A2F3A; border-radius: 14px; background: #12151B; display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; color: inherit">
+              <div style="width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: #222733; color: {{accent}}; display: flex; align-items: center; justify-content: center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              </div>
+              <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+                <span style="font-size: 14px; font-weight: 700; color: #F2F3F5">Business settings</span>
+                <span style="font-size: 12px; color: #8A919D; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{item.settingsHint}}</span>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A919D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+            <button onClick="{{item.openBookings}}" style="width: 100%; box-sizing: border-box; min-height: 52px; padding: 8px; margin-bottom: 6px; border: 1px solid #2A2F3A; border-radius: 14px; background: #12151B; display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; color: inherit">
+              <div style="width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: #13231B; color: {{call}}; display: flex; align-items: center; justify-content: center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+              </div>
+              <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+                <span style="font-size: 14px; font-weight: 700; color: #F2F3F5">Bookings</span>
+                <span style="font-size: 12px; color: #8A919D; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{item.bookingsHint}}</span>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A919D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 8px 4px">
+              <span style="font-size: 12px; font-weight: 700; color: #9AA1AD; letter-spacing: 0.05em; text-transform: uppercase">Recent conversations</span>
+              <span style="font-size: 12px; color: #8A919D">{{item.countLabel}}</span>
+            </div>
+            <sc-for list="{{item.recent}}" as="r" hint-placeholder-count="3">
+              <button onClick="{{r.open}}" style="{{r.rowStyle}}">
+                <div role="img" aria-label="{{r.srcLabel}}" title="{{r.srcLabel}}" style="width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: {{r.srcBg}}; color: {{r.srcColor}}; display: flex; align-items: center; justify-content: center">
+                  <sc-if value="{{r.isPhone}}" hint-placeholder-val="{{ true }}">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                  </sc-if>
+                  <sc-if value="{{r.isWeb}}" hint-placeholder-val="{{ false }}">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                  </sc-if>
+                </div>
+                <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+                  <div style="display: flex; align-items: center; gap: 6px">
+                    <span style="font-size: 14px; font-weight: 700; color: #F2F3F5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.title}}</span>
+                    <sc-if value="{{r.isNew}}" hint-placeholder-val="{{ false }}">
+                      <span style="flex-shrink: 0; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: {{accent}}; color: #0B1220">NEW</span>
+                    </sc-if>
+                  </div>
+                  <div style="font-size: 12px; color: #8A919D">{{r.date}} · {{r.dur}} · {{r.countLabel}}</div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A919D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              </button>
+            </sc-for>
+            <sc-if value="{{item.noRecent}}" hint-placeholder-val="{{ false }}">
+              <div style="padding: 10px 8px 6px; font-size: 14px; line-height: 1.45; color: #9AA1AD">No conversations yet. Start a call below and it will show up here.</div>
+            </sc-if>
+            <sc-if value="{{item.hasMore}}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{item.seeAll}}" style="align-self: flex-start; height: 40px; margin: 2px 0 0; padding: 0 10px; border: 0; border-radius: 12px; background: transparent; color: {{accent}}; font-size: 14px; font-weight: 700; cursor: pointer">See all {{item.count}} conversations</button>
+            </sc-if>
+          </div>
+        </sc-if>
+      </div>
+    </sc-for>
+    <sc-if value="{{noResults}}" hint-placeholder-val="{{ false }}">
+      <p style="margin: 24px 0 0; text-align: center; color: #9AA1AD; font-size: 14px">No businesses match your search.</p>
+    </sc-if>
+    <sc-if value="{{hasSel}}" hint-placeholder-val="{{ false }}">
+      <div aria-hidden="true" style="flex-shrink: 0; height: 320px"></div>
+    </sc-if>
+  </div>
+
+  <div style="padding: 14px 20px 30px; border-top: 1px solid #1C2029; background: #0D0F14; display: flex; flex-direction: column; gap: 10px">
+    <div style="position: relative">
+      <sc-if value="{{hasSel}}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; inset: 0; border-radius: 30px; border: 2px solid {{accent}}; animation: vw-halo 2s ease-out infinite; pointer-events: none"></div>
+      </sc-if>
+      <button onClick="{{callSelected}}" disabled="{{noSel}}" style="{{callStyle}}">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{callLabel}}</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- a phone call in progress (Twilio), watch-only -->
+  <sc-if value="{{phoneLive}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 16px; right: 16px; bottom: 104px; z-index: 5; animation: vw-rise .3s ease-out">
+      <div style="position: absolute; inset: 0; border-radius: 30px; border: 2px solid {{call}}; animation: vw-halo 2s ease-out infinite; pointer-events: none"></div>
+      <button onClick="{{watchPhone}}" aria-label="{{phoneAria}}" style="position: relative; width: 100%; height: 60px; border-radius: 30px; border: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 20px; background: {{call}}; color: #0B1220; cursor: pointer; box-shadow: 0 6px 24px #0008">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+        <span style="display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.15">
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 800; letter-spacing: .02em">{{phoneCaller}}</span>
+          <small style="font-size: 12px; font-weight: 700; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%">Phone call · {{phoneBizName}}</small>
+        </span>
+      </button>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<!-- ============ 1b. BUSINESS SETTINGS ============ -->
+<sc-if value="{{isSettings}}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; min-height: 0; display: flex; flex-direction: column; animation: vw-slide .3s ease-out">
+  <div style="padding: 44px 12px 4px; display: flex; align-items: center">
+    <button aria-label="Back" onClick="{{goBack}}" style="height: 44px; max-width: 100%; padding: 0 12px 0 0; border: 0; border-radius: 22px; background: transparent; color: #F2F3F5; display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; cursor: pointer">
+      <span style="flex-shrink: 0; width: 44px; height: 44px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{accent}}; color: {{accent}}; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg></span>
+      Businesses
+    </button>
+  </div>
+  <div style="padding: 0 20px 12px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #1C2029">
+    <div style="width: 44px; height: 44px; flex-shrink: 0; box-sizing: border-box; border-radius: 14px; background: #07090C; border: 1.5px solid {{accent}}; color: {{accent}}; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800">{{biz.mono}}</div>
+    <div style="display: flex; flex-direction: column; gap: 1px; min-width: 0">
+      <h1 style="margin: 0; font-size: 20px; line-height: 1.2; font-weight: 800; letter-spacing: -0.01em">Settings</h1>
+      <div style="font-size: 13px; color: #9AA1AD; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{biz.name}} · {{biz.category}}</div>
+    </div>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 24px; display: flex; flex-direction: column; gap: 10px">
+
+    <!-- Phone number -->
+    <section aria-label="Phone number" style="flex-shrink: 0; padding: 10px 10px 10px 12px; border-radius: 16px; background: #14171D; border: 1px solid #232731; display: flex; align-items: center; gap: 12px">
+      <div style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 11px; background: #13231B; color: {{call}}; display: flex; align-items: center; justify-content: center">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+      </div>
+      <sc-if value="{{hasNumber}}" hint-placeholder-val="{{ true }}">
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; animation: vw-rise .3s ease-out">
+          <span style="font-family: 'JetBrains Mono', monospace; font-size: 15px; color: #F2F3F5; white-space: nowrap">{{number.num}}</span>
+          <span style="font-size: 12px; color: #8A919D; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{number.area}} · Twilio · {{number.caps}}</span>
+        </div>
+        <button onClick="{{openSheet}}" style="height: 36px; flex-shrink: 0; padding: 0 12px; border-radius: 18px; background: transparent; border: 1px solid #2E333E; color: #F2F3F5; font-size: 13px; font-weight: 600; cursor: pointer">Change</button>
+      </sc-if>
+      <sc-if value="{{noNumber}}" hint-placeholder-val="{{ false }}">
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+          <span style="font-size: 14px; font-weight: 700; color: #F2F3F5">No number assigned</span>
+          <span style="font-size: 12px; color: #8A919D">Pick one from Twilio</span>
+        </div>
+        <button onClick="{{openSheet}}" style="height: 36px; flex-shrink: 0; padding: 0 14px; border-radius: 18px; border: 0; background: {{call}}; color: #0B1220; font-size: 13px; font-weight: 700; cursor: pointer">Choose</button>
+      </sc-if>
+    </section>
+
+    <!-- First greeting -->
+    <section aria-label="First greeting" style="flex-shrink: 0; padding: 12px; border-radius: 16px; background: #14171D; border: 1px solid #232731; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px">
+        <h2 style="margin: 0; font-size: 14px; font-weight: 800">First greeting</h2>
+        <div style="{{chipStyle}}" aria-live="polite">
+          <sc-if value="{{chipSaving}}" hint-placeholder-val="{{ false }}">
+            <div style="width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: vw-spin .8s linear infinite"></div>
+          </sc-if>
+          <sc-if value="{{chipCached}}" hint-placeholder-val="{{ true }}">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="animation: vw-pop .3s ease-out"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </sc-if>
+          <sc-if value="{{chipWarn}}" hint-placeholder-val="{{ false }}">
+            <div style="width: 6px; height: 6px; border-radius: 50%; background: currentColor"></div>
+          </sc-if>
+          <span>{{chipText}}</span>
+        </div>
+      </div>
+      <textarea aria-label="First greeting message" value="{{draft}}" onChange="{{onDraft}}" rows="3" maxlength="300" style="width: 100%; box-sizing: border-box; min-height: 78px; padding: 9px 11px; border-radius: 12px; border: 1px solid {{draftBorder}}; background: #0F1217; color: #F2F3F5; font-family: inherit; font-size: 14px; line-height: 1.45; resize: none; outline: none"></textarea>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+        <span style="font-size: 11px; color: #8A919D; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{draftCount}}/300 · {{cacheNote}}</span>
+        <div style="display: flex; gap: 6px; flex-shrink: 0">
+          <sc-if value="{{dirty}}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{resetDraft}}" style="height: 34px; padding: 0 12px; border-radius: 17px; background: transparent; border: 1px solid #2E333E; color: #F2F3F5; font-size: 13px; font-weight: 600; cursor: pointer">Reset</button>
+          </sc-if>
+          <button onClick="{{saveGreeting}}" disabled="{{saveDisabled}}" style="{{saveStyle}}">
+            <sc-if value="{{chipSaving}}" hint-placeholder-val="{{ false }}">
+              <div style="width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: vw-spin .8s linear infinite"></div>
+            </sc-if>
+            <span>{{saveLabel}}</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Top asked questions -->
+    <section aria-label="Top asked questions" style="flex-shrink: 0; padding: 12px 12px 6px; border-radius: 16px; background: #14171D; border: 1px solid #232731; display: flex; flex-direction: column">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-bottom: 6px">
+        <h2 style="margin: 0; font-size: 14px; font-weight: 800">Top questions</h2>
+        <span style="font-size: 11px; color: #8A919D; white-space: nowrap">{{qSummary}}</span>
+      </div>
+      <sc-for list="{{questions}}" as="q" hint-placeholder-count="5">
+        <div style="border-top: 1px solid #1F232C; animation: vw-rise .35s ease-out both; animation-delay: {{q.delay}}">
+          <button aria-expanded="{{q.ariaExp}}" onClick="{{q.toggle}}" style="width: 100%; box-sizing: border-box; min-height: 48px; padding: 9px 0; border: 0; background: transparent; color: inherit; display: flex; flex-direction: column; gap: 6px; text-align: left; cursor: pointer">
+            <div style="width: 100%; display: flex; align-items: center; gap: 10px">
+              <span style="width: 20px; height: 20px; flex-shrink: 0; border-radius: 6px; background: #222733; color: #C9D3FF; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center">{{q.rank}}</span>
+              <span style="flex: 1; min-width: 0; font-size: 14px; font-weight: 700; line-height: 1.3; color: #F2F3F5">{{q.text}}</span>
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #F2F3F5; flex-shrink: 0">{{q.pctStr}}</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A919D" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="{{q.chevStyle}}"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <div style="width: 100%; display: flex; align-items: center; gap: 10px; padding-left: 30px; box-sizing: border-box">
+              <div style="flex: 1; height: 4px; border-radius: 2px; background: #222733; overflow: hidden">
+                <div style="height: 100%; width: {{q.pctStr}}; border-radius: 2px; background: {{accent}}; transform-origin: left; animation: vw-grow .6s ease-out both; animation-delay: {{q.delay}}"></div>
+              </div>
+              <span style="font-size: 11px; color: #8A919D; flex-shrink: 0">{{q.count}}× asked</span>
+            </div>
+          </button>
+          <sc-if value="{{q.expanded}}" hint-placeholder-val="{{ false }}">
+            <div style="margin: 0 0 10px 30px; padding: 8px 10px; border-radius: 10px; background: #0F1217; border: 1px solid #1F232C; display: flex; flex-direction: column; gap: 3px; overflow: hidden; animation: vw-open .3s ease-out">
+              <span style="font-size: 10px; font-weight: 800; color: {{call}}; letter-spacing: 0.06em; text-transform: uppercase">Expected answer</span>
+              <span style="font-size: 13px; line-height: 1.45; color: #D5D9E0">{{q.answer}}</span>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </section>
+  </div>
+
+  <!-- number picker sheet -->
+  <sc-if value="{{sheetOpen}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; justify-content: flex-end">
+      <button aria-label="Close number picker" onClick="{{closeSheet}}" style="position: absolute; inset: 0; border: 0; background: rgba(5,7,10,.66); cursor: pointer; animation: vw-fade .2s ease-out"></button>
+      <div role="dialog" aria-label="Choose a phone number" style="position: relative; max-height: 80%; box-sizing: border-box; padding: 10px 16px 28px; border-radius: 24px 24px 0 0; background: #14171D; border: 1px solid #262A33; border-bottom: 0; display: flex; flex-direction: column; gap: 12px; animation: vw-sheet .32s cubic-bezier(.2,.8,.2,1)">
+        <div style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: #343A46"></div>
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <h2 style="margin: 0; font-size: 18px; font-weight: 800">Choose a number</h2>
+            <p style="margin: 0; font-size: 13px; color: #9AA1AD">Available numbers in your Twilio account</p>
+          </div>
+          <button aria-label="Close" onClick="{{closeSheet}}" style="width: 44px; height: 44px; flex-shrink: 0; border-radius: 22px; border: 0; background: #1B1F27; color: #F2F3F5; display: flex; align-items: center; justify-content: center; cursor: pointer">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+        <label style="display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-radius: 12px; background: #0F1217; border: 1px solid #262A33; color: #9AA1AD">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input aria-label="Filter by area code or city" placeholder="Area code or city" value="{{numQuery}}" onChange="{{onNumQuery}}" style="flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: #F2F3F5; font-size: 15px; font-family: inherit">
+        </label>
+        <div style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{numbers}}" as="n" hint-placeholder-count="5">
+            <button aria-pressed="{{n.pressed}}" onClick="{{n.pick}}" style="{{n.rowStyle}}">
+              <div style="{{n.radioStyle}}">
+                <sc-if value="{{n.selected}}" hint-placeholder-val="{{ false }}">
+                  <div style="width: 10px; height: 10px; border-radius: 50%; background: #0B1220; animation: vw-pop .25s ease-out"></div>
+                </sc-if>
+              </div>
+              <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 15px; color: #F2F3F5">{{n.num}}</span>
+                <span style="font-size: 12px; color: #8A919D">{{n.area}}</span>
+              </div>
+              <div style="display: flex; gap: 4px; flex-shrink: 0">
+                <sc-for list="{{n.capList}}" as="cap" hint-placeholder-count="2">
+                  <span style="font-size: 11px; font-weight: 700; padding: 3px 7px; border-radius: 7px; background: #1F232C; color: #B3B9C4">{{cap.label}}</span>
+                </sc-for>
+              </div>
+            </button>
+          </sc-for>
+          <sc-if value="{{noNumbers}}" hint-placeholder-val="{{ false }}">
+            <p style="margin: 16px 0; text-align: center; font-size: 14px; color: #9AA1AD">No available numbers match.</p>
+          </sc-if>
+        </div>
+        <button onClick="{{assignNumber}}" disabled="{{assignDisabled}}" style="{{assignStyle}}">
+          <sc-if value="{{assigning}}" hint-placeholder-val="{{ false }}">
+            <div style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: vw-spin .8s linear infinite"></div>
+          </sc-if>
+          <span>{{assignLabel}}</span>
+        </button>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<!-- ============ 1c. BOOKINGS (day view) ============ -->
+<sc-if value="{{isBookings}}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; min-height: 0; display: flex; flex-direction: column; animation: vw-slide .3s ease-out">
+  <div style="padding: 44px 12px 0; display: flex; align-items: center">
+    <button aria-label="Back" onClick="{{goBack}}" style="height: 44px; max-width: 100%; padding: 0 12px 0 0; border: 0; border-radius: 22px; background: transparent; color: #F2F3F5; display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; cursor: pointer">
+      <span style="flex-shrink: 0; width: 44px; height: 44px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{accent}}; color: {{accent}}; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg></span>
+      Businesses
+    </button>
+  </div>
+
+  <div style="padding: 2px 12px 10px 20px; display: flex; align-items: center; gap: 10px">
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+      <span style="font-size: 11px; font-weight: 700; color: #8A919D; letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Bookings · {{biz.name}}</span>
+      <button aria-expanded="{{calOpenStr}}" aria-label="Choose date" onClick="{{toggleCal}}" style="align-self: flex-start; height: 36px; padding: 0; border: 0; background: transparent; color: #F2F3F5; display: flex; align-items: center; gap: 6px; font-size: 21px; font-weight: 800; letter-spacing: -0.01em; cursor: pointer">
+        <span>{{dayTitle}}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="{{calChevStyle}}"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+    </div>
+    <sc-if value="{{notToday}}" hint-placeholder-val="{{ false }}">
+      <button onClick="{{goToday}}" style="height: 34px; padding: 0 12px; border-radius: 17px; background: transparent; border: 1px solid #2E333E; color: #F2F3F5; font-size: 13px; font-weight: 700; cursor: pointer; flex-shrink: 0">Today</button>
+    </sc-if>
+    <button aria-label="Previous day" onClick="{{prevDay}}" style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 20px; border: 0; background: #171A21; color: #F2F3F5; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+    </button>
+    <button aria-label="Next day" onClick="{{nextDay}}" style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 20px; border: 0; background: #171A21; color: #F2F3F5; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+    </button>
+  </div>
+
+  <!-- mini month calendar -->
+  <sc-if value="{{calOpen}}" hint-placeholder-val="{{ false }}">
+    <div style="margin: 0 14px 10px; padding: 10px 10px 8px; border-radius: 18px; background: #14171D; border: 1px solid #232731; overflow: hidden; animation: vw-open .3s ease-out">
+      <div style="display: flex; align-items: center; gap: 2px">
+        <button aria-label="Previous year" onClick="{{prevYear}}" style="width: 36px; height: 36px; border-radius: 18px; border: 0; background: transparent; color: #B3B9C4; display: flex; align-items: center; justify-content: center; cursor: pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline></svg>
+        </button>
+        <button aria-label="Previous month" onClick="{{prevMonth}}" style="width: 36px; height: 36px; border-radius: 18px; border: 0; background: transparent; color: #F2F3F5; display: flex; align-items: center; justify-content: center; cursor: pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
+        <div style="flex: 1; text-align: center; font-size: 15px; font-weight: 800">{{monthTitle}}</div>
+        <button aria-label="Next month" onClick="{{nextMonth}}" style="width: 36px; height: 36px; border-radius: 18px; border: 0; background: transparent; color: #F2F3F5; display: flex; align-items: center; justify-content: center; cursor: pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+        <button aria-label="Next year" onClick="{{nextYear}}" style="width: 36px; height: 36px; border-radius: 18px; border: 0; background: transparent; color: #B3B9C4; display: flex; align-items: center; justify-content: center; cursor: pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></svg>
+        </button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); margin-top: 4px">
+        <sc-for list="{{weekdays}}" as="w" hint-placeholder-count="7">
+          <div style="height: 24px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #8A919D">{{w.label}}</div>
+        </sc-for>
+        <sc-for list="{{calDays}}" as="d" hint-placeholder-count="42">
+          <div style="height: 42px; display: flex; align-items: center; justify-content: center">
+            <button aria-label="{{d.aria}}" aria-pressed="{{d.pressed}}" onClick="{{d.pick}}" style="{{d.style}}">
+              <span>{{d.num}}</span>
+              <span style="{{d.dotStyle}}"></span>
+            </button>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <div style="padding: 0 20px 8px; display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #8A919D; border-bottom: 1px solid #1C2029">
+    <span>{{daySummary}}</span>
+    <span>Swipe to change day</span>
+  </div>
+
+  <!-- day column -->
+  <div ref="{{dayRef}}" onPointerDown="{{swipeStart}}" onPointerUp="{{swipeEnd}}" style="flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; user-select: none; -webkit-user-select: none">
+    <div ref="{{dayInnerRef}}" style="position: relative; height: {{dayHeight}}; margin: 12px 0 28px">
+      <div style="position: absolute; left: 56px; right: 0; bottom: 0; border-top: 1px solid #1C2029; pointer-events: none">
+        <span style="position: absolute; left: -50px; top: -8px; width: 42px; text-align: right; font-size: 11px; color: #7E8592">{{lastHourLabel}}</span>
+      </div>
+      <sc-for list="{{hours}}" as="h" hint-placeholder-count="18">
+        <div style="{{h.rowStyle}}">
+          <span style="position: absolute; left: -50px; top: -8px; width: 42px; text-align: right; font-size: 11px; color: #7E8592">{{h.label}}</span>
+          <div style="position: absolute; left: 0; right: 0; top: 30px; border-top: 1px dashed #161920"></div>
+        </div>
+      </sc-for>
+      <sc-for list="{{dayBookings}}" as="e" hint-placeholder-count="3">
+        <button onClick="{{e.open}}" style="{{e.style}}">
+          <div style="display: flex; align-items: center; gap: 6px; min-width: 0">
+            <sc-if value="{{e.byAssistant}}" hint-placeholder-val="{{ false }}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path></svg>
+            </sc-if>
+            <span style="font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{e.name}}</span>
+          </div>
+          <span style="font-size: 12px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{e.line}}</span>
+        </button>
+      </sc-for>
+      <sc-if value="{{isToday}}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 50px; right: 0; top: {{nowTop}}; height: 2px; background: #F28B82; pointer-events: none">
+          <div style="position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: #F28B82; animation: vw-blink 2s ease-in-out infinite"></div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- booking detail sheet -->
+  <sc-if value="{{bkOpen}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; justify-content: flex-end">
+      <button aria-label="Close booking" onClick="{{closeBk}}" style="position: absolute; inset: 0; border: 0; background: rgba(5,7,10,.62); cursor: pointer; animation: vw-fade .2s ease-out"></button>
+      <div role="dialog" aria-label="Booking details" style="position: relative; box-sizing: border-box; padding: 10px 18px 28px; border-radius: 24px 24px 0 0; background: #14171D; border: 1px solid #262A33; border-bottom: 0; display: flex; flex-direction: column; gap: 14px; animation: vw-sheet .32s cubic-bezier(.2,.8,.2,1)">
+        <div style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: #343A46"></div>
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <span style="font-size: 12px; font-weight: 700; color: {{bk.color}}; letter-spacing: 0.05em; text-transform: uppercase">{{bk.source}}</span>
+          <span style="font-size: 22px; font-weight: 800">{{bk.name}}</span>
+          <span style="font-size: 15px; color: #B3B9C4">{{bk.service}}</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+          <div style="padding: 10px 12px; border-radius: 12px; background: #0F1217; border: 1px solid #1F232C; display: flex; flex-direction: column; gap: 2px">
+            <span style="font-size: 11px; color: #8A919D">Time</span>
+            <span style="font-size: 15px; font-weight: 700">{{bk.time}}</span>
+          </div>
+          <div style="padding: 10px 12px; border-radius: 12px; background: #0F1217; border: 1px solid #1F232C; display: flex; flex-direction: column; gap: 2px">
+            <span style="font-size: 11px; color: #8A919D">Duration</span>
+            <span style="font-size: 15px; font-weight: 700">{{bk.dur}}</span>
+          </div>
+        </div>
+        <button onClick="{{closeBk}}" style="height: 52px; border-radius: 26px; border: 1px solid #2E333E; background: transparent; color: #F2F3F5; font-size: 15px; font-weight: 700; cursor: pointer">Close</button>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<!-- ============ 2. BUSINESS · PREVIOUS CONVERSATIONS ============ -->
+<sc-if value="{{isConvos}}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; min-height: 0; display: flex; flex-direction: column; animation: vw-slide .3s ease-out">
+  <div style="padding: 44px 12px 4px; display: flex; align-items: center">
+    <button aria-label="Back to businesses" onClick="{{goSelect}}" style="height: 44px; max-width: 100%; padding: 0 12px 0 0; border: 0; border-radius: 22px; background: transparent; color: #F2F3F5; display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; cursor: pointer">
+      <span style="flex-shrink: 0; width: 44px; height: 44px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{accent}}; color: {{accent}}; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg></span>
+      Businesses
+    </button>
+  </div>
+
+  <div style="padding: 8px 20px 18px; display: flex; align-items: center; gap: 14px">
+    <div style="width: 60px; height: 60px; flex-shrink: 0; box-sizing: border-box; border-radius: 18px; background: #07090C; border: 1.5px solid {{accent}}; color: {{accent}}; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800">{{biz.mono}}</div>
+    <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+      <h1 style="margin: 0; font-size: 24px; line-height: 1.2; font-weight: 800; letter-spacing: -0.01em">{{biz.name}}</h1>
+      <div style="font-size: 14px; color: #9AA1AD">{{biz.domain}}</div>
+    </div>
+  </div>
+
+  <div style="padding: 0 20px 20px">
+    <button onClick="{{startNew}}" style="width: 100%; height: 56px; border-radius: 28px; border: 0; background: {{accent}}; color: #0B1220; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 16px; font-weight: 700; cursor: pointer">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+      Start new call
+    </button>
+  </div>
+
+  <div style="padding: 0 20px 10px; display: flex; align-items: baseline; justify-content: space-between; border-top: 1px solid #1C2029; padding-top: 18px">
+    <h2 style="margin: 0; font-size: 13px; font-weight: 700; color: #9AA1AD; letter-spacing: 0.04em; text-transform: uppercase">Previous conversations</h2>
+    <span style="font-size: 13px; color: #8A919D">{{convoCount}}</span>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 30px; display: flex; flex-direction: column; gap: 10px">
+    <sc-for list="{{convos}}" as="c" hint-placeholder-count="3">
+      <button onClick="{{c.open}}" style="{{c.cardStyle}}">
+        <div style="display: flex; align-items: center; gap: 10px; width: 100%">
+          <div role="img" aria-label="{{c.srcLabel}}" title="{{c.srcLabel}}" style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; background: {{c.srcBg}}; color: {{c.srcColor}}; display: flex; align-items: center; justify-content: center">
+            <sc-if value="{{c.isPhone}}" hint-placeholder-val="{{ true }}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+            </sc-if>
+            <sc-if value="{{c.isWeb}}" hint-placeholder-val="{{ false }}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            </sc-if>
+          </div>
+          <div style="flex: 1; min-width: 0; font-size: 16px; font-weight: 700; color: #F2F3F5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.title}}</div>
+          <sc-if value="{{c.isNew}}" hint-placeholder-val="{{ false }}">
+            <span style="flex-shrink: 0; font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 8px; background: {{accent}}; color: #0B1220">NEW</span>
+          </sc-if>
+        </div>
+        <div style="font-size: 14px; line-height: 1.4; color: {{c.textColor}}; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">{{c.blurb}}</div>
+        <sc-if value="{{c.hasTags}}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+            <sc-for list="{{c.tags}}" as="t" hint-placeholder-count="1">
+              <span style="{{t.style}}">{{t.label}}</span>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 12px; color: #8A919D">
+          <span>{{c.date}}</span>
+          <span style="display: flex; align-items: center; gap: 4px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15 14"></polyline></svg>
+            {{c.dur}}
+          </span>
+          <span style="display: flex; align-items: center; gap: 4px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+            {{c.countLabel}}
+          </span>
+        </div>
+      </button>
+    </sc-for>
+    <sc-if value="{{noConvos}}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top: 28px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; color: #9AA1AD">
+        <div style="width: 56px; height: 56px; border-radius: 50%; background: #161920; border: 1px dashed #343A46; display: flex; align-items: center; justify-content: center">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        </div>
+        <div style="font-size: 16px; font-weight: 700; color: #F2F3F5">No conversations yet</div>
+        <div style="font-size: 14px; line-height: 1.45; max-width: 260px">Start a call and it will show up here when you hang up.</div>
+      </div>
+    </sc-if>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ 3. READ A PAST CONVERSATION ============ -->
+<sc-if value="{{isTranscript}}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; min-height: 0; display: flex; flex-direction: column; animation: vw-slide .3s ease-out">
+  <div style="padding: 44px 12px 4px; display: flex; align-items: center">
+    <button aria-label="Back" onClick="{{goBack}}" style="height: 44px; max-width: 100%; padding: 0 12px 0 0; border: 0; border-radius: 22px; background: transparent; color: #F2F3F5; display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; cursor: pointer">
+      <span style="flex-shrink: 0; width: 44px; height: 44px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{accent}}; color: {{accent}}; display: flex; align-items: center; justify-content: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg></span>
+      <span aria-hidden="true" style="width: 28px; height: 28px; flex-shrink: 0; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; background: #222733; color: #C9D3FF">{{biz.mono}}</span>
+      <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{biz.name}}</span>
+    </button>
+  </div>
+  <div style="padding: 6px 20px 14px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid #1C2029">
+    <div style="display: flex; align-items: center; gap: 12px">
+      <div role="img" aria-label="{{convo.srcLabel}}" title="{{convo.srcLabel}}" style="width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; background: {{convo.srcBg}}; color: {{convo.srcColor}}; display: flex; align-items: center; justify-content: center">
+        <sc-if value="{{convo.isPhone}}" hint-placeholder-val="{{ true }}">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+        </sc-if>
+        <sc-if value="{{convo.isWeb}}" hint-placeholder-val="{{ false }}">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+        </sc-if>
+      </div>
+      <h1 style="margin: 0; font-size: 22px; line-height: 1.25; font-weight: 800; letter-spacing: -0.01em">{{convo.title}}</h1>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; color: #9AA1AD">
+      <span>{{convo.date}}</span>
+      <span>·</span>
+      <span>{{convo.dur}}</span>
+      <span>·</span>
+      <span>{{convo.countLabel}}</span>
+    </div>
+  </div>
+
+  <sc-if value="{{convo.hasSummaryBox}}" hint-placeholder-val="{{ true }}">
+    <div style="margin: 12px 20px 0; padding: 12px 14px; border-radius: 12px; background: {{tint}}; display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+      <sc-for list="{{convo.tags}}" as="t" hint-placeholder-count="1">
+        <span style="{{t.style}}">{{t.label}}</span>
+      </sc-for>
+      <sc-if value="{{convo.hasSummary}}" hint-placeholder-val="{{ true }}">
+        <p style="flex-basis: 100%; margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: #F2F3F5">{{convo.summary}}</p>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <div style="flex: 1; min-height: 0; overflow-y: auto">
+    <div style="display: flex; flex-direction: column; gap: 14px; padding: 18px 16px 16px">
+      <div style="align-self: center; font-size: 12px; font-weight: 600; color: #8A919D; padding: 4px 10px; border-radius: 10px; background: #161920">Call started · {{convo.date}}</div>
+      <sc-for list="{{convoMsgs}}" as="m" hint-placeholder-count="4">
+        <div style="display: flex; flex-direction: column; animation: vw-rise .35s ease-out">
+          <sc-if value="{{m.isBot}}" hint-placeholder-val="{{ true }}">
+            <div style="display: flex; gap: 8px; align-items: flex-end; max-width: 86%">
+              <div style="width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: #8AA4FF; display: flex; align-items: center; justify-content: center; gap: 2px">
+                <div style="width: 2px; height: 6px; border-radius: 1px; background: #0D0F14"></div>
+                <div style="width: 2px; height: 11px; border-radius: 1px; background: #0D0F14"></div>
+                <div style="width: 2px; height: 6px; border-radius: 1px; background: #0D0F14"></div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px">
+                <div style="padding: 11px 14px; border-radius: 18px 18px 18px 6px; background: #1B1F27; border: 1px solid #262A33; font-size: 15px; line-height: 1.45; color: #E7E9EE">{{m.text}}</div>
+                <div style="font-size: 11px; color: #8A919D; padding-left: 4px">{{m.meta}}</div>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{m.isUser}}" hint-placeholder-val="{{ false }}">
+            <div style="align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 80%">
+              <div style="padding: 11px 14px; border-radius: 18px 18px 6px 18px; background: {{accent}}; color: #0B1220; font-size: 15px; line-height: 1.45; font-weight: 500">{{m.text}}</div>
+              <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #8A919D; padding-right: 4px">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path></svg>
+                {{m.meta}}
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+      <div style="align-self: center; font-size: 12px; font-weight: 600; color: #8A919D; padding: 4px 10px; border-radius: 10px; background: #161920">Call ended · {{convo.dur}}</div>
+    </div>
+  </div>
+
+  <div style="padding: 14px 20px 30px; border-top: 1px solid #1C2029; background: #0D0F14">
+    <button onClick="{{continueCall}}" style="width: 100%; height: 56px; border-radius: 28px; border: 0; background: {{accent}}; color: #0B1220; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 16px; font-weight: 700; cursor: pointer">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+      Continue in a new call
+    </button>
+  </div>
+</div>
+</sc-if>
+
+<!-- ============ 4. CONNECTING ============ -->
+<sc-if value="{{isConnecting}}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 40px 28px; text-align: center">
+  <div style="position: relative; width: 140px; height: 140px; display: flex; align-items: center; justify-content: center">
+    <div style="position: absolute; inset: 14px; border-radius: 50%; border: 2px solid {{call}}; animation: vw-ring 1.8s ease-out infinite"></div>
+    <div style="position: absolute; inset: 14px; border-radius: 50%; border: 2px solid {{call}}; animation: vw-ring 1.8s ease-out .9s infinite"></div>
+    <div style="width: 112px; height: 112px; border-radius: 50%; background: {{call}}; color: #0D0F14; display: flex; align-items: center; justify-content: center; animation: vw-breathe 1.8s ease-in-out infinite">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 8px">
+    <div style="font-size: 24px; font-weight: 800; letter-spacing: -0.01em">Connecting…</div>
+    <div style="font-size: 15px; line-height: 1.45; color: #9AA1AD">Starting a call about {{biz.name}}</div>
+  </div>
+  <button onClick="{{goConvos}}" style="height: 48px; padding: 0 24px; border-radius: 24px; background: transparent; border: 1px solid #2E333E; color: #F2F3F5; font-size: 15px; font-weight: 600; cursor: pointer">Cancel</button>
+</div>
+</sc-if>
+
+<!-- ============ 5. LIVE CALL ============ -->
+<sc-if value="{{isCall}}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; min-height: 0; display: flex; flex-direction: column">
+  <div style="padding: 48px 20px 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px">
+    <div style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 16px; background: #101C17; border: 1px solid #1F3A2D; flex-shrink: 0">
+      <div style="width: 8px; height: 8px; border-radius: 50%; background: {{call}}; animation: vw-blink 1.4s ease-in-out infinite"></div>
+      <span style="font-size: 13px; font-weight: 700; color: {{call}}">{{livePill}}</span>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #F2F3F5">{{timer}}</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 4px; border-radius: 16px; background: #171A21; border: 1px solid #262A33; font-size: 13px; font-weight: 600; min-width: 0">
+      <span style="width: 24px; height: 24px; flex-shrink: 0; border-radius: 12px; background: #222733; color: #C9D3FF; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center">{{biz.mono}}</span>
+      <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{biz.name}}</span>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 0 12px; flex-shrink: 0">
+    <div style="position: relative; width: 104px; height: 104px; display: flex; align-items: center; justify-content: center">
+      <sc-if value="{{orbActive}}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; inset: 8px; border-radius: 50%; border: 2px solid {{orbColor}}; animation: vw-ring 1.6s ease-out infinite"></div>
+        <div style="position: absolute; inset: 8px; border-radius: 50%; border: 2px solid {{orbColor}}; animation: vw-ring 1.6s ease-out .8s infinite"></div>
+      </sc-if>
+      <div style="width: 88px; height: 88px; border-radius: 50%; background: {{orbColor}}; display: flex; align-items: center; justify-content: center; gap: 5px; transition: background .3s ease; animation: vw-breathe 3.2s ease-in-out infinite">
+        <div style="width: 5px; height: 16px; border-radius: 3px; background: #0D0F14; animation: vw-wave {{barSpeed}} ease-in-out -.1s infinite; animation-play-state: {{barPlay}}"></div>
+        <div style="width: 5px; height: 28px; border-radius: 3px; background: #0D0F14; animation: vw-wave {{barSpeed}} ease-in-out -.45s infinite; animation-play-state: {{barPlay}}"></div>
+        <div style="width: 5px; height: 38px; border-radius: 3px; background: #0D0F14; animation: vw-wave {{barSpeed}} ease-in-out -.25s infinite; animation-play-state: {{barPlay}}"></div>
+        <div style="width: 5px; height: 28px; border-radius: 3px; background: #0D0F14; animation: vw-wave {{barSpeed}} ease-in-out -.6s infinite; animation-play-state: {{barPlay}}"></div>
+        <div style="width: 5px; height: 16px; border-radius: 3px; background: #0D0F14; animation: vw-wave {{barSpeed}} ease-in-out -.3s infinite; animation-play-state: {{barPlay}}"></div>
+      </div>
+    </div>
+    <div style="font-size: 14px; font-weight: 700; color: {{statusColor}}" aria-live="polite">{{statusText}}</div>
+  </div>
+
+  <div style="flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; border-top: 1px solid #1C2029">
+    <div style="display: flex; flex-direction: column; gap: 14px; padding: 16px 16px 12px">
+      <sc-for list="{{messages}}" as="m" hint-placeholder-count="3">
+        <div style="display: flex; flex-direction: column; animation: vw-rise .35s ease-out">
+          <sc-if value="{{m.isBot}}" hint-placeholder-val="{{ true }}">
+            <div style="display: flex; gap: 8px; align-items: flex-end; max-width: 86%">
+              <div style="width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: #8AA4FF; display: flex; align-items: center; justify-content: center; gap: 2px">
+                <div style="width: 2px; height: 6px; border-radius: 1px; background: #0D0F14"></div>
+                <div style="width: 2px; height: 11px; border-radius: 1px; background: #0D0F14"></div>
+                <div style="width: 2px; height: 6px; border-radius: 1px; background: #0D0F14"></div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px">
+                <div style="padding: 11px 14px; border-radius: 18px 18px 18px 6px; background: #1B1F27; border: 1px solid #262A33; font-size: 15px; line-height: 1.45; color: #E7E9EE">{{m.text}}</div>
+                <div style="font-size: 11px; color: #8A919D; padding-left: 4px">{{m.meta}}</div>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{m.isUser}}" hint-placeholder-val="{{ false }}">
+            <div style="align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 80%">
+              <div style="padding: 11px 14px; border-radius: 18px 18px 6px 18px; background: {{accent}}; color: #0B1220; font-size: 15px; line-height: 1.45; font-weight: 500">{{m.text}}</div>
+              <div style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #8A919D; padding-right: 4px">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path></svg>
+                {{m.meta}}
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+
+      <sc-if value="{{isThinking}}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; gap: 8px; align-items: center; animation: vw-rise .3s ease-out">
+          <div style="width: 26px; height: 26px; border-radius: 50%; background: #8AA4FF"></div>
+          <div style="display: flex; gap: 5px; padding: 14px 16px; border-radius: 18px 18px 18px 6px; background: #1B1F27; border: 1px solid #262A33">
+            <div style="width: 7px; height: 7px; border-radius: 50%; background: #B7C3D6; animation: vw-dot 1.1s ease-in-out infinite"></div>
+            <div style="width: 7px; height: 7px; border-radius: 50%; background: #B7C3D6; animation: vw-dot 1.1s ease-in-out .15s infinite"></div>
+            <div style="width: 7px; height: 7px; border-radius: 50%; background: #B7C3D6; animation: vw-dot 1.1s ease-in-out .3s infinite"></div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{talking}}" hint-placeholder-val="{{ false }}">
+        <div style="align-self: flex-end; display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 18px 18px 6px 18px; border: 1.5px dashed {{accent}}; color: {{accent}}; font-size: 15px; font-weight: 600; animation: vw-rise .25s ease-out">
+          <div style="display: flex; align-items: center; gap: 3px; height: 16px">
+            <div style="width: 3px; height: 10px; border-radius: 2px; background: {{accent}}; animation: vw-wave .7s ease-in-out infinite"></div>
+            <div style="width: 3px; height: 16px; border-radius: 2px; background: {{accent}}; animation: vw-wave .7s ease-in-out -.3s infinite"></div>
+            <div style="width: 3px; height: 12px; border-radius: 2px; background: {{accent}}; animation: vw-wave .7s ease-in-out -.15s infinite"></div>
+          </div>
+          Listening…
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <sc-if value="{{phoneMode}}" hint-placeholder-val="{{ false }}">
+  <div style="padding: 14px 16px 30px; display: flex; gap: 12px; align-items: center; border-top: 1px solid #1C2029; background: #0D0F14">
+    <div style="flex: 1; min-width: 0; height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 6px; color: #9AA1AD; font-size: 15px; font-weight: 600">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{call}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+      <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{phoneCaller}}</span>
+    </div>
+    <button onClick="{{closePhone}}" style="height: 56px; flex-shrink: 0; padding: 0 28px; border-radius: 28px; background: transparent; border: 1px solid #2E333E; color: #F2F3F5; font-size: 16px; font-weight: 600; cursor: pointer">Close</button>
+  </div>
+  </sc-if>
+  <sc-if value="{{webMode}}" hint-placeholder-val="{{ true }}">
+  <div style="padding: 14px 16px 30px; display: flex; gap: 12px; align-items: center; border-top: 1px solid #1C2029; background: #0D0F14">
+    <button aria-label="Push to talk — hold to speak" onPointerDown="{{pttDown}}" onPointerUp="{{pttUp}}" onPointerCancel="{{pttUp}}" onKeyDown="{{pttKeyDown}}" onKeyUp="{{pttKeyUp}}" onContextMenu="{{noMenu}}" style="{{pttStyle}}">
+      <sc-if value="{{talking}}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; align-items: center; gap: 3px; height: 22px">
+          <div style="width: 4px; height: 12px; border-radius: 2px; background: #0B1220; animation: vw-wave .6s ease-in-out infinite"></div>
+          <div style="width: 4px; height: 22px; border-radius: 2px; background: #0B1220; animation: vw-wave .6s ease-in-out -.2s infinite"></div>
+          <div style="width: 4px; height: 16px; border-radius: 2px; background: #0B1220; animation: vw-wave .6s ease-in-out -.4s infinite"></div>
+          <div style="width: 4px; height: 20px; border-radius: 2px; background: #0B1220; animation: vw-wave .6s ease-in-out -.1s infinite"></div>
+        </div>
+        <span>Release to send</span>
+      </sc-if>
+      <sc-if value="{{notTalking}}" hint-placeholder-val="{{ true }}">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="22"></line></svg>
+        <span>Hold to talk</span>
+      </sc-if>
+    </button>
+    <button aria-label="End call" onClick="{{endCall}}" style="width: 64px; height: 64px; flex-shrink: 0; border-radius: 50%; border: 0; background: #D93D42; color: #FFFFFF; display: flex; align-items: center; justify-content: center; cursor: pointer">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform: rotate(135deg)"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+    </button>
+  </div>
+  </sc-if>
+</div>
+</sc-if>
+
+<!-- ============ 6. CALL ENDED ============ -->
+<sc-if value="{{isEnded}}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 40px 24px; text-align: center">
+  <div style="width: 84px; height: 84px; border-radius: 50%; background: #1B1F27; border: 1px solid #2E333E; color: {{call}}; display: flex; align-items: center; justify-content: center; animation: vw-pop .45s ease-out">
+    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 8px">
+    <div style="font-size: 28px; font-weight: 800; letter-spacing: -0.02em">Call ended</div>
+    <div style="font-size: 15px; line-height: 1.45; color: #9AA1AD">Saved to {{biz.name}}’s conversations</div>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%">
+    <div style="padding: 14px 8px; border-radius: 16px; background: #161920; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 4px">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px">{{timer}}</div>
+      <div style="font-size: 12px; color: #9AA1AD">Duration</div>
+    </div>
+    <div style="padding: 14px 8px; border-radius: 16px; background: #161920; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 4px">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 20px">{{msgCount}}</div>
+      <div style="font-size: 12px; color: #9AA1AD">Messages</div>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 8px">
+    <button onClick="{{openLast}}" style="height: 56px; border-radius: 28px; border: 0; background: {{accent}}; color: #0B1220; font-size: 16px; font-weight: 700; cursor: pointer">Read this conversation</button>
+    <button onClick="{{goConvos}}" style="height: 56px; border-radius: 28px; background: transparent; border: 1px solid #2E333E; color: #F2F3F5; font-size: 16px; font-weight: 600; cursor: pointer">Back to conversations</button>
+  </div>
+</div>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#8AB4F8","options":["#8AB4F8","#A5B4FC","#7DD3FC","#C4B5FD"],"section":"Look"},"callColor":{"editor":"color","default":"#7FD6A8","options":["#7FD6A8","#86EFAC","#6EE7B7","#A3E4A0"],"section":"Look"},"mainNumber":{"editor":"text","default":"+1 (305) 555-0100","section":"Preview"},"phoneLive":{"editor":"boolean","default":true,"section":"Preview"},"startStage":{"editor":"enum","default":"select","options":["select","bookings","settings","convos","transcript","call","phone","ended"],"section":"Preview"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  biz() {
+    const D = { bakery: 'cornerbakery.com', auto: 'harborauto.com', florist: 'bloomandstem.com', dental: 'northsidedental.com', fitness: 'peakfitness.co', coffee: 'lumencoffee.com', books: 'paperlanternbooks.com', pets: 'happypawsgrooming.com' };
+    return [
+      { id: 'bakery', name: 'Corner Bakery', category: 'Bakery', mono: 'CB', past: 3 },
+      { id: 'auto', name: 'Harbor Auto Repair', category: 'Auto repair', mono: 'HA', past: 2 },
+      { id: 'florist', name: 'Bloom & Stem', category: 'Florist', mono: 'BS', past: 3 },
+      { id: 'dental', name: 'Northside Dental', category: 'Dental clinic', mono: 'ND', past: 1 },
+      { id: 'fitness', name: 'Peak Fitness', category: 'Fitness studio', mono: 'PF', past: 2 },
+      { id: 'coffee', name: 'Lumen Coffee', category: 'Coffee shop', mono: 'LC', past: 3 },
+      { id: 'books', name: 'Paper Lantern Books', category: 'Bookstore', mono: 'PL', past: 1 },
+      { id: 'pets', name: 'Happy Paws Grooming', category: 'Pet grooming', mono: 'HP', past: 0 }
+    ].map((b) => Object.assign(b, { domain: D[b.id] || 'No website' }));
+  }
+  /* the one main Twilio number; picking a business points it there (like the app) */
+  mainNum() { return this.props.mainNumber != null ? this.props.mainNumber : '+1 (305) 555-0100'; }
+  holderNow() { const s = this.S(); return s.mainHolder !== undefined ? s.mainHolder : 'bakery'; }
+  numsFor(b) {
+    const out = [];
+    const own = this.settingsFor(b).number;
+    if (own) out.push(own);
+    if (this.mainNum() && this.holderNow() === b.id) out.push(this.mainNum());
+    return out;
+  }
+  src(source, accent, call) {
+    const phone = source === 'twilio';
+    return { isPhone: phone, isWeb: !phone, srcLabel: phone ? 'Phone' : 'Web', srcColor: phone ? call : accent, srcBg: phone ? 'rgba(127,214,168,.18)' : 'rgba(138,180,248,.10)' };
+  }
+  tagsFor(c, accent) {
+    const L = { booked: 'Booked', info_request: 'Info request', message: 'Message', transferred: 'Transferred', unresolved: 'Unresolved' };
+    const base = 'font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 8px; ';
+    const out = [];
+    if (c.outcome) out.push({ label: L[c.outcome] || c.outcome, style: base + (c.outcome === 'booked' ? 'background: ' + accent + '; color: #0B1220; border: 1px solid ' + accent + ';'
+      : c.outcome === 'unresolved' ? 'background: #2a1517; color: #ffc9cc; border: 1px solid #5c2328;' : 'background: rgba(138,180,248,.10); color: #F2F3F5; border: 1px solid ' + accent + ';') });
+    if (c.followUp) out.push({ label: 'Follow up', style: base + 'background: #2b2410; color: #ffe08a; border: 1px solid #8a6d1f;' });
+    return out;
+  }
+  phoneSeed() {
+    const A = this.bizFor(this.holderNow()).name;
+    return [
+      { id: 'p0', role: 'bot', time: '0:00', lat: null, text: this.settingsFor(this.bizFor(this.holderNow())).greeting },
+      { id: 'p1', role: 'user', time: '0:09', text: 'Hi, are you open this Saturday?' },
+      { id: 'p2', role: 'bot', time: '0:12', lat: '1.3', text: 'Yes — ' + A + ' is open Saturday from 7 AM. Would you like to book a time?' }
+    ];
+  }
+  bizFor(id) { return this.biz().find((b) => b.id === id) || this.biz()[0]; }
+  watchPhone() {
+    const holder = this.holderNow() || 'bakery';
+    this.go('call', { phoneMode: true, bizId: holder, messages: this.phoneSeed(), seconds: 37, turn: 0 });
+    this.later(() => {
+      const m = this.msgsNow().concat([{ id: 'p3', role: 'user', time: this.fmt(this.secNow()), text: 'Yes, 10 AM please.' }]);
+      this.setState({ messages: m, botState: 'thinking' });
+      this.later(() => {
+        const m2 = this.msgsNow().concat([{ id: 'p4', role: 'bot', time: this.fmt(this.secNow()), lat: '1.4', text: 'Done — you’re booked for Saturday at 10 AM. See you then!' }]);
+        this.setState({ messages: m2, botState: 'speaking' });
+        this.later(() => this.setState({ botState: null }), 2600);
+      }, 1400);
+    }, 2200);
+  }
+  S() { return this.state || {}; }
+  start() { return this.props.startStage || 'select'; }
+  stageNow() { return this.S().stage || (this.start() === 'phone' ? 'call' : this.start()); }
+  selNow() { const s = this.S(); return s.bizId !== undefined ? s.bizId : (this.start() === 'select' ? null : 'bakery'); }
+  bizNow() { const id = this.selNow() || 'bakery'; return this.biz().find((b) => b.id === id) || this.biz()[0]; }
+  secNow() { const s = this.S(); return s.seconds != null ? s.seconds : (this.start() === 'call' || this.start() === 'ended' ? 84 : this.start() === 'phone' ? 37 : 0); }
+  fmt(sec) { const m = Math.floor(sec / 60); const s = sec % 60; return m + ':' + (s < 10 ? '0' : '') + s; }
+
+  /* sample past conversations, built from the business name */
+  pastFor(b) {
+    const A = b.name;
+    const T = [
+      { key: 'repeat', title: 'Getting more repeat customers', date: 'Today · 9:14 AM', dur: '4:12', source: 'twilio', outcome: 'info_request', followUp: false,
+        summary: 'Asked how to bring customers back; agreed to start with a short follow-up message after each visit.', lines: [
+        ['bot', 'Hi! Ready to talk about ' + A + '. What’s on your mind?'],
+        ['user', 'How could ' + A + ' get more repeat customers?'],
+        ['bot', 'A few ideas: a simple loyalty card, a short follow-up message after each visit, and a weekly special people can plan around.'],
+        ['user', 'Which one is easiest to start with?'],
+        ['bot', 'The follow-up message. It needs no new tools — just a short thank-you and a reason to come back.'],
+        ['user', 'Okay, let’s go with that.'],
+        ['bot', 'Great. Next time we can write the message together.']
+      ] },
+      { key: 'owner', title: 'Questions for the owner', date: 'Yesterday · 6:40 PM', dur: '2:58', source: 'web', outcome: 'message', followUp: true,
+        summary: 'Prepared questions for the owner about slow weeks, best customers and top services.', lines: [
+        ['bot', 'Hi! What would you like to know about ' + A + '?'],
+        ['user', 'What should I ask the owner when we meet?'],
+        ['bot', 'Ask what a slow week looks like, who their best customers are, and what they wish more people knew about them.'],
+        ['user', 'Anything about money?'],
+        ['bot', 'Ask which service brings in the most and which one they’d drop if they could.']
+      ] },
+      { key: 'overview', title: 'Quick overview and a booking', date: 'Sep 28 · 11:02 AM', dur: '1:45', source: 'twilio', outcome: 'booked', followUp: false,
+        summary: 'Caller asked what ' + A + ' offers and booked a visit for the next morning at 10.', lines: [
+        ['bot', 'Hi! Let’s talk about ' + A + '.'],
+        ['user', 'Give me a quick overview.'],
+        ['bot', 'Sure. Do you want to start with what they offer, or how customers find them?'],
+        ['user', 'What they offer — and can I come in tomorrow at 10?'],
+        ['bot', 'Done — you’re booked for tomorrow at 10 AM. I’ll walk you through the main services when you arrive.']
+      ] }
+    ];
+    return T.slice(0, b.past).map((t) => ({
+      id: b.id + '-' + t.key, title: t.title, date: t.date, dur: t.dur,
+      source: t.source, outcome: t.outcome, followUp: t.followUp, summary: t.summary,
+      messages: t.lines.map((l, i) => ({ id: t.key + i, role: l[0], text: l[1], time: this.fmt(i * 19 + 2), lat: l[0] === 'bot' && i > 0 ? (1 + ((i * 7) % 9) / 10).toFixed(1) : null }))
+    }));
+  }
+  convosFor(b) {
+    const h = (this.S().history || {})[b.id] || [];
+    return h.concat(this.pastFor(b));
+  }
+  turns() {
+    const A = this.bizNow().name;
+    return [
+      ['Give me a quick overview.', 'Sure. Let’s start with ' + A + ' — do you want what they offer, or how customers find them?'],
+      ['Start with what they offer.', 'Got it. I’ll go through ' + A + '’s main services first, then how they compare with similar places nearby.'],
+      ['How could they get more repeat customers?', 'A few ideas: a simple loyalty card, a short follow-up message after each visit, and a weekly special people can plan around.'],
+      ['What should I ask the owner?', 'Ask what a slow week looks like, who their best customers are, and what they wish more people knew about them.']
+    ];
+  }
+  greet(topic) {
+    const A = this.bizNow().name;
+    const text = topic
+      ? 'Welcome back! Picking up where we left off on “' + topic + '” for ' + A + '. Hold the button and go ahead.'
+      : this.settingsFor(this.bizNow()).greeting;
+    return { id: 'g' + Date.now(), role: 'bot', time: '0:00', text };
+  }
+  seedCall() {
+    const tr = this.turns()[0];
+    return [{ id: 's0', role: 'bot', time: '0:02', text: this.greet().text }, { id: 's1', role: 'user', time: '0:41', text: tr[0] }, { id: 's2', role: 'bot', time: '0:44', lat: '1.4', text: tr[1] }];
+  }
+  msgsNow() { const s = this.S(); return s.messages || (this.start() === 'phone' ? this.phoneSeed() : this.start() === 'call' || this.start() === 'ended' ? this.seedCall() : []); }
+  later(fn, ms) { if (!this.timers) this.timers = []; this.timers.push(setTimeout(fn, ms)); }
+  clearT() { (this.timers || []).forEach((t) => clearTimeout(t)); this.timers = []; }
+
+  /* ---------- business settings (sample data) ---------- */
+  pool() {
+    return [
+      { num: '+1 (305) 555-0142', area: 'Miami, FL', caps: ['Voice', 'SMS'] },
+      { num: '+1 (305) 555-0178', area: 'Miami, FL', caps: ['Voice', 'SMS'] },
+      { num: '+1 (786) 555-0119', area: 'Miami, FL', caps: ['Voice'] },
+      { num: '+1 (512) 555-0134', area: 'Austin, TX', caps: ['Voice', 'SMS'] },
+      { num: '+1 (206) 555-0156', area: 'Seattle, WA', caps: ['Voice', 'SMS'] },
+      { num: '+1 (312) 555-0163', area: 'Chicago, IL', caps: ['Voice'] },
+      { num: '+1 (720) 555-0187', area: 'Denver, CO', caps: ['Voice', 'SMS'] },
+      { num: '+1 (617) 555-0192', area: 'Boston, MA', caps: ['Voice', 'SMS'] }
+    ];
+  }
+  settingsFor(b) {
+    const i = this.biz().findIndex((x) => x.id === b.id);
+    const defNum = { bakery: '+1 (305) 555-0142', florist: '+1 (305) 555-0178', coffee: '+1 (512) 555-0134' }[b.id] || null;
+    const def = {
+      greeting: 'Hi! Thanks for calling ' + b.name + '. I’m the virtual assistant — how can I help you today?',
+      cached: i % 2 === 0, cachedAt: 'Oct 28, 4:12 PM', saving: false, number: defNum
+    };
+    return Object.assign(def, ((this.S().settings || {})[b.id]) || {});
+  }
+  patchSettings(id, patch) {
+    const all = Object.assign({}, this.S().settings || {});
+    all[id] = Object.assign({}, all[id] || {}, patch);
+    this.setState({ settings: all });
+  }
+  questionsFor(b) {
+    const i = this.biz().findIndex((x) => x.id === b.id);
+    const f = [1, 0.7, 0.85, 0.5, 1.2, 0.9, 0.4, 0.3][i] || 1;
+    const Q = [
+      ['What are your opening hours?', 'Open Monday to Saturday, 8 AM to 6 PM. Closed on Sundays.', 48],
+      ['Do I need to book in advance?', 'Walk-ins are welcome, but booking ahead guarantees a spot at busy times.', 31],
+      ['Where are you, and is there parking?', 'We’re at [ADDRESS]. Free parking is available behind the building.', 22],
+      ['How much does it cost?', 'It depends on the service — I can text you the current price list right now.', 15],
+      ['Can I talk to a person?', 'Of course. I’ll pass your number to the team and someone will call you back today.', 9]
+    ];
+    const counts = Q.map((q) => Math.max(1, Math.round(q[2] * f)));
+    const sum = counts.reduce((a, c) => a + c, 0);
+    const total = Math.round(sum / 0.72);
+    return {
+      total, calls: Math.max(1, Math.round(total / 3.4)),
+      list: Q.map((q, k) => {
+        const pct = Math.round((counts[k] / total) * 100);
+        return { rank: String(k + 1), text: q[0], answer: q[1], count: String(counts[k]), pctStr: pct + '%', delay: (k * 0.07) + 's' };
+      })
+    };
+  }
+  saveGreeting() {
+    const b = this.bizNow();
+    const st = this.settingsFor(b);
+    const s = this.S();
+    const text = (s.draft != null ? s.draft : st.greeting).trim() || st.greeting;
+    this.patchSettings(b.id, { saving: true, cached: false });
+    setTimeout(() => {
+      this.patchSettings(b.id, { greeting: text, saving: false, cached: true, cachedAt: 'just now' });
+      this.setState({ draft: null });
+    }, 1800);
+  }
+  assignNumber() {
+    const s = this.S();
+    const b = this.bizNow();
+    if (!s.pickNum) return;
+    this.setState({ assigning: true });
+    setTimeout(() => {
+      this.patchSettings(b.id, { number: s.pickNum });
+      this.setState({ assigning: false, sheet: false });
+    }, 1400);
+  }
+  /* ---------- bookings (sample data, generated per day) ---------- */
+  get OPEN_H() { return 7; }
+  get CLOSE_H() { return 23; }
+  get VIEW_START_H() { return this.OPEN_H - 1; }
+  get VIEW_END_H() { return this.CLOSE_H + 1; }
+  iso(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  parseISO(s) { const p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
+  todayISO() { return this.iso(new Date()); }
+  calNow() { return this.S().calDate || this.todayISO(); }
+  rng(seed) {
+    let h = 1779033703 ^ seed.length;
+    for (let i = 0; i < seed.length; i++) { h = Math.imul(h ^ seed.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+    return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+  }
+  bookingsFor(b, isoDate) {
+    const d = this.parseISO(isoDate);
+    if (d.getDay() === 0) return [];
+    const r = this.rng(b.id + isoDate);
+    const svc = {
+      bakery: ['Cake pickup', 'Catering consult', 'Tasting'],
+      auto: ['Oil change', 'Brake check', 'Diagnostics', 'Tire rotation'],
+      florist: ['Bouquet pickup', 'Wedding consult', 'Delivery'],
+      dental: ['Cleaning', 'Check-up', 'Whitening consult'],
+      fitness: ['Personal training', 'Intro class', 'Assessment'],
+      coffee: ['Catering order', 'Event booking'],
+      books: ['Book club', 'Special order pickup'],
+      pets: ['Full groom', 'Bath & brush', 'Nail trim']
+    }[b.id] || ['Appointment'];
+    const names = ['Maria L.', 'James K.', 'Aisha R.', 'Tom B.', 'Elena S.', 'Chris P.', 'Nina W.', 'Omar H.', 'Grace T.', 'Leo M.'];
+    /* open 7 AM – 11 PM; every booking is one hour, starting on the hour */
+    const slots = [];
+    for (let h = this.OPEN_H; h < this.CLOSE_H; h++) slots.push(h);
+    const n = 3 + Math.floor(r() * 6);
+    const picked = [];
+    while (picked.length < n && slots.length) picked.push(slots.splice(Math.floor(r() * slots.length), 1)[0]);
+    return picked.sort((a, b) => a - b).map((h, i) => ({
+      id: isoDate + '-' + i, start: h * 60, dur: 60,
+      name: names[Math.floor(r() * names.length)], service: svc[Math.floor(r() * svc.length)], byAssistant: r() < 0.55
+    }));
+  }
+  fmtMin(m) { const h = Math.floor(m / 60) % 24, mm = m % 60; return (((h + 11) % 12) + 1) + (mm ? ':' + String(mm).padStart(2, '0') : '') + ' ' + (h >= 12 ? 'PM' : 'AM'); }
+  animDay(dir) {
+    setTimeout(() => {
+      const el = this.dayInnerEl;
+      if (el && el.animate) el.animate([{ transform: 'translateX(' + (dir * 40) + 'px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260, easing: 'ease-out' });
+    }, 0);
+  }
+  setDay(isoDate, dir) { this.setState({ calDate: isoDate, calView: null, bkSel: null }); this.animDay(dir); }
+  shiftDay(n) { const d = this.parseISO(this.calNow()); d.setDate(d.getDate() + n); this.setDay(this.iso(d), n > 0 ? 1 : -1); }
+  viewNow() { const v = this.S().calView; if (v) return v; const d = this.parseISO(this.calNow()); return { y: d.getFullYear(), m: d.getMonth() }; }
+  moveView(months) { const v = this.viewNow(); const d = new Date(v.y, v.m + months, 1); this.setState({ calView: { y: d.getFullYear(), m: d.getMonth() } }); }
+  swipeStart(e) { this.sw = { x: e.clientX, y: e.clientY }; }
+  swipeEnd(e) {
+    if (!this.sw) return;
+    const dx = e.clientX - this.sw.x, dy = e.clientY - this.sw.y;
+    this.sw = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) { this.swiped = Date.now(); this.shiftDay(dx < 0 ? 1 : -1); }
+  }
+  scrollToCard(id) {
+    const list = this.listEl;
+    const el = this.cardEls && this.cardEls[id];
+    if (!list || !el) return;
+    const lr = list.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    const scale = list.clientHeight ? lr.height / list.clientHeight : 1;
+    const top = list.scrollTop + (er.top - lr.top) / (scale || 1) - 2;
+    if (list.scrollTo) list.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    else list.scrollTop = Math.max(0, top);
+  }
+  componentDidMount() {
+    this.tick = setInterval(() => { if (this.stageNow() === 'call') this.setState({ seconds: this.secNow() + 1 }); }, 1000);
+  }
+  componentWillUnmount() { clearInterval(this.tick); this.clearT(); }
+
+  go(stage, extra) { this.clearT(); this.setState(Object.assign({ stage, talking: false, botState: null }, extra || {})); }
+  startCall(topic) {
+    this.go('connecting', { messages: [], seconds: 0, turn: 0, topic: topic || null, phoneMode: false });
+    this.later(() => {
+      this.setState({ stage: 'call', messages: [this.greet(topic)], botState: 'speaking' });
+      this.later(() => this.setState({ botState: null }), 2400);
+    }, 1700);
+  }
+  pttDown(e) {
+    if (this.stageNow() !== 'call' || this.S().talking) return;
+    if (e && e.pointerId != null && e.currentTarget && e.currentTarget.setPointerCapture) {
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    this.clearT();
+    this.setState({ talking: true, botState: null });
+  }
+  pttUp() {
+    const s = this.S();
+    if (!s.talking) return;
+    const all = this.turns();
+    const turn = s.turn != null ? s.turn : (this.start() === 'call' ? 1 : 0);
+    const tr = all[turn % all.length];
+    const msgs = this.msgsNow().concat([{ id: 'u' + Date.now(), role: 'user', time: this.fmt(this.secNow()), text: tr[0] }]);
+    this.setState({ talking: false, botState: 'thinking', messages: msgs, turn: turn + 1 });
+    this.later(() => {
+      const m2 = this.msgsNow().concat([{ id: 'b' + Date.now(), role: 'bot', time: this.fmt(this.secNow()), lat: '1.2', text: tr[1] }]);
+      this.setState({ botState: 'speaking', messages: m2 });
+      this.later(() => this.setState({ botState: null }), 2600);
+    }, 1200);
+  }
+  endCall() {
+    const s = this.S();
+    const b = this.bizNow();
+    const msgs = this.msgsNow();
+    const firstQ = msgs.find((m) => m.role === 'user');
+    const convo = {
+      id: 'new' + Date.now(), isNew: true,
+      title: s.topic ? s.topic + ' (continued)' : (firstQ ? firstQ.text.replace(/[.?!]$/, '') : 'Voice call'),
+      date: 'Just now', dur: this.fmt(this.secNow()), messages: msgs,
+      source: 'web', outcome: null, followUp: false, summary: null
+    };
+    const history = Object.assign({}, s.history || {});
+    history[b.id] = [convo].concat(history[b.id] || []);
+    this.go('ended', { history, lastId: convo.id });
+  }
+
+  renderVals() {
+    const accent = this.props.accent || '#8AB4F8';
+    const call = this.props.callColor || '#7FD6A8';
+    const hex = (c) => /^#[0-9a-fA-F]{6}$/.test(c);
+    const tint = hex(accent) ? accent + '1A' : 'rgba(138,180,248,.10)';
+    const glow = hex(call) ? call + '2E' : 'rgba(127,214,168,.18)';
+    const s = this.S();
+    const stage = this.stageNow();
+    const talking = !!s.talking;
+    const botState = s.botState || null;
+    const query = s.query || '';
+    const q = query.trim().toLowerCase();
+    const selId = this.selNow();
+    const biz = this.bizNow();
+    const selBiz = selId ? biz : null;
+
+    const filtered = this.biz().filter((b) => b.id === selId || !q || b.name.toLowerCase().indexOf(q) >= 0 || b.domain.toLowerCase().indexOf(q) >= 0);
+    const phoneMode = stage === 'call' && (s.phoneMode !== undefined ? !!s.phoneMode : this.start() === 'phone');
+    const mainNumber = this.mainNum();
+    const holderId = this.holderNow();
+    const holderBiz = holderId ? this.bizFor(holderId) : null;
+    if (!this.cardEls) this.cardEls = {};
+    const items = filtered.map((b) => {
+      const on = b.id === selId;
+      const all = this.convosFor(b);
+      const n = all.length;
+      return Object.assign({}, b, {
+        selected: on,
+        pressed: on ? 'true' : 'false',
+        count: String(n),
+        countLabel: n === 0 ? 'No chats yet' : (n === 1 ? '1 chat' : n + ' chats'),
+        ref: (el) => { if (el) this.cardEls[b.id] = el; },
+        hasNums: this.numsFor(b).length > 0,
+        numsText: this.numsFor(b).join(', '),
+        pick: () => {
+          this.setState(on ? { bizId: null } : { bizId: b.id, mainHolder: mainNumber ? b.id : holderId });
+          if (!on) this.later(() => this.scrollToCard(b.id), 40);
+        },
+        cardStyle: 'flex-shrink: 0; border-radius: 18px; overflow: hidden; transition: border-color .25s ease, background .25s ease, box-shadow .25s ease; '
+          + (on ? 'border: 1.5px solid #262A33; background: #181B22; box-shadow: 0 8px 24px rgba(0,0,0,.35);'
+                : 'border: 1.5px solid #262A33; background: #161920;'),
+        monoStyle: 'width: 44px; height: 44px; flex-shrink: 0; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; transition: background .25s ease; '
+          + (on ? 'background: #07090C; color: ' + accent + '; border: 1.5px solid ' + accent + '; box-sizing: border-box;' : 'background: #222733; color: #C9D3FF;'),
+        chevStyle: 'flex-shrink: 0; transition: transform .25s ease; transform: rotate(' + (on ? 180 : 0) + 'deg)',
+        radioStyle: 'width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; transition: all .2s ease; '
+          + (on ? 'background: ' + accent + '; color: #0B1220; border: 0;' : 'border: 2px solid #3A404C;'),
+        recent: all.slice(0, 3).map((c) => Object.assign({}, c, this.src(c.source, accent, call), {
+          isNew: !!c.isNew,
+          countLabel: c.messages.length + ' msgs',
+          open: () => this.go('transcript', { convoId: c.id, returnTo: 'select' }),
+          rowStyle: 'width: 100%; box-sizing: border-box; min-height: 56px; padding: 8px; border: 0; border-radius: 12px; background: transparent; display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; color: inherit'
+        })),
+        noRecent: n === 0,
+        hasMore: n > 3,
+        seeAll: () => this.go('convos', { bizId: b.id }),
+        openSettings: () => this.go('settings', { bizId: b.id, returnTo: 'select', draft: null, sheet: false }),
+        openBookings: () => this.go('bookings', { bizId: b.id, returnTo: 'select', calDate: this.todayISO(), calOpen: false, calView: null, bkSel: null }),
+        bookingsHint: (() => { const k = this.bookingsFor(b, this.todayISO()).length; return 'Today · ' + (k ? k + (k === 1 ? ' booking' : ' bookings') : 'no bookings'); })(),
+        settingsHint: (() => { const st = this.settingsFor(b); return (st.number || 'No number') + ' · Greeting ' + (st.cached ? 'cached' : 'not cached'); })()
+      });
+    });
+
+    const list = this.convosFor(biz);
+    const convos = list.map((c, i) => {
+      const bots = c.messages.filter((m) => m.role === 'bot');
+      const last = c.messages[c.messages.length - 1];
+      const tags = this.tagsFor(c, accent);
+      return Object.assign({}, c, this.src(c.source, accent, call), {
+        isNew: !!c.isNew,
+        preview: last ? (last.role === 'user' ? 'You: ' : '') + last.text : 'No messages',
+        blurb: c.summary || (last ? (last.role === 'user' ? 'You: ' : '') + last.text : 'No messages'),
+        textColor: c.summary ? '#F2F3F5' : '#B3B9C4',
+        tags, hasTags: tags.length > 0,
+        countLabel: c.messages.length + ' messages',
+        open: () => this.go('transcript', { convoId: c.id, returnTo: 'convos' }),
+        cardStyle: 'width: 100%; box-sizing: border-box; padding: 14px 16px; border-radius: 18px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 8px; animation: vw-rise .35s ease-out both; animation-delay: ' + (i * 0.06) + 's; '
+          + (c.isNew ? 'background: ' + tint + '; border: 1px solid ' + accent + ';' : 'background: #161920; border: 1px solid #262A33;'),
+        _bots: bots.length
+      });
+    });
+
+    const convoId = s.convoId || (list[0] && list[0].id);
+    const convoRaw = list.find((c) => c.id === convoId) || list[0] || { title: 'Conversation', date: '', dur: '0:00', messages: [] };
+    const convoTags = this.tagsFor(convoRaw, accent);
+    const convo = Object.assign({}, convoRaw, this.src(convoRaw.source, accent, call), {
+      countLabel: convoRaw.messages.length + ' messages',
+      tags: convoTags, summary: convoRaw.summary || '', hasSummary: !!convoRaw.summary,
+      hasSummaryBox: !!convoRaw.summary || convoTags.length > 0
+    });
+    const who = phoneMode ? 'Caller' : 'You';
+    const tag = (m) => Object.assign({}, m, {
+      isBot: m.role === 'bot', isUser: m.role === 'user',
+      meta: m.role === 'bot' ? 'Assistant · ' + m.time + (m.lat ? ' · ' + m.lat + ' s' : '') : who + ' · ' + m.time
+    });
+
+    const messages = this.msgsNow().map(tag);
+
+    let statusText = 'Hold the button to talk';
+    let statusColor = '#9AA1AD';
+    let orbColor = '#8AA4FF';
+    let barPlay = 'paused';
+    let barSpeed = '1s';
+    let orbActive = false;
+    if (talking) { statusText = 'Listening to you…'; statusColor = call; orbColor = call; barPlay = 'running'; barSpeed = '.7s'; orbActive = true; }
+    else if (botState === 'thinking') { statusText = 'Thinking…'; statusColor = '#B7C7FF'; barPlay = 'running'; barSpeed = '1.8s'; }
+    else if (botState === 'speaking') { statusText = 'Assistant is speaking'; statusColor = '#B7C7FF'; barPlay = 'running'; barSpeed = '.85s'; orbActive = true; }
+    else if (phoneMode) { statusText = 'The caller’s turn'; }
+
+    /* settings view values */
+    const st = this.settingsFor(biz);
+    const draft = s.draft != null ? s.draft : st.greeting;
+    const dirty = draft !== st.greeting;
+    const saving = !!st.saving;
+    const amber = '#E9C46A';
+    let chipText, chipColor, chipBg;
+    if (saving) { chipText = 'Caching…'; chipColor = accent; chipBg = tint; }
+    else if (dirty) { chipText = 'Unsaved changes'; chipColor = amber; chipBg = 'rgba(233,196,106,.12)'; }
+    else if (st.cached) { chipText = 'Cached'; chipColor = call; chipBg = 'rgba(127,214,168,.12)'; }
+    else { chipText = 'Not cached'; chipColor = amber; chipBg = 'rgba(233,196,106,.12)'; }
+    const saveDisabled = saving || (!dirty && st.cached) || !draft.trim();
+    const qs = this.questionsFor(biz);
+    const used = this.biz().filter((b) => b.id !== biz.id).map((b) => this.settingsFor(b).number).filter(Boolean);
+    const nq = (s.numQuery || '').trim().toLowerCase();
+    const pool = this.pool();
+    const current = pool.find((p) => p.num === st.number) || null;
+    const pick = s.pickNum !== undefined && s.pickNum !== null ? s.pickNum : st.number;
+    const numbers = pool
+      .filter((p) => used.indexOf(p.num) < 0)
+      .filter((p) => !nq || p.num.replace(/\D/g, '').indexOf(nq.replace(/\D/g, '') || '§') >= 0 || p.area.toLowerCase().indexOf(nq) >= 0)
+      .map((p) => {
+        const on = p.num === pick;
+        return Object.assign({}, p, {
+          selected: on, pressed: on ? 'true' : 'false',
+          capList: p.caps.map((c) => ({ label: c })),
+          pick: () => this.setState({ pickNum: p.num }),
+          rowStyle: 'width: 100%; box-sizing: border-box; flex-shrink: 0; min-height: 60px; padding: 10px 12px; border-radius: 14px; display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; color: inherit; transition: background .2s ease, border-color .2s ease; '
+            + (on ? 'background: rgba(127,214,168,.10); border: 1.5px solid ' + call + ';' : 'background: #0F1217; border: 1.5px solid #222630;'),
+          radioStyle: 'width: 22px; height: 22px; flex-shrink: 0; box-sizing: border-box; border-radius: 50%; display: flex; align-items: center; justify-content: center; '
+            + (on ? 'background: ' + call + '; border: 0;' : 'border: 2px solid #3A404C;')
+        });
+      });
+    const assigning = !!s.assigning;
+    const canAssign = !!pick && pick !== st.number && !assigning;
+
+    /* bookings view values */
+    const todayIso = this.todayISO();
+    const calIso = this.calNow();
+    const calD = this.parseISO(calIso);
+    const nowD = new Date();
+    const dayList = this.bookingsFor(biz, calIso);
+    const byA = dayList.filter((e) => e.byAssistant).length;
+    const view = this.viewNow();
+    const first = new Date(view.y, view.m, 1);
+    const calDays = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(view.y, view.m, 1 - first.getDay() + i);
+      const di = this.iso(d);
+      const inMonth = d.getMonth() === view.m;
+      const sel = di === calIso, tod = di === todayIso;
+      const has = inMonth && this.bookingsFor(biz, di).length > 0;
+      calDays.push({
+        num: String(d.getDate()),
+        aria: d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+        pressed: sel ? 'true' : 'false',
+        pick: () => { this.setState({ calOpen: false }); this.setDay(di, di > calIso ? 1 : -1); },
+        style: 'width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .2s ease; '
+          + (sel ? 'background: ' + accent + '; color: #0B1220;'
+            : tod ? 'background: transparent; color: ' + accent + '; box-shadow: inset 0 0 0 1.5px ' + accent + ';'
+            : inMonth ? 'background: transparent; color: #E7E9EE;' : 'background: transparent; color: #4B515C;'),
+        dotStyle: 'width: 4px; height: 4px; border-radius: 50%; background: ' + (has ? (sel ? '#0B1220' : call) : 'transparent') + ';'
+      });
+    }
+    const vStart = this.VIEW_START_H * 60, vEnd = this.VIEW_END_H * 60;
+    const nowMin = nowD.getHours() * 60 + nowD.getMinutes();
+    if (!this._dayRef) this._dayRef = (el) => { if (el && el !== this.dayEl) { this.dayEl = el; el.scrollTop = 0; } if (!el) this.dayEl = null; };
+    if (!this._dayInnerRef) this._dayInnerRef = (el) => { this.dayInnerEl = el; };
+    const bkRaw = dayList.find((e) => e.id === s.bkSel) || null;
+
+    return {
+      accent,
+      call,
+      isBookings: stage === 'bookings',
+      dayTitle: (calIso === todayIso ? 'Today, ' : calD.toLocaleDateString('en-US', { weekday: 'short' }) + ', ')
+        + calD.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + (calD.getFullYear() !== nowD.getFullYear() ? ' ' + calD.getFullYear() : ''),
+      notToday: calIso !== todayIso,
+      isToday: calIso === todayIso && nowMin >= vStart && nowMin <= vEnd,
+      nowTop: (nowMin - vStart) + 'px',
+      dayHeight: (vEnd - vStart) + 'px',
+      lastHourLabel: this.fmtMin(vEnd),
+      goToday: () => this.setDay(todayIso, todayIso > calIso ? 1 : -1),
+      prevDay: () => this.shiftDay(-1),
+      nextDay: () => this.shiftDay(1),
+      calOpen: !!s.calOpen,
+      calOpenStr: s.calOpen ? 'true' : 'false',
+      toggleCal: () => this.setState({ calOpen: !s.calOpen, calView: null }),
+      calChevStyle: 'transition: transform .25s ease; transform: rotate(' + (s.calOpen ? 180 : 0) + 'deg)',
+      monthTitle: first.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+      prevMonth: () => this.moveView(-1),
+      nextMonth: () => this.moveView(1),
+      prevYear: () => this.moveView(-12),
+      nextYear: () => this.moveView(12),
+      weekdays: ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((l) => ({ label: l })),
+      calDays,
+      daySummary: dayList.length ? dayList.length + (dayList.length === 1 ? ' booking' : ' bookings') + ' · ' + byA + ' by assistant' : (calD.getDay() === 0 ? 'Closed · no bookings' : 'No bookings'),
+      dayRef: this._dayRef,
+      dayInnerRef: this._dayInnerRef,
+      swipeStart: (e) => this.swipeStart(e),
+      swipeEnd: (e) => this.swipeEnd(e),
+      hours: Array.from({ length: this.VIEW_END_H - this.VIEW_START_H }, (_, i) => {
+        const h = this.VIEW_START_H + i;
+        const closed = h < this.OPEN_H || h >= this.CLOSE_H;
+        return { label: this.fmtMin(h * 60), rowStyle: 'position: relative; height: 60px; box-sizing: border-box; margin-left: 56px; border-top: 1px solid #1C2029; ' + (closed ? 'background: repeating-linear-gradient(135deg, #101216 0 6px, #0D0F14 6px 12px);' : '') };
+      }),
+      dayBookings: dayList.map((e) => {
+        const short = e.dur < 45;
+        const g = e.byAssistant;
+        return Object.assign({}, e, {
+          line: e.service + ' · ' + this.fmtMin(e.start) + '–' + this.fmtMin(e.start + e.dur),
+          open: () => { if (Date.now() - (this.swiped || 0) < 350) return; this.setState({ bkSel: e.id }); },
+          style: 'position: absolute; left: 62px; right: 10px; top: ' + (e.start - vStart + 2) + 'px; height: ' + (e.dur - 4) + 'px; box-sizing: border-box; padding: ' + (short ? '0 10px' : '6px 10px') + '; border-radius: 10px; display: flex; '
+            + (short ? 'flex-direction: row; align-items: center; gap: 8px;' : 'flex-direction: column; gap: 2px;')
+            + ' text-align: left; overflow: hidden; cursor: pointer; font-family: inherit; animation: vw-rise .3s ease-out; '
+            + (g ? 'background: rgba(127,214,168,.15); border: 1px solid rgba(127,214,168,.38); color: #C3EDD7;' : 'background: rgba(138,180,248,.15); border: 1px solid rgba(138,180,248,.38); color: #CFDDFB;')
+        });
+      }),
+      bkOpen: !!bkRaw,
+      bk: bkRaw ? {
+        name: bkRaw.name, service: bkRaw.service,
+        time: this.fmtMin(bkRaw.start) + ' – ' + this.fmtMin(bkRaw.start + bkRaw.dur),
+        dur: bkRaw.dur + ' min',
+        source: bkRaw.byAssistant ? 'Booked by assistant on a call' : 'Booked manually',
+        color: bkRaw.byAssistant ? call : accent
+      } : { name: '', service: '', time: '', dur: '', source: '', color: accent },
+      closeBk: () => this.setState({ bkSel: null }),
+      isSettings: stage === 'settings',
+      chipText,
+      chipSaving: saving,
+      chipCached: !saving && !dirty && !!st.cached,
+      chipWarn: !saving && (dirty || !st.cached),
+      chipStyle: 'flex-shrink: 0; display: flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 12px; font-size: 11px; font-weight: 700; transition: all .25s ease; color: ' + chipColor + '; background: ' + chipBg + ';',
+      draft,
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      draftBorder: dirty ? amber : '#262A33',
+      draftCount: String(draft.length),
+      cacheNote: saving ? 'Generating audio…' : (dirty ? 'Save to re-cache' : (st.cached ? 'Cached ' + st.cachedAt : 'Generated live on each call')),
+      dirty,
+      resetDraft: () => this.setState({ draft: null }),
+      saveGreeting: () => this.saveGreeting(),
+      saveDisabled,
+      saveLabel: saving ? 'Saving…' : (dirty ? 'Save & cache' : (st.cached ? 'Saved' : 'Cache greeting')),
+      saveStyle: 'height: 34px; padding: 0 14px; border-radius: 17px; border: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; transition: background .2s ease; '
+        + (saveDisabled && !saving ? 'background: #1F232C; color: #6E7582; cursor: not-allowed;' : 'background: ' + accent + '; color: #0B1220; cursor: pointer;'),
+      qSummary: qs.total + ' questions · ' + qs.calls + ' calls · 30 days',
+      questions: qs.list.map((q, k) => {
+        const open = (s.openQ !== undefined ? s.openQ : 0) === k;
+        return Object.assign({}, q, {
+          expanded: open, ariaExp: open ? 'true' : 'false',
+          toggle: () => this.setState({ openQ: open ? -1 : k }),
+          chevStyle: 'flex-shrink: 0; transition: transform .25s ease; transform: rotate(' + (open ? 180 : 0) + 'deg)'
+        });
+      }),
+      hasNumber: !!current,
+      noNumber: !current,
+      number: current ? Object.assign({}, current, { caps: current.caps.join(' & ') }) : { num: '', area: '', caps: '' },
+      sheetOpen: !!s.sheet,
+      openSheet: () => this.setState({ sheet: true, pickNum: null, numQuery: '' }),
+      closeSheet: () => { if (!assigning) this.setState({ sheet: false }); },
+      numQuery: s.numQuery || '',
+      onNumQuery: (e) => this.setState({ numQuery: e.target.value }),
+      numbers,
+      noNumbers: numbers.length === 0,
+      assigning,
+      assignDisabled: !canAssign,
+      assignLabel: assigning ? 'Assigning…' : (pick && pick === st.number ? 'Currently assigned' : (pick ? 'Assign ' + pick : 'Select a number')),
+      assignAction: null,
+      assignNumber: () => this.assignNumber(),
+      assignStyle: 'flex-shrink: 0; height: 56px; border-radius: 28px; border: 0; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 16px; font-weight: 700; transition: background .2s ease; '
+        + (canAssign || assigning ? 'background: ' + call + '; color: #0B1220; cursor: pointer;' : 'background: #1F232C; color: #6E7582; cursor: not-allowed;'),
+      isSelect: stage === 'select',
+      isConvos: stage === 'convos',
+      isTranscript: stage === 'transcript',
+      isConnecting: stage === 'connecting',
+      isCall: stage === 'call',
+      isEnded: stage === 'ended',
+      query,
+      onQuery: (e) => this.setState({ query: e.target.value }),
+      items,
+      noResults: items.length === 0,
+      biz,
+      convos,
+      convoCount: String(convos.length),
+      noConvos: convos.length === 0,
+      convo,
+      convoMsgs: convo.messages.map(tag),
+      listRef: (el) => { this.listEl = el; },
+      goSelect: () => this.go('select'),
+      goConvos: () => this.go('select'),
+      goBack: () => this.go(s.returnTo || 'select'),
+      hasSel: !!selBiz,
+      noSel: !selBiz,
+      callLabel: selBiz ? 'Call about ' + selBiz.name : 'Select a business to call',
+      callSelected: () => { if (selBiz) this.startCall(null); },
+      callStyle: 'position: relative; width: 100%; height: 60px; border-radius: 30px; border: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 20px; font-size: 17px; font-weight: 800; transition: background .25s ease, color .25s ease, transform .15s ease; '
+        + (selBiz ? 'background: ' + accent + '; color: #0B1220; cursor: pointer;' : 'background: #1B1F27; color: #6E7582; cursor: not-allowed;'),
+      tint,
+      hasMainNumber: !!mainNumber,
+      noMainNumber: !mainNumber,
+      mainNumber,
+      mainTel: 'tel:' + mainNumber.replace(/[^\d+]/g, ''),
+      hasHolder: !!holderBiz && !!holderId,
+      noHolder: !holderId,
+      holderName: holderBiz ? holderBiz.name : '',
+      phoneLive: !!this.props.phoneLive && stage === 'select',
+      phoneCaller: '+1 (786) 555-0123',
+      phoneBizName: holderBiz ? holderBiz.name : 'Business',
+      phoneAria: 'Phone call from +1 (786) 555-0123 about ' + (holderBiz ? holderBiz.name : 'a business'),
+      watchPhone: () => this.watchPhone(),
+      closePhone: () => this.go('select', { phoneMode: false }),
+      phoneMode,
+      webMode: !phoneMode,
+      livePill: phoneMode ? 'Phone' : 'Live',
+      startNew: () => this.startCall(null),
+      continueCall: () => this.startCall(convo.title.replace(/ \(continued\)$/, '')),
+      openLast: () => this.go('transcript', { convoId: s.lastId }),
+      timer: this.fmt(this.secNow()),
+      messages,
+      msgCount: String(messages.length),
+      talking,
+      notTalking: !talking,
+      isThinking: botState === 'thinking',
+      statusText, statusColor, orbColor, barPlay, barSpeed, orbActive,
+      pttStyle: 'flex: 1; height: 64px; border-radius: 32px; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 16px; font-weight: 700; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; transition: background .18s ease, transform .12s ease, box-shadow .18s ease; '
+        + (talking ? 'background: ' + call + '; color: #0B1220; border: 1.5px solid ' + call + '; transform: scale(0.97); box-shadow: 0 0 0 6px ' + glow + ';'
+                   : 'background: #1B1F27; color: #F2F3F5; border: 1.5px solid #2E333E;'),
+      pttDown: (e) => this.pttDown(e),
+      pttUp: () => this.pttUp(),
+      pttKeyDown: (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!e.repeat) this.pttDown(e); } },
+      pttKeyUp: (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); this.pttUp(); } },
+      noMenu: (e) => e.preventDefault(),
+      endCall: () => this.endCall()
+    };
+  }
+}
+</script>
+</body>
+</html>
