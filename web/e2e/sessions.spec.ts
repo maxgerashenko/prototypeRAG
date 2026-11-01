@@ -62,7 +62,7 @@ test("a + sits on free future hours only: not on booked, session or past hours, 
   await expect(page.locator(".bk-hour-add")).toHaveCount(0);
 });
 
-test("a + is a transparent hour-sized hit area with a faded glyph centred in the event area", async ({ page }) => {
+test("a + is a transparent hour-sized hit area with a glyph hidden until hover, centred in the event area", async ({ page }) => {
   await openBookings(page);
   const btn = hourAdd(page, 12);
   await expect(btn).toBeVisible();
@@ -73,7 +73,7 @@ test("a + is a transparent hour-sized hit area with a faded glyph centred in the
   });
   expect(css.bg).toBe("rgba(0, 0, 0, 0)");
   expect(css.border).toBe("0px");
-  expect(css.glyph).toBeLessThan(1);
+  expect(css.glyph).toBe(0); // shown only on hover / touch / focus
   const box = (await btn.boundingBox())!;
   const col = (await page.locator(".bk-inner").boundingBox())!;
   const row = col.y + (12 - 8) * 60;

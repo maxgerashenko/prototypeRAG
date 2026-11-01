@@ -310,13 +310,15 @@ test("bookings: the spinner uses the Bookings colour and lines up with the calen
   await page.locator(".biz-pick").click();
   await page.getByTestId("bookings-row").click();
   await expect(page.getByTestId("bk-day")).toBeVisible();
-  await expect(page.locator(".bk-hour-add").first()).toBeVisible();
+  await expect(page.getByTestId("bk-day")).toBeVisible();
   await page.waitForTimeout(500); // the day's slide-in animation has settled
   const f = await finger(page, "[data-testid=bk-day]", 200);
   const spinner = page.locator("[data-screen=bookings] .bars-spinner");
   await expect(spinner).toBeVisible();
   const box = (await spinner.boundingBox())!;
-  const plus = (await page.locator(".bk-hour-add span").first().boundingBox())!;
+  const hour = page.locator(".bk-hour-add").first();
+  await expect(hour).toBeVisible();
+  const plus = (await hour.locator("span").boundingBox())!; // the glyph is hidden (opacity 0) but still laid out
   expect(Math.abs(box.x + box.width / 2 - (plus.x + plus.width / 2))).toBeLessThan(2);
   const fill = await spinner.locator("rect").first().evaluate((el) => getComputedStyle(el).fill);
   const purple = await page.evaluate(() => {
