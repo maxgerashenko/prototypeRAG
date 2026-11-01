@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from app.actions.booking import rules as R
 from app.actions.booking.internal import _load_rules
+from app.actions.booking.sessions import sessions_in_range
 from app.db import tenant_session
 from app.db.models import Booking, Business
 
@@ -74,7 +75,7 @@ def list_bookings(
         rows = session.scalars(
             select(Booking).where(
                 Booking.business_id == business_id, Booking.status == "confirmed",
-                Booking.starts_at >= lo, Booking.starts_at < hi,
+                Booking.session_id.is_(None), Booking.starts_at >= lo, Booking.starts_at < hi,
             ).order_by(Booking.starts_at)
         ).all()
         out = []
@@ -89,4 +90,5 @@ def list_bookings(
                 "name": b.name, "service": b.service, "party_size": b.party_size,
                 "phone": b.phone, "notes": b.notes, "by_assistant": b.conversation_id is not None,
             })
-    return {"timezone": zone.key, "hours": open_hours(rules), "bookings": out}
+        sessions = sessions_in_range(session, business_id, lo, hi, zone)
+    return {"timezone": zone.key, "hours": open_hours(rules), "bookings": out, "sessions": sessions}

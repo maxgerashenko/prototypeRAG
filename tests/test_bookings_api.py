@@ -116,3 +116,35 @@ def test_range_and_isolation(client, biz):
     finally:
         with tenant_session(other) as s:
             s.execute(delete(Business).where(Business.id == other))
+
+
+def test_get_lists_sessions_and_hides_attendee_rows(client, biz):
+    from app.db.models import GroupSession
+    conv = uuid.uuid4()
+    with tenant_session(biz) as s:
+        s.add(Conversation(id=conv, business_id=biz, channel="voice"))
+        sess = GroupSession(business_id=biz, starts_at=utc(2026, 11, 5, 15, 0), ends_at=utc(2026, 11, 5, 16, 0),
+                            name="Yoga", max_attendees=8)
+        gone = GroupSession(business_id=biz, starts_at=utc(2026, 11, 5, 17, 0), ends_at=utc(2026, 11, 5, 18, 0),
+                            name="Cancelled", max_attendees=8, status="cancelled")
+        s.add_all([sess, gone])
+        s.flush()
+        for name, phone, c, status in [("Ann", "+1555", conv, "confirmed"), ("Bob", None, None, "confirmed"),
+                                       ("Old", "+1666", None, "cancelled")]:
+            s.add(Booking(business_id=biz, session_id=sess.id, type="session", starts_at=sess.starts_at,
+                          ends_at=sess.ends_at, name=name, phone=phone, conversation_id=c, status=status))
+        sid = str(sess.id)
+    _book(biz, utc(2026, 11, 5, 19, 0), name="Solo")
+    body = client.get(f"/businesses/{biz}/bookings", params={"start": "2026-11-05", "end": "2026-11-05"}).json()
+    assert [b["name"] for b in body["bookings"]] == ["Solo"]
+    assert len(body["sessions"]) == 1
+    item = body["sessions"][0]
+    assert (item["id"], item["date"], item["start_min"], item["end_min"], item["name"],
+            item["max_attendees"], item["booked"]) == (sid, "2026-11-05", 10 * 60, 11 * 60, "Yoga", 8, 2)
+    assert [(a["name"], a["phone"], a["by_assistant"]) for a in item["attendees"]] == [
+        ("Ann", "+1555", True), ("Bob", None, False)]
+    assert all(set(a) == {"id", "name", "phone", "by_assistant", "conversation_id"} for a in item["attendees"])
+    # the id of the booking conversation comes through for the assistant's booking, null for a manual one
+    assert [a["conversation_id"] for a in item["attendees"]] == [str(conv), None]
+    other_day = client.get(f"/businesses/{biz}/bookings", params={"start": "2026-11-06", "end": "2026-11-06"}).json()
+    assert other_day["sessions"] == []
