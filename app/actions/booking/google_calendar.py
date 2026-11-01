@@ -1,24 +1,29 @@
 """Google Calendar booking backend (DEC-48, plan/04-actions.md).
 
 Same rules as the internal backend (`rules.py`: hours, lead time, party size, capacity),
-plus Google's free/busy: the owner's own calendar entries block slots too.
+but busy time comes from the calendar mirror (`mirror.py`, #165), not `freeBusy`.
 
-- availability: rules + the day's confirmed `bookings` rows + `freeBusy` of the calendar.
-- create: under the per-business advisory lock it re-runs the rules, asks `freeBusy`
-  again, and only then calls `events.insert`; the `bookings` row (the double-booking lock,
-  Google has no transaction) is written with the event id in `external_ref`. If the row
-  can't be written the event is deleted again; if Google fails nothing is booked.
+- availability: one incremental sync, then rules + every opaque event of the shared
+  calendar (any business, hand-typed ones too) + this business's confirmed `bookings` rows
+  whose event the mirror doesn't show (yet). Events are counted one by one, so capacity > 1
+  works (`freeBusy` merged overlapping events).
+- create: ONE advisory lock per calendar (`hashtext(calendar_id)`), not per business: in the
+  demo all businesses share one calendar (Max, 2026-11-01), so all writers queue up. Inside
+  it: forced sync, rules re-check, `events.insert` with our own event id derived from the
+  booking id (base32hex) -- a retry after a timeout gets 409 (= already there), never a
+  duplicate -- then the `bookings` row with the event id in `external_ref`. If the row can't
+  be written the event is deleted again; if Google fails nothing is booked.
 - cancel: deletes the event found by `external_ref`, then marks the row cancelled. If Google
   can't delete it the booking stays confirmed (a stale event would keep blocking the slot).
 
-Capacity: `freeBusy` merges overlapping events into one busy block, so it can't be counted.
-With capacity 1 any busy block blocks the slot; with capacity > 1 only the `bookings` rows
-are counted (calendar entries by the owner are then not seen). Pilot limitation.
-
-The event carries name, phone, service and notes in the description, and `business_id`,
-`conversation_id` and `booking_id` as private extended properties. Nobody is invited.
+Event: summary "Name - service"; description with the name, last 4 digits of the phone, the
+booking reference and a link to the conversation (`APP_BASE_URL/web/#conversation=<id>`);
+`business_id`, `booking_id` and `conversation_id` as private extended properties. Nobody is
+invited (a service account can't add attendees on a Gmail calendar). The caller is the
+conversation; the caller-ID phone is saved on the booking but not required.
 """
 
+import base64
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -26,10 +31,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import Text, cast, select, text
 
 from app.actions.booking import rules as R
-from app.actions.booking.google_client import CalendarClient, CalendarError
+from app.actions.booking.google_client import CalendarClient, CalendarError, EventExists
+from app.actions.booking.mirror import CalendarMirror, DbMirror
 from app.actions.booking.internal import (
-    MIN_REF, REF_LEN, Availability, BookingRequest, BookingResult, _check, _day_bookings, _load_rules,
+    MIN_REF, REF_LEN, Availability, BookingRequest, BookingResult, _check, _load_rules,
 )
+from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Booking, Business, BusinessProfile
 
@@ -45,12 +52,23 @@ def calendar_id_for(business_id: uuid.UUID, default: str = "") -> str:
     return str(settings.get("google_calendar_id") or default).strip()
 
 
+def event_id_for(booking_id: uuid.UUID) -> str:
+    """Our own Google event id: the booking id in base32hex (26 chars of 0-9a-v, which is
+    what Google allows). A retried insert for the same booking gets 409, not a second event."""
+    return base64.b32hexencode(booking_id.bytes).decode().rstrip("=").lower()
+
+
+def _conversation_link(conversation_id: uuid.UUID) -> str:
+    return f"{get_settings().app_base_url.rstrip('/')}/web/#conversation={conversation_id}"
+
+
 def _event_body(booking_id: uuid.UUID, business_id: uuid.UUID, request: BookingRequest,
                 start: datetime, end: datetime, tz: str, ref: str) -> dict:
     what = request.service or (f"table for {request.party_size}" if request.party_size else "booking")
     lines = [f"Name: {request.name.strip()}"]
-    if request.phone:
-        lines.append(f"Phone: {request.phone}")
+    digits = "".join(c for c in (request.phone or "") if c.isdigit())
+    if digits:
+        lines.append(f"Phone: ...{digits[-4:]}")  # the full number stays in our DB
     if request.service:
         lines.append(f"Service: {request.service}")
     if request.party_size:
@@ -61,7 +79,9 @@ def _event_body(booking_id: uuid.UUID, business_id: uuid.UUID, request: BookingR
     private = {"business_id": str(business_id), "booking_id": str(booking_id)}
     if request.conversation_id:
         private["conversation_id"] = str(request.conversation_id)
+        lines.append(f"Conversation: {_conversation_link(request.conversation_id)}")
     return {
+        "id": event_id_for(booking_id),
         "summary": f"{request.name.strip()} - {what}",
         "description": "\n".join(lines),
         "start": {"dateTime": start.isoformat(), "timeZone": tz},
@@ -72,21 +92,28 @@ def _event_body(booking_id: uuid.UUID, business_id: uuid.UUID, request: BookingR
 
 
 class GoogleCalendarBackend:
-    def __init__(self, client: CalendarClient, default_calendar_id: str = ""):
+    def __init__(self, client: CalendarClient, default_calendar_id: str = "", mirror: CalendarMirror | None = None):
         self.client = client
         self.default_calendar_id = default_calendar_id
+        self.mirror = mirror or DbMirror(client)
 
     def _calendar(self, business_id: uuid.UUID) -> str:
         return calendar_id_for(business_id, self.default_calendar_id)
 
-    def _busy(self, calendar_id: str, start: datetime) -> list[tuple[datetime, datetime]]:
-        """Busy blocks around the local day of `start` (same +-1 day margin as the rows)."""
-        return self.client.busy(calendar_id, R.to_utc(start - timedelta(days=1)), R.to_utc(start + timedelta(days=2)))
-
-    @staticmethod
-    def _existing(rules: R.Rules, rows, busy):
-        # capacity > 1: freeBusy blocks are merged, so they can't be counted (module docstring)
-        return rows + busy if rules.capacity == 1 else rows
+    def _existing(self, session, business_id: uuid.UUID, rules: R.Rules, calendar_id: str, start: datetime):
+        """Busy intervals around the local day of `start` (+-1 day margin for long ones): the
+        mirror's events, plus this business's confirmed rows the mirror doesn't show."""
+        lo, hi = R.to_utc(start - timedelta(days=1)), R.to_utc(start + timedelta(days=2))
+        events = self.mirror.busy_events(calendar_id, lo, hi)
+        rows = session.execute(
+            select(Booking.starts_at, Booking.ends_at, Booking.external_ref).where(
+                Booking.business_id == business_id, Booking.status == "confirmed",
+                Booking.starts_at < hi, Booking.ends_at > lo,
+            )
+        ).all()
+        seen = {e.event_id for e in events}
+        unseen = [(a, b) for a, b, ref in rows if ref not in seen]  # just written, before the next sync shows it
+        return [(e.start, e.end) for e in events] + unseen
 
     def availability(self, business_id: uuid.UUID, request: BookingRequest, now: datetime | None = None) -> Availability:
         now = now or datetime.now(timezone.utc)
@@ -94,12 +121,12 @@ class GoogleCalendarBackend:
         if not calendar_id:
             return Availability(False, UNAVAILABLE)
         try:
+            self.mirror.sync(calendar_id)
             with tenant_session(business_id) as session:
                 rules = _load_rules(session, business_id)
                 start = R.local_start(rules, request.day, request.at)
-                rows = _day_bookings(session, business_id, start)
-            busy = self._busy(calendar_id, start)
-            _, _, reason, alts = _check(rules, request, self._existing(rules, rows, busy), now)
+                existing = self._existing(session, business_id, rules, calendar_id, start)
+            _, _, reason, alts = _check(rules, request, existing, now)
         except ValueError as exc:
             return Availability(False, str(exc))
         except CalendarError as exc:
@@ -117,22 +144,24 @@ class GoogleCalendarBackend:
         event_id: str | None = None
         try:
             with tenant_session(business_id) as session:
-                session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:b, 0))"), {"b": str(business_id)})
+                # one lock per CALENDAR: every business on it queues here; released at commit/rollback
+                session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:c, 0))"), {"c": calendar_id})
                 rules = _load_rules(session, business_id)
                 try:
                     start = R.local_start(rules, request.day, request.at)
                 except ValueError as exc:
                     return BookingResult(False, str(exc))
-                rows = _day_bookings(session, business_id, start)
-                # the re-check right before events.insert (DEC-48): fresh free/busy, inside the lock
-                start, end, reason, alts = _check(rules, request, self._existing(rules, rows, self._busy(calendar_id, start)), now)
+                # forced sync + re-check right before events.insert (DEC-48), inside the lock
+                self.mirror.sync(calendar_id)
+                existing = self._existing(session, business_id, rules, calendar_id, start)
+                start, end, reason, alts = _check(rules, request, existing, now)
                 if reason:
                     return BookingResult(False, reason, alternatives=alts)
                 booking_id = uuid.uuid4()
                 ref = str(booking_id)[:REF_LEN].upper()
-                event_id = self.client.insert_event(
-                    calendar_id, _event_body(booking_id, business_id, request, start, end, rules.timezone, ref)
-                )
+                body = _event_body(booking_id, business_id, request, start, end, rules.timezone, ref)
+                event_id = body["id"]  # set first: if the insert times out, the event may still exist
+                self._insert(calendar_id, body)
                 session.add(Booking(
                     id=booking_id, business_id=business_id, conversation_id=request.conversation_id,
                     type="appointment" if request.service else "table",
@@ -147,12 +176,28 @@ class GoogleCalendarBackend:
                 return BookingResult(True, "Booked.", booking_id, ref, name, start.strftime("%a %d %b, %H:%M"))
         except CalendarError as exc:
             log.warning("google calendar create failed: %s", exc)
+            if event_id:  # the insert failed twice, but a timed-out call may have gone through
+                self._delete_quietly(calendar_id, event_id)
             return BookingResult(False, UNAVAILABLE)
         except Exception:
             # the row could not be written (rolled back): don't leave an orphan event blocking the slot
             if event_id:
                 self._delete_quietly(calendar_id, event_id)
             raise
+
+    def _insert(self, calendar_id: str, body: dict) -> None:
+        """events.insert, once more after a failure. The event id is ours, so if the first call
+        reached Google after all, the retry gets 409 (the client reads that as success)."""
+        try:
+            self.client.insert_event(calendar_id, body)
+        except EventExists:
+            pass  # an earlier attempt got through
+        except CalendarError as exc:
+            log.warning("events.insert failed, retrying once: %s", exc)
+            try:
+                self.client.insert_event(calendar_id, body)
+            except EventExists:
+                pass
 
     def _delete_quietly(self, calendar_id: str, event_id: str) -> None:
         try:

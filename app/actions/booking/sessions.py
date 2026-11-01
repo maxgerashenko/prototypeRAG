@@ -8,14 +8,17 @@ overlapping the hour. `create_session` takes the same per-business advisory lock
 after the transaction committed; a failing send never undoes the change."""
 
 import logging
+import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select, text
+from sqlalchemy import Text, cast, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.actions import sms
+from app.actions.booking import session_events as G
+from app.actions.booking.google_client import CalendarError
 from app.db import tenant_session
 from app.db.models import Booking, Business, BusinessProfile, GroupSession
 
@@ -111,12 +114,12 @@ def _confirmed(session, business_id: uuid.UUID, sids: list[uuid.UUID]) -> list[B
 def _item(s: GroupSession, attendees: list[Booking], zone: ZoneInfo) -> dict:
     a = s.starts_at.astimezone(zone)
     start_min = a.hour * 60 + a.minute
-    # a session is always exactly 1 hour; the wall clock would be wrong on DST-change days
-    end_min = min(start_min + 60, 24 * 60)
+    # length, not the wall clock (wrong on DST-change days); imported events may be longer than an hour
+    end_min = min(start_min + int((s.ends_at - s.starts_at).total_seconds() // 60), 24 * 60)
     return {
         "id": str(s.id), "date": a.date().isoformat(),
         "start_min": start_min, "end_min": end_min,
-        "name": s.name, "max_attendees": s.max_attendees, "private": s.private,
+        "name": s.name, "max_attendees": s.max_attendees, "private": s.private, "source": s.source,
         "booked": len(attendees),
         "attendees": [
             {"id": str(x.id), "name": x.name, "phone": x.phone, "by_assistant": x.conversation_id is not None,
@@ -176,14 +179,21 @@ def create_session(
         ).limit(1)):
             raise SessionError(409, "A booking already overlaps that hour")
         row = GroupSession(
-            business_id=business_id, starts_at=starts, ends_at=ends, name=name, max_attendees=max_attendees,
-            private=private,
+            id=uuid.uuid4(), business_id=business_id, starts_at=starts, ends_at=ends, name=name,
+            max_attendees=max_attendees, private=private,
         )
         session.add(row)
         try:
             session.flush()
         except IntegrityError:
             raise SessionError(409, "There is already a session at that hour") from None
+        client = G.get_client()
+        if client is not None:  # a Google failure rolls the session back: it must not exist only here
+            try:
+                row.external_ref = G.create_event(client, G.calendar_for(business_id), row, business.timezone)
+            except CalendarError as exc:
+                log.warning("could not create the calendar event: %s", exc)
+                raise SessionError(502, "The calendar can't be reached right now") from None
         return _item(row, [], zone)
 
 
@@ -211,7 +221,11 @@ def update_session(
             row.private = bool(private)
         row.updated_at = now
         session.flush()
-        return _item(row, attendees, _zone(business.timezone))
+        item = _item(row, attendees, _zone(business.timezone))
+        linked = row.external_ref is not None
+    if linked:
+        G.push_title(business_id, sid)
+    return item
 
 
 def _when(s: GroupSession, zone: ZoneInfo) -> str:
@@ -244,6 +258,13 @@ def cancel_session(business_id: uuid.UUID, sid: uuid.UUID, now: datetime | None 
         for b in attendees:
             b.status, b.cancelled_at = "cancelled", now
         row.status, row.cancelled_at, row.updated_at = "cancelled", now, now
+        client = G.get_client()
+        if client is not None and row.external_ref:
+            try:
+                G.delete_event(client, G.calendar_for(business_id), row.external_ref)
+            except CalendarError as exc:
+                log.warning("could not delete the calendar event: %s", exc)
+                raise SessionError(502, "The calendar can't be reached right now") from None
         callers = [(b.phone, b.name) for b in attendees]
         s_name, when = row.name, _when(row, _zone(business.timezone))
         who = _business_label(session, business_id, business)
@@ -274,5 +295,106 @@ def remove_attendee(
         caller = (booking.phone, booking.name)
         s_name, when = row.name, _when(row, zone)
         who = _business_label(session, business_id, business)
+        linked = row.external_ref is not None
+    if linked:
+        G.push_title(business_id, sid)
     texted, _ = _text_callers([caller], s_name, when, who)
     return item, texted == 1
+
+
+# --- calls: list_sessions / join_session -----------------------------------------------------------
+# Demo rule (Max, 2026-11-01): every session is visible and joinable for every business; business_id
+# is stored (the attendee row takes the session's) but nothing filters on it yet.
+
+
+def list_open(
+    business_id: uuid.UUID, day: str | None = None, now: datetime | None = None, limit: int = 10
+) -> list[dict]:
+    """Public sessions that have not ended, soonest first: {ref, name, when, booked, max_attendees, full}.
+    `day` (business-local YYYY-MM-DD) narrows to that day; without it the next 30 days."""
+    now = now or datetime.now(timezone.utc)
+    with tenant_session(business_id) as session:
+        zone = _zone(_business(session, business_id).timezone)
+        lo, hi = now, now + timedelta(days=30)
+        if day:
+            d = local_hour_start(day, 0, zone.key)
+            lo, hi = max(now, d.astimezone(timezone.utc)), (d + timedelta(days=1)).astimezone(timezone.utc)
+        rows = session.scalars(
+            select(GroupSession).where(
+                GroupSession.status == "active", GroupSession.private.is_(False),
+                GroupSession.ends_at > lo, GroupSession.starts_at < hi,
+            ).order_by(GroupSession.starts_at).limit(limit)
+        ).all()
+        out = []
+        for r in rows:
+            booked = G._booked(session, r.business_id, r.id)
+            a, b = r.starts_at.astimezone(zone), r.ends_at.astimezone(zone)
+            out.append({
+                "ref": session_ref(r.id), "name": r.name, "booked": booked, "max_attendees": r.max_attendees,
+                "full": booked >= r.max_attendees,
+                "when": f"{a:%a %d %b}, {a:%H:%M}-{b:%H:%M}",
+            })
+        return out
+
+
+def session_ref(sid: uuid.UUID) -> str:
+    return str(sid)[:8].upper()
+
+
+def join_session(
+    business_id: uuid.UUID, ref: str, conversation_id: uuid.UUID | None, name: str, phone: str | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Put a caller (the conversation) into a session until it is full. -> {ref, name, when, booked,
+    max_attendees, booking_ref}. SessionError carries the reason (full, ended, private, unknown...)."""
+    now = now or datetime.now(timezone.utc)
+    ref = (ref or "").strip().lower()
+    if len(ref) < 6 or not re.fullmatch(r"[0-9a-f-]+", ref):
+        raise SessionError(422, "a session reference is needed")
+    try:
+        G.sync_before_booking(business_id)  # an event just deleted or moved in Google must not be booked
+    except CalendarError as exc:
+        log.warning("calendar sync before join failed: %s", exc)
+        raise SessionError(503, "The calendar can't be reached right now") from None
+    with tenant_session(business_id) as session:
+        found = session.scalars(
+            select(GroupSession).where(
+                GroupSession.status == "active", GroupSession.ends_at > now, cast(GroupSession.id, Text).startswith(ref),
+            ).limit(2)
+        ).all()
+        if len(found) != 1:
+            raise SessionError(404, "session not found")
+        owner, sid = found[0].business_id, found[0].id
+    with tenant_session(owner) as session:
+        # one lock per calendar (all writers to it queue up); without Google, per business as for bookings
+        key = (G.calendar_for(owner) if G.get_client() else "") or str(owner)
+        session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:b, 0))"), {"b": key})
+        row = _get_session(session, owner, sid, lock=True)
+        _check_not_ended(row, now)
+        if row.private:
+            raise SessionError(403, "This session is private")
+        if conversation_id is not None and session.scalar(select(Booking.id).where(
+                Booking.business_id == owner, Booking.session_id == sid, Booking.status == "confirmed",
+                Booking.notes == f"conversation {conversation_id}")):
+            raise SessionError(409, "This caller already has a seat in that session")
+        booked = G._booked(session, owner, sid)
+        if booked >= row.max_attendees:
+            raise SessionError(409, "That session is full")
+        # the conversation FK needs the same business; across businesses (demo) the id goes into the notes
+        linked = conversation_id if owner == business_id else None
+        booking = Booking(
+            business_id=owner, session_id=sid, type="session", starts_at=row.starts_at, ends_at=row.ends_at,
+            name=(name or "").strip() or "Caller", phone=phone, conversation_id=linked,
+            notes=f"conversation {conversation_id}" if conversation_id else None,
+        )
+        session.add(booking)
+        session.flush()
+        zone = _zone(_business(session, owner).timezone)
+        result = {
+            "ref": session_ref(sid), "name": row.name, "booked": booked + 1, "max_attendees": row.max_attendees,
+            "when": f"{row.starts_at.astimezone(zone):%a %d %b, %H:%M}", "booking_ref": str(booking.id)[:8].upper(),
+        }
+        linked_event = row.external_ref is not None
+    if linked_event:  # after the commit; a failed patch keeps the seat, the next sync retries it
+        G.push_title(owner, sid)
+    return result

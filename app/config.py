@@ -74,8 +74,13 @@ class Settings(BaseSettings):
     booking_backend: str = "internal"
     google_calendar_id: str = ""
     google_calendar_credentials_file: str = ""
+    # Where the app is reached; calendar events link back to the conversation with it.
+    app_base_url: str = "http://localhost:8000"
     # Calendar sync (#165): how often Google's events are mirrored into `calendar_events`.
     calendar_sync_interval_seconds: int = 60
+    # Business that events typed in Google are imported under as sessions (#149). Empty: the oldest
+    # business using the calendar. Demo rule: every session is open to every business anyway.
+    google_calendar_owner_business_id: str = ""
 
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 
