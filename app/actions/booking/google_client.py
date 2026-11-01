@@ -27,7 +27,8 @@ class CalendarClient(Protocol):
         ...
 
     def insert_event(self, calendar_id: str, body: dict) -> str:
-        """Create an event; returns its id."""
+        """Create an event; returns its id. A body with its own `id` is idempotent: if that
+        event already exists (a retry after a timeout) Google answers 409 and the id is returned."""
         ...
 
     def delete_event(self, calendar_id: str, event_id: str) -> None:
@@ -83,6 +84,8 @@ class GoogleCalendarClient:
 
     def insert_event(self, calendar_id, body):
         resp = self._call("POST", f"{API}/calendars/{_quote(calendar_id)}/events", json=body)
+        if resp.status_code == 409 and body.get("id"):
+            return body["id"]  # our earlier attempt got through: not a duplicate
         if resp.status_code not in (200, 201):
             raise CalendarError(f"events.insert {resp.status_code}: {resp.text[:200]}")
         return resp.json()["id"]
