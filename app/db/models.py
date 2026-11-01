@@ -465,13 +465,48 @@ class BookingRule(Base):
     updated_at: Mapped[datetime] = _now()
 
 
+class GroupSession(Base):
+    """A group session the owner offers (e.g. a class): one fixed hour, a name and a
+    capacity. Attendees are `bookings` rows with `session_id` set. Cancelling is soft
+    (`status='cancelled'`). plan/feature-bookings-sessions.md."""
+
+    __tablename__ = "sessions"
+    __table_args__ = (
+        CheckConstraint("ends_at = starts_at + interval '1 hour'", name="one_hour"),
+        CheckConstraint("char_length(btrim(name)) BETWEEN 1 AND 60", name="name_length"),
+        CheckConstraint("max_attendees BETWEEN 1 AND 30", name="max_attendees"),
+        CheckConstraint("status IN ('active', 'cancelled')", name="status"),
+        UniqueConstraint("business_id", "id"),
+        Index("ix_sessions_business_id_starts_at", "business_id", "starts_at"),
+        Index(
+            "uq_sessions_business_id_starts_at_active",
+            "business_id",
+            "starts_at",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    business_id: Mapped[uuid.UUID] = _business_id()
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    max_attendees: Mapped[int] = mapped_column(Integer, nullable=False)
+    private: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))  # closed to the public: only added by hand
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    created_at: Mapped[datetime] = _now()
+    updated_at: Mapped[datetime] = _now()
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Booking(Base):
     """A booking or appointment in the internal backend. Times are UTC; `ends_at` is
     starts_at + the service's duration at booking time."""
 
     __tablename__ = "bookings"
     __table_args__ = (
-        CheckConstraint("type IN ('table', 'appointment')", name="type"),
+        CheckConstraint("type IN ('table', 'appointment', 'session')", name="type"),
         CheckConstraint("status IN ('confirmed', 'cancelled')", name="status"),
         CheckConstraint("ends_at > starts_at", name="times"),
         UniqueConstraint("business_id", "id"),
@@ -480,12 +515,18 @@ class Booking(Base):
             ["conversations.business_id", "conversations.id"],
             ondelete="SET NULL (conversation_id)",
         ),
+        ForeignKeyConstraint(
+            ["business_id", "session_id"],
+            ["sessions.business_id", "sessions.id"],
+        ),
         Index("ix_bookings_business_id_starts_at", "business_id", "starts_at"),
+        Index("ix_bookings_business_id_session_id", "business_id", "session_id"),
     )
 
     id: Mapped[uuid.UUID] = _id()
     business_id: Mapped[uuid.UUID] = _business_id()
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     type: Mapped[str] = mapped_column(Text, nullable=False)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
