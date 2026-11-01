@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from app.actions.booking import calendar_sync
 from app.api.bookings import router as bookings_router
 from app.api.business_settings import router as business_settings_router
 from app.api.businesses import router as businesses_router
@@ -46,7 +47,11 @@ async def lifespan(app: FastAPI):
     google_auth.warm_up()  # missing Google credentials show at startup, not mid-call (V7)
     # T4: warm the TTS connection in the background -- startup isn't held up by it
     threading.Thread(target=tts.warm_up, daemon=True).start()
+    stop_sync = threading.Event()
+    if get_settings().booking_backend == "google_calendar":  # #165: mirror Google's events
+        threading.Thread(target=calendar_sync.run_sync_loop, args=(stop_sync,), daemon=True).start()
     yield
+    stop_sync.set()
 
 
 app = FastAPI(title="prototypeRAG", lifespan=lifespan)

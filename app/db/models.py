@@ -500,6 +500,48 @@ class GroupSession(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CalendarEvent(Base):
+    """App copy of one Google Calendar event (#165). Google owns time and existence; this
+    row is rewritten by the sync (actions/booking/calendar_sync.py). `business_id` comes from
+    the event's private extended property; the demo treats every event as every business's."""
+
+    __tablename__ = "calendar_events"
+    __table_args__ = (
+        UniqueConstraint("calendar_id", "google_event_id"),
+        CheckConstraint("status IN ('confirmed', 'tentative', 'cancelled')", name="status"),
+        CheckConstraint("transparency IN ('opaque', 'transparent')", name="transparency"),
+        CheckConstraint("ends_at >= starts_at", name="times"),
+        Index("ix_calendar_events_calendar_id_starts_at", "calendar_id", "starts_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    calendar_id: Mapped[str] = mapped_column(Text, nullable=False)
+    google_event_id: Mapped[str] = mapped_column(Text, nullable=False)
+    etag: Mapped[str | None] = mapped_column(Text)
+    business_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="SET NULL")
+    )
+    summary: Mapped[str | None] = mapped_column(Text)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="confirmed")
+    transparency: Mapped[str] = mapped_column(Text, nullable=False, server_default="opaque")
+    google_updated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    synced_at: Mapped[datetime] = _now()
+
+
+class CalendarSyncState(Base):
+    """Incremental-sync cursor per calendar (#165)."""
+
+    __tablename__ = "calendar_sync_state"
+
+    calendar_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    sync_token: Mapped[str | None] = mapped_column(Text)
+    last_full_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
 class Booking(Base):
     """A booking or appointment in the internal backend. Times are UTC; `ends_at` is
     starts_at + the service's duration at booking time."""
