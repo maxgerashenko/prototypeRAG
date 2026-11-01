@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     google_calendar_credentials_file: str = ""
     # Where the app is reached; calendar events link back to the conversation with it.
     app_base_url: str = "http://localhost:8000"
+    # Calendar sync (#165): how often Google's events are mirrored into `calendar_events`.
+    calendar_sync_interval_seconds: int = 60
 
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 

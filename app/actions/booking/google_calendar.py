@@ -31,8 +31,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import Text, cast, select, text
 
 from app.actions.booking import rules as R
-from app.actions.booking.google_client import CalendarClient, CalendarError
-from app.actions.booking.mirror import CalendarMirror, FreeBusyMirror
+from app.actions.booking.google_client import CalendarClient, CalendarError, EventExists
+from app.actions.booking.mirror import CalendarMirror, DbMirror
 from app.actions.booking.internal import (
     MIN_REF, REF_LEN, Availability, BookingRequest, BookingResult, _check, _load_rules,
 )
@@ -95,7 +95,7 @@ class GoogleCalendarBackend:
     def __init__(self, client: CalendarClient, default_calendar_id: str = "", mirror: CalendarMirror | None = None):
         self.client = client
         self.default_calendar_id = default_calendar_id
-        self.mirror = mirror or FreeBusyMirror(client)
+        self.mirror = mirror or DbMirror(client)
 
     def _calendar(self, business_id: uuid.UUID) -> str:
         return calendar_id_for(business_id, self.default_calendar_id)
@@ -111,13 +111,8 @@ class GoogleCalendarBackend:
                 Booking.starts_at < hi, Booking.ends_at > lo,
             )
         ).all()
-        if not self.mirror.exact:
-            # merged free/busy blocks can't be counted: capacity 1 -> any block blocks the slot;
-            # capacity > 1 -> only our rows count (the owner's own entries aren't seen)
-            blocks = [(e.start, e.end) for e in events] if rules.capacity == 1 else []
-            return [(a, b) for a, b, _ in rows] + blocks
         seen = {e.event_id for e in events}
-        unseen = [(a, b) for a, b, ref in rows if ref not in seen]  # just written, or deleted in Google
+        unseen = [(a, b) for a, b, ref in rows if ref not in seen]  # just written, before the next sync shows it
         return [(e.start, e.end) for e in events] + unseen
 
     def availability(self, business_id: uuid.UUID, request: BookingRequest, now: datetime | None = None) -> Availability:
@@ -195,9 +190,14 @@ class GoogleCalendarBackend:
         reached Google after all, the retry gets 409 (the client reads that as success)."""
         try:
             self.client.insert_event(calendar_id, body)
+        except EventExists:
+            pass  # an earlier attempt got through
         except CalendarError as exc:
             log.warning("events.insert failed, retrying once: %s", exc)
-            self.client.insert_event(calendar_id, body)
+            try:
+                self.client.insert_event(calendar_id, body)
+            except EventExists:
+                pass
 
     def _delete_quietly(self, calendar_id: str, event_id: str) -> None:
         try:
