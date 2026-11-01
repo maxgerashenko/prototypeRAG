@@ -14,6 +14,7 @@ whose `settings["enabled_tools"]` lists them (#151). `app/voice/tools.py` import
 
 import re
 
+from app.actions.booking import sessions as sessions_
 from app.actions.booking.internal import BookingBackend, BookingRequest, InternalBackend
 from app.actions.registry import ActionContext, Tool, register
 from app.config import get_settings
@@ -117,6 +118,63 @@ def cancel_booking(ctx: ActionContext, args: dict) -> str:
     return backend.cancel(ctx.business_id, ref, phone)
 
 
+def list_sessions(ctx: ActionContext, args: dict) -> str:
+    day = args.get("date")
+    try:
+        rows = sessions_.list_open(ctx.business_id, day.strip() if isinstance(day, str) and day.strip() else None)
+    except sessions_.SessionError as exc:
+        return f"Error: {exc.message}."
+    if not rows:
+        return "No group sessions are open for booking" + (f" on {day}." if day else " in the next 30 days.")
+    lines = [
+        f"{r['ref']} · {r['name']} · {r['when']} · "
+        + ("FULL" if r["full"] else f"{r['max_attendees'] - r['booked']} of {r['max_attendees']} seats left")
+        for r in rows
+    ]
+    return "Group sessions (read the name and time to the caller, not the code):\n" + "\n".join(lines)
+
+
+def join_session(ctx: ActionContext, args: dict) -> str:
+    ref = args.get("session")
+    if not isinstance(ref, str) or not ref.strip():
+        return "Error: the session code from list_sessions is needed."
+    name = args.get("name") if isinstance(args.get("name"), str) else ""
+    if not name.strip():
+        return "Error: a name for the booking is needed."
+    try:
+        r = sessions_.join_session(ctx.business_id, ref, ctx.conversation_id, name, _phone(ctx, args))
+    except sessions_.SessionError as exc:
+        return f"Error: not booked. {exc.message}."
+    return (
+        f"Booked {name.strip()} into {r['name']} on {r['when']} ({r['booked']} of {r['max_attendees']} seats taken). "
+        f"Reference {r['booking_ref']}. Read the reference to the caller; no confirmation text message is sent."
+    )
+
+
+register(Tool(
+    name="list_sessions",
+    description="List open group sessions (classes, shared sessions) with their time and seats left, before offering one to the caller.",
+    parameters={"date": _DATE},
+    required=(),
+    handler=list_sessions,
+    optional=True,
+))
+register(Tool(
+    name="join_session",
+    description=(
+        "Book the caller into a group session from list_sessions until it is full. "
+        "Read the session, time and name back and get a yes first."
+    ),
+    parameters={
+        "session": {"type": "string", "description": "Session code from list_sessions, e.g. 3F9A1C2B."},
+        "name": {"type": "string", "description": "Name the seat is under."},
+        "phone": {"type": "string", "description": "Only if the caller's number is not known: full international number."},
+    },
+    required=("session", "name"),
+    side_effect=True,
+    handler=join_session,
+    optional=True,
+))
 register(Tool(
     name="check_availability",
     description="Check whether a table or appointment is free at a date and time, before offering it to the caller.",

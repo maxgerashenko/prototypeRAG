@@ -472,18 +472,19 @@ class GroupSession(Base):
 
     __tablename__ = "sessions"
     __table_args__ = (
-        CheckConstraint("ends_at = starts_at + interval '1 hour'", name="one_hour"),
+        CheckConstraint("ends_at > starts_at", name="times"),
         CheckConstraint("char_length(btrim(name)) BETWEEN 1 AND 60", name="name_length"),
         CheckConstraint("max_attendees BETWEEN 1 AND 30", name="max_attendees"),
         CheckConstraint("status IN ('active', 'cancelled')", name="status"),
+        CheckConstraint("source IN ('app', 'google')", name="source"),
         UniqueConstraint("business_id", "id"),
         Index("ix_sessions_business_id_starts_at", "business_id", "starts_at"),
         Index(
-            "uq_sessions_business_id_starts_at_active",
+            "uq_sessions_business_id_external_ref",
             "business_id",
-            "starts_at",
+            "external_ref",
             unique=True,
-            postgresql_where=text("status = 'active'"),
+            postgresql_where=text("external_ref IS NOT NULL"),
         ),
     )
 
@@ -495,6 +496,8 @@ class GroupSession(Base):
     max_attendees: Mapped[int] = mapped_column(Integer, nullable=False)
     private: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))  # closed to the public: only added by hand
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    external_ref: Mapped[str | None] = mapped_column(Text)  # Google Calendar event id
+    source: Mapped[str] = mapped_column(Text, nullable=False, server_default="app")  # "app" | "google"
     created_at: Mapped[datetime] = _now()
     updated_at: Mapped[datetime] = _now()
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
