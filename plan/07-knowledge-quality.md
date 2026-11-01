@@ -184,6 +184,12 @@ the statement changes.
 
 - Same `fact_key` + same normalized value → one fact, one more `fact_sources` row,
   confidence up.
+- The key's subject ignores the business name and the fact's **own** location name
+  (`make_fact_key` / `rekey_facts`, 2026-11-01): "Bathhouse Williamsburg" and "Williamsburg"
+  phone are one fact; a business-wide "Flatiron phone" keeps "Flatiron". Different subjects
+  with the same value stay apart (Prenatal / Full-Body / Couples massage, all "From $154").
+  `settle_facts` re-keys and merges facts stored under older keys on every run. Retrieval also
+  never returns two chunks with the same text (two facts in the same words under different keys).
 - Same `fact_key`, **different value** →
   1. owner-confirmed fact always wins; the crawl value becomes `conflict` and is shown
      to the owner (dashboard, step 5 / stage 3 onboarding);
@@ -320,6 +326,42 @@ retired, `facts.py` NOT yet built)
   retrievable / 28 excluded** (blog/legal/careers/landing/site_chrome + 5 exact
   duplicates), **170 chunks** (8 location-tagged across the 4 locations, 162
   business-wide).
+
+### Re-crawl with the facts library, run 2026-11-01 (`google/gemma-4-12b`, same business)
+
+First full crawl since `facts.py` (the 2026-10 data had **0 facts**). Before → after, row
+counts for the business: `pages` 61 → 52 · `chunks` 170 → 444 (335 fact + 109 scraped) · `facts` 0 → 359 (335 active, 24 conflict) · `fact_sources` 0 → 380 ·
+`business_summaries` 0 → 1 · `locations` 4 · `business_profile` 1 (approx. — counts move with
+every re-crawl). Bookings, calendar and sessions are not touched by the crawler.
+
+| Run | Pass rate (19 graded) | Retrieval hit@k (13) | Avg tool result |
+|---|---|---|---|
+| Before (old data, no facts) | 15/19 (78.9 %) | 6/13 | 5206 chars |
+| After re-crawl, old eval file | 14/19 (73.7 %) | 5/13 | 787 chars |
+| After re-crawl + eval fix + fact dedup | **16/19 (84.2 %)** | **7/13** | 798 chars |
+
+- **Fixed:** "What time do you open?", "What are your hours on Sunday?" (V23 — hours now come from
+  the site-chrome facts), and two of three closing-time phrasings.
+- **Eval file was stale:** three closing-time questions expected "midnight"; the live footer says
+  "7 days a week 8am to 11:30pm" (the page's hidden `businessHours` JSON says 9am – 11:30pm —
+  the site disagrees with itself; the crawler uses the visible text). Changed to "11:30".
+- **Tool result ~6.5× smaller** (5206 → ~800 chars): fact chunks are one sentence each.
+- **Still failing:** "Till what time are you working?" (the 11:30 hours fact is not in the top 5
+  for this phrasing); Philadelphia phone (by design under DEC-49: the conversation is about the
+  default location, the prompt names other locations with their address only); the blog-history
+  question (#178).
+- **Duplicates:** before the dedup, the Williamsburg phone, email and address and the Day Pass
+  prices of two locations were each stored 2–3× under different subject wording, and "phone calls
+  allowed in the lounge" twice under two keys, filling the top-5 slots. The dedup (§5.4) merged 8
+  of 343 active facts.
+- **Fact step speed (OPEN-20):** sequential gemma took ~4 h 50 min for 32 of 45 pages (one page
+  can loop or be slow: no `max_tokens`, client timeout 600 s × 3 tries). Now 4 pages in parallel
+  (`FACTS_PARALLEL=4`, `lms load --parallel 4`), `FACT_MAX_TOKENS=4000`, timeout 900 s: the last
+  gemma batch took 4 min 46 s. At 8 parallel or a 300 s timeout, long location pages timed out:
+  `/flatiron` alone needs 105 s for 2170 tokens (~20 tok/s). gemma failed 3 pages on broken
+  JSON (bar menu and rooftop pool hit the token cap, `/atlantic-ave` invalid JSON); local
+  `qwen/qwen3.6-35b-a3b` with thinking did all 3 in 1 min 12 s, 60 facts, 0 rejected.
+- No PDFs on abathhouse.com (sitemap, 59 URLs), so MarkItDown (DEC-51) was not exercised by this crawl.
 
 ## 8. Code layout (planned)
 

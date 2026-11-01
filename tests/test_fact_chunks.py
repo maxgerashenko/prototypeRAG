@@ -104,7 +104,8 @@ def test_changed_statement_resets_embedding_and_demoted_fact_loses_its_chunk(bus
 
 def test_fact_outranks_an_equally_matching_page_chunk(business_id):
     with tenant_session(business_id) as s:
-        _scraped(s, business_id, "Sauna hours are varied across the week.")
+        # same words, so the same keyword rank; not the same text, which would be dropped
+        _scraped(s, business_id, "Sauna hours are varied across the week!")
         _fact(s, business_id, "Sauna hours are varied across the week.")
         sync_fact_chunks(s, business_id)
     with tenant_session(business_id) as s:
@@ -126,6 +127,18 @@ def test_page_chunk_repeating_a_returned_fact_is_dropped_others_stay(business_id
     assert texts[0] == "Bathhouse Day Pass starts at $39."
     assert "Day pass guests may also book a massage." in texts
     assert not any("Starts at $39" in t and t != texts[0] for t in texts)
+
+
+def test_same_text_under_two_fact_keys_is_returned_once(business_id):
+    # pilot: "phone calls allowed in the lounge" came out as two facts with different keys
+    with tenant_session(business_id) as s:
+        _fact(s, business_id, "Bathhouse allows phone calls in the lounge.")
+        _fact(s, business_id, "Bathhouse allows phone calls in the lounge.")
+        _fact(s, business_id, "Phone calls are not allowed at the pools.")
+        sync_fact_chunks(s, business_id)
+    with tenant_session(business_id) as s:
+        texts = [c.text for c in retrieve(s, business_id, "phone calls", top_n=3)]
+    assert sorted(texts) == ["Bathhouse allows phone calls in the lounge.", "Phone calls are not allowed at the pools."]
 
 
 def test_location_filter_keeps_business_wide_and_current_location_only(business_id):
