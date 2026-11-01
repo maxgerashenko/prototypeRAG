@@ -154,7 +154,8 @@ def _drop_fact_duplicates(
 ) -> list[uuid.UUID]:
     """DEC-47: a page chunk that contains the quote of a fact in the top_n adds nothing,
     so skip it and let the next candidate take its place. Page chunks that say anything
-    the facts don't stay as fallback."""
+    the facts don't stay as fallback. A chunk whose text repeats one already picked is
+    skipped too (two facts stated in the same words under different keys)."""
     fact_ids = [found[cid].fact_id for cid in ranked[:top_n] if found[cid].kind == "fact"]
     quotes = []
     if fact_ids:
@@ -164,11 +165,14 @@ def _drop_fact_duplicates(
         quotes = [q for q in (normalize_text(r) for r in rows) if q]
 
     picked = []
+    seen_texts: set[str] = set()
     for cid in ranked:
-        if found[cid].kind == "scraped" and quotes:
-            text = normalize_text(found[cid].text)
-            if any(q in text for q in quotes):
-                continue
+        text = normalize_text(found[cid].text)
+        if text in seen_texts:
+            continue
+        if found[cid].kind == "scraped" and quotes and any(q in text for q in quotes):
+            continue
+        seen_texts.add(text)
         picked.append(cid)
         if len(picked) == top_n:
             break

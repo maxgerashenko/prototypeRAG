@@ -17,7 +17,7 @@ from app.ingest.clean import clean_page
 from app.ingest.facts import (
     EXTRACTOR_VERSION, normalize_text, pages_to_extract, parse_hours, split_sections, validate_fact,
 )
-from app.ingest.merge import conflicts_report, make_fact_key, normalize_value
+from app.ingest.merge import conflicts_report, make_fact_key, normalize_value, rekey_facts, settle_facts
 
 FIXTURES = Path(__file__).parent / "fixtures"
 HOURS_QUOTE = "Hours 7 days a week 8am to 11:30pm"
@@ -103,6 +103,24 @@ def test_split_sections_cuts_at_headings_and_hard_when_needed():
 def test_normalize_value_and_fact_key():
     assert normalize_value("From  $39.") == normalize_value("from 39")
     assert make_fact_key("price", None, " Day  Pass", "Price") == "price|-|day pass|price"
+
+
+NAMES = ["Bathhouse", "Williamsburg", "Flatiron", "Atlantic Ave", "Philadelphia"]
+
+
+@pytest.mark.parametrize("subject, expected", [
+    ("Bathhouse Williamsburg", ""), ("Williamsburg", ""), ("PHILADELPHIA Day Pass", "day pass"),
+    ("17th Floor, Williamsburg", "17th floor"), ("Bathhouse's Banya", "banya"), ("Atlantic Ave Hot Pool", "hot pool"),
+    ("Prenatal Massage", "prenatal massage"), ("Bathhouses of the world", "bathhouses of the world"),
+])
+def test_fact_key_subject_ignores_business_and_location_names(subject, expected):
+    assert make_fact_key("price", None, subject, "price", NAMES) == f"price|-|{expected}|price"
+
+
+def test_fact_key_matches_a_name_ending_in_punctuation():
+    assert make_fact_key("service", None, "Atlantic Ave. Hot Pool", "temperature", ["Atlantic Ave."]) == (
+        "service|-|hot pool|temperature"
+    )
 
 
 def _page(url="https://x.com/p", page_type="service", stamp=None, **kw):
@@ -323,3 +341,103 @@ def test_fact_calls_are_bounded(monkeypatch):
     assert seen and all(
         kw["max_tokens"] == facts_mod.FACT_MAX_TOKENS and kw["timeout"] == facts_mod.FACT_TIMEOUT_SECONDS for kw in seen
     )
+
+
+def _stored_fact(s, bid, subject, value, key, status="active", location_id=None, page_id=None):
+    f = Fact(business_id=bid, type="contact", subject=subject, attribute="phone", value=value,
+             statement=f"{subject} phone is {value}.", fact_key=key, status=status, location_id=location_id)
+    s.add(f)
+    s.flush()
+    if page_id:
+        s.add(FactSource(business_id=bid, fact_id=f.id, page_id=page_id, quote=value, page_hash="h"))
+    return f
+
+
+def test_rekey_merges_old_duplicates_keeps_sources_and_is_idempotent(business_id):
+    # facts stored before the subject normalisation: same location + value, different subject wording
+    with tenant_session(business_id) as s:
+        wb = Location(business_id=business_id, name="Williamsburg", is_default=True)
+        s.add(wb)
+        s.flush()
+        # the odd value comes from a lower-priority page, so settle's winner is decided by rule, not by row order
+        pages = [Page(business_id=business_id, url=f"https://x.com/{n}", markdown="m", content_hash="h",
+                      page_type=t) for n, t in (("a", "location"), ("b", "location"), ("c", "faq"))]
+        s.add_all(pages)
+        s.flush()
+        loc = str(wb.id)
+        _stored_fact(s, business_id, "Bathhouse Williamsburg", "(929) 489 - 2284",
+                     f"contact|{loc}|bathhouse williamsburg|phone", location_id=wb.id, page_id=pages[0].id)
+        _stored_fact(s, business_id, "Williamsburg", "(929) 489 - 2284.",
+                     f"contact|{loc}|williamsburg|phone", location_id=wb.id, page_id=pages[1].id)
+        # same new key, different value: kept as its own row, settle decides
+        _stored_fact(s, business_id, "Williamsburg", "(929) 000-0000",
+                     f"contact|{loc}|williamsburg|phone", status="conflict", location_id=wb.id, page_id=pages[2].id)
+    with tenant_session(business_id) as s:
+        removed = rekey_facts(s, business_id)
+        settle_facts(s, business_id)
+    assert removed == 1
+    with tenant_session(business_id) as s:
+        facts = list(s.scalars(select(Fact).where(Fact.business_id == business_id)))
+        assert {f.fact_key for f in facts} == {f"contact|{loc}||phone"}
+        (active,) = [f for f in facts if f.status == "active"]
+        assert len(s.scalars(select(FactSource).where(FactSource.fact_id == active.id)).all()) == 2
+        assert len(facts) == 2
+        before = {(f.id, f.fact_key, f.status) for f in facts}
+    with tenant_session(business_id) as s:
+        assert rekey_facts(s, business_id) == 0
+    with tenant_session(business_id) as s:
+        assert {(f.id, f.fact_key, f.status) for f in s.scalars(select(Fact).where(Fact.business_id == business_id))} == before
+
+
+def test_rekey_keeps_different_subjects_with_the_same_value_apart(business_id):
+    with tenant_session(business_id) as s:
+        for subject in ("Prenatal Massage", "Full-Body Massage", "Couples Massage"):
+            s.add(Fact(business_id=business_id, type="service", subject=subject, attribute="price", value="From $154",
+                       statement=f"{subject} from $154.", fact_key=f"service|-|{subject.lower()}|price", status="active"))
+    with tenant_session(business_id) as s:
+        assert rekey_facts(s, business_id) == 0
+        assert len(s.scalars(select(Fact).where(Fact.business_id == business_id)).all()) == 3
+
+
+def test_rekey_keeps_business_wide_facts_about_different_locations_apart(business_id):
+    # review finding: only the fact's own location name may go, else these two share a key
+    with tenant_session(business_id) as s:
+        s.add_all([Location(business_id=business_id, name="Williamsburg", is_default=True),
+                   Location(business_id=business_id, name="Flatiron")])
+        s.flush()
+        _stored_fact(s, business_id, "Williamsburg phone", "(929) 489 - 2284", "contact|-|williamsburg phone|phone")
+        _stored_fact(s, business_id, "Flatiron phone", "(646) 891 - 1315", "contact|-|flatiron phone|phone")
+    with tenant_session(business_id) as s:
+        rekey_facts(s, business_id)
+        settle_facts(s, business_id)
+    with tenant_session(business_id) as s:
+        facts = list(s.scalars(select(Fact).where(Fact.business_id == business_id)))
+    assert len({f.fact_key for f in facts}) == 2
+
+
+def test_rekey_unchanged_active_meets_changed_key_owner_wins_confidence_stays_unknown(business_id):
+    with tenant_session(business_id) as s:
+        wb = Location(business_id=business_id, name="Williamsburg", is_default=True)
+        s.add(wb)
+        s.flush()
+        page = Page(business_id=business_id, url="https://x.com/wb", markdown="m", content_hash="h", page_type="location")
+        s.add(page)
+        s.flush()
+        loc, new_key = str(wb.id), f"contact|{wb.id}||phone"
+        # already on the new key, active, crawl value
+        _stored_fact(s, business_id, "", "(929) 489 - 2284", new_key, location_id=wb.id, page_id=page.id)
+        # old key, active, same value, owner-confirmed -> must win the merge; no confidence known
+        owner = _stored_fact(s, business_id, "Bathhouse Williamsburg", "(929) 489 - 2284",
+                             f"contact|{loc}|bathhouse williamsburg|phone", location_id=wb.id, page_id=page.id)
+        owner.origin, owner.owner_confirmed_at, owner.confidence = "owner", datetime.now(UTC), None
+        owner_id = owner.id
+        s.flush()
+        s.execute(Fact.__table__.update().where(Fact.business_id == business_id).values(confidence=None))
+    with tenant_session(business_id) as s:
+        assert rekey_facts(s, business_id) == 1
+        settle_facts(s, business_id)
+    with tenant_session(business_id) as s:
+        (fact,) = s.scalars(select(Fact).where(Fact.business_id == business_id)).all()
+        assert (fact.id, fact.fact_key, fact.status, fact.confidence) == (owner_id, new_key, "active", None)
+        # both rows were backed by the same page: one source, not two
+        assert len(s.scalars(select(FactSource).where(FactSource.fact_id == fact.id)).all()) == 1
