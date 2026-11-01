@@ -68,12 +68,12 @@ test("the open card's Bookings row shows today's count", async ({ page }) => {
   await expect(row(page)).toContainText("Today · 2 bookings");
 });
 
-test("header is Settings-style: back row, Bookings, name and host; Back returns to the list", async ({ page }) => {
+test("header: Bookings title, business and host subtitle, no Back button; Esc returns to the list", async ({ page }) => {
   await openBookings(page);
   await expect(page.getByRole("heading", { name: "Bookings" })).toBeVisible();
   await expect(page.locator(".biz-head .ellipsis")).toHaveText("Corner Bakery · cornerbakery.example");
   await expect(title(page)).toHaveText("Today, Nov 5");
-  await page.getByRole("button", { name: "Back to businesses" }).click();
+  await page.keyboard.press("Escape");
   await expect(screen(page)).toHaveCount(0);
   await expect(row(page)).toBeVisible();
 });
@@ -257,7 +257,7 @@ test("a booking added for a later month shows after reopening the screen", async
   await expect(cal(page).locator(".bk-cal-title")).toHaveText("December 2026");
   await expect(cal(page).locator(".bk-dot.on")).toHaveCount(0);
   await page.keyboard.press("Escape"); // closes the calendar
-  await page.getByRole("button", { name: "Back to businesses" }).click();
+  await page.keyboard.press("Escape");
   await expect(row(page)).toBeVisible();
   api.bookings.push(booking({ id: "d1", date: "2026-12-10", start_min: 540, end_min: 600, name: "Di Evans" }));
   await row(page).click();

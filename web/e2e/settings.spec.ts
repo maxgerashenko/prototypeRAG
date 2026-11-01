@@ -50,7 +50,7 @@ test.beforeEach(async ({ page }) => {
 
 const pick = (page: Page, name: string) => page.getByTestId("biz-card").filter({ hasText: name }).locator(".biz-pick").click();
 const row = (page: Page) => page.getByTestId("settings-row");
-const back = (page: Page) => page.getByRole("button", { name: "Back to businesses" });
+const back = (page: Page) => ({ click: () => page.keyboard.press("Escape") });
 const greetingBox = (page: Page) => page.getByRole("textbox", { name: "First greeting message" });
 const chip = (page: Page) => page.getByTestId("greeting-chip");
 const sheet = (page: Page) => page.getByTestId("number-sheet");

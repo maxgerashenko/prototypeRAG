@@ -299,13 +299,12 @@ test("Esc and Back close the sheet before the calendar; arrows do nothing while 
   // Back: sheet first, then the calendar, then leave
   await hourAdd(page, 11).click();
   await expect(sheet(page)).toBeVisible();
-  const back = page.getByRole("button", { name: "Back to businesses" });
-  await back.dispatchEvent("click"); // the scrim covers it for a real click
+  await page.keyboard.press("Escape");
   await expect(sheet(page)).toHaveCount(0);
   await expect(cal(page)).toBeVisible();
-  await back.click();
+  await page.keyboard.press("Escape");
   await expect(cal(page)).toHaveCount(0);
-  await back.click();
+  await page.keyboard.press("Escape");
   await expect(page.locator("[data-screen=bookings]")).toHaveCount(0);
 });
 
@@ -558,7 +557,7 @@ test("tapping an attendee row opens its conversation; Back returns to the open s
   expect(await row.evaluate((el) => getComputedStyle(el).cursor)).toBe("pointer");
   await row.click({ position: { x: 20, y: 10 } });
   await expect(page.getByRole("heading", { name: "Booked the 3 PM class" })).toBeVisible();
-  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(page.locator("[data-screen=bookings]")).toBeVisible();
   await expect(sheet(page).getByRole("dialog", { name: "Session" })).toBeVisible();
   await expect(sheet(page).getByTestId("attendee-row")).toHaveCount(2);

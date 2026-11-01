@@ -216,7 +216,7 @@ test.describe("1 · pick a business", () => {
     await pick(page, "Corner Bakery");
     await page.locator(".recent-row").first().click();
     await expect(page.locator("[data-screen=transcript]")).toBeVisible();
-    await page.getByRole("button", { name: "Back" }).click();
+    await page.keyboard.press("Escape");
     await expect(page.locator("[data-screen=select]")).toBeVisible();
     await expect(card(page, "Corner Bakery")).toHaveClass(/\bon\b/); // selection kept
   });
@@ -269,7 +269,7 @@ test.describe("2 · a business's previous conversations", () => {
     await pick(page, "Bloom & Stem");
     await page.getByTestId("conversations-row").click();
     const screen = page.locator("[data-screen=convos]");
-    await expect(screen.getByRole("heading", { level: 1 })).toHaveText("Bloom & Stem");
+    await expect(screen.getByRole("heading", { level: 1 })).toHaveText("Conversations");
     await expect(screen.locator(".big-mono")).toHaveText("BS");
     await expect(screen.locator(".biz-head")).toContainText("bloomstem.example");
     await expect(screen.locator(".section-head")).toContainText("Previous conversations5");
@@ -278,7 +278,7 @@ test.describe("2 · a business's previous conversations", () => {
     await expect(cards.first()).toContainText("Florist question 1");
     await expect(cards.first().locator(".convo-preview")).toHaveText("Answer 1.");
     await expect(cards.first().locator(".convo-meta")).toContainText(/1:35.*3 messages/);
-    await page.getByRole("button", { name: "Back to businesses" }).click();
+    await page.keyboard.press("Escape");
     await expect(page.locator("[data-screen=select]")).toBeVisible();
 
     await page.getByTestId("conversations-row").click();
@@ -296,7 +296,7 @@ test.describe("2 · a business's previous conversations", () => {
     await expect(early.locator(".convo-preview")).toHaveText("You: Hello?");
     await early.click();
     await expect(page.locator("[data-screen=transcript] h1")).toHaveText("Hung up early");
-    await page.getByRole("button", { name: "Back" }).click();
+    await page.keyboard.press("Escape");
     await expect(page.locator("[data-screen=convos]")).toBeVisible(); // returns where it came from
   });
 
@@ -342,7 +342,7 @@ test.describe("2 · a business's previous conversations", () => {
     await expect(cards.nth(0).locator(".convo-top .src-badge")).toHaveClass(/src-web/);
     await expect(cards.nth(1).locator(".convo-top .src-badge")).toHaveClass(/src-twilio/);
     await cards.nth(1).click();
-    await expect(page.locator("[data-screen=transcript] .tr-title .src-badge")).toHaveClass(/src-twilio/);
+    await expect(page.locator("[data-screen=transcript] .tr-meta .src-badge")).toHaveClass(/src-twilio/);
   });
 
   test("'Start new call' and Space call this business", async ({ page }) => {
@@ -386,7 +386,8 @@ test.describe("2 · a business's previous conversations", () => {
     await page.getByRole("button", { name: "End call" }).click();
     await page.getByRole("button", { name: "Back to conversations" }).click();
     const screen = page.locator("[data-screen=convos]");
-    await expect(screen.locator("h1")).toHaveText("Happy Paws Grooming");
+    await expect(screen.locator("h1")).toHaveText("Conversations");
+    await expect(screen.locator(".biz-head .ellipsis")).toContainText("Happy Paws Grooming");
     await expect(screen.locator(".biz-head")).toContainText("No website");
     await expect(screen.locator(".section-head")).toHaveText("Previous conversations0");
     await expect(screen.locator(".convo-card")).toHaveCount(0);
@@ -414,7 +415,7 @@ test.describe("3 · read a past conversation", () => {
     await expect(screen.locator(".tr-meta")).toHaveText("Today · 2:58 PM·4:12·5 messages");
     await expect(screen.locator(".pill").first()).toHaveText("Call started · Today · 2:58 PM");
     await expect(screen.locator(".pill").last()).toHaveText("Call ended · 4:12");
-    await expect(screen.getByRole("button", { name: "Back" })).toContainText("Corner Bakery");
+    await expect(screen.locator(".biz-head .ellipsis")).toHaveText("Corner Bakery");
     const msgs = screen.locator(".msg");
     await expect(msgs).toHaveCount(5);
     await expect(msgs.nth(0)).toHaveAttribute("data-role", "bot");
@@ -788,11 +789,11 @@ test.describe("6 · call ended", () => {
     await expect(page.locator("[data-screen=transcript] h1")).toHaveText("Are you open");
     expect(api.requests).toContain("/businesses/b1/conversations/new-call");
 
-    await page.getByRole("button", { name: "Back" }).click(); // to the business's conversations
+    await page.keyboard.press("Escape"); // to the business's conversations
     await expect(page.locator("[data-screen=convos]")).toBeVisible();
     await expect(page.locator(".convo-card.new")).toHaveCount(1);
     await expect(page.locator(".convo-card.new")).toContainText("Are you openNEW");
-    await page.getByRole("button", { name: "Back to businesses" }).click();
+    await page.keyboard.press("Escape");
     const bakery = card(page, "Corner Bakery");
     await expect(bakery).toContainText("cornerbakery.example · 4 chats");
     await expect(bakery.locator(".recent-row").first()).toContainText("Are you openNEW");
@@ -814,7 +815,7 @@ test.describe("6 · call ended", () => {
     await startCall(page, "Harbor Auto Repair");
     await page.getByRole("button", { name: "End call" }).click();
     await page.getByRole("button", { name: "Back to conversations" }).click();
-    await expect(page.locator("[data-screen=convos] h1")).toHaveText("Harbor Auto Repair");
+    await expect(page.locator("[data-screen=convos] .biz-head .ellipsis")).toContainText("Harbor Auto Repair");
   });
 
   test("4404 during a call returns to the list with 'Unknown business'", async ({ page }) => {

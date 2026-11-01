@@ -215,7 +215,7 @@ test("Back from a transcript restores the list scroll position", async ({ page }
   await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(600);
   await list.locator(".convo-card").nth(12).click();
   await expect(page.locator("[data-screen=transcript]")).toBeVisible();
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.keyboard.press("Escape");
   await expect(page.locator("[data-screen=convos] .convo-list")).toBeVisible();
   await expect.poll(() => page.locator("[data-screen=convos] .convo-list").evaluate((el) => el.scrollTop)).toBe(600);
 });
