@@ -47,18 +47,18 @@
   note: "V23"
 
 - question: "Till what time are you working?"
-  expected_facts: ["midnight"]
-  expected_in_context: ["midnight"]
-  note: "V28 / #108 — ranked #5 on the pilot with top-3 voice search; the Rooftop Pool's hours were answered instead."
+  expected_facts: ["11:30"]
+  expected_in_context: ["11:30"]
+  note: "V28 / #108 — ranked #5 on the pilot with top-3 voice search; the Rooftop Pool's hours were answered instead. Was 'midnight' until the site changed; live footer 2026-11-01: '7 days a week 8am to 11:30pm' (the page's hidden businessHours JSON says 9am - 11:30pm)."
 
 - question: "When do you close?"
-  expected_facts: ["midnight"]
-  expected_in_context: ["midnight"]
+  expected_facts: ["11:30"]
+  expected_in_context: ["11:30"]
   note: "V28 / #108"
 
 - question: "Till what time are you open on Saturday?"
-  expected_facts: ["midnight"]
-  expected_in_context: ["midnight"]
+  expected_facts: ["11:30"]
+  expected_in_context: ["11:30"]
   note: "V28 / #108"
 
 - question: "What is the address of the Flatiron location?"
