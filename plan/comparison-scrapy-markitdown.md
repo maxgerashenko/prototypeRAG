@@ -68,6 +68,19 @@ menu may behave differently; re-run `scripts/compare_crawlers.py pdf` on one on 
 | Two-column bar menu (names left, prices right) | names and prices on separate lines, each column read top to bottom | one table, each row `Espresso \| $4 \| Old Fashioned \| $14`: price stays next to its name |
 | Scanned (image only) | empty | empty (no OCR by default) |
 
+**Real menu, 2026-11-01 (on the Mac):** gnocco.com links one same-domain PDF from `/reservations`
+(`/s/SUMMER-2026-RESTAURANT-MONTH-MENU-1.pdf`, 1 page, dish names and descriptions on separate lines,
+no table; the earlier "none of the three sites links one" missed it — only the home pages were
+checked; its other PDF links are on the Squarespace CDN, which the crawler doesn't follow).
+
+| PDF | Ours (`pypdf`) | MarkItDown |
+|---|---|---|
+| Line menu, no table (gnocco.com) | one line per dish / description, 1615 chars | lines glued ("One choice of:GNOCCOHomemade", "sprinkledwith"); 30 of 163 searchable words lost to keyword search |
+
+Fact extraction found little in either text (the dishes have no prices; qwen: 2 facts from `pypdf`,
+0 from MarkItDown). `extract_pdf_text` now uses `pypdf`'s text when MarkItDown finds no table
+(DEC-51 refined).
+
 Both run in ~10 ms on these files. Text order was correct in all three; the difference is
 table structure, which matters for prices (the assistant must not pair a price with the wrong
 item). Not tested: long prose PDFs, multi-column articles, rotated pages, encrypted files.
@@ -87,5 +100,5 @@ for PDFs; install only `markitdown[pdf]`.
 ## Not done / needs the Mac or the user
 
 - [ ] Pilot sauna site (abathhouse.com) and a link-BFS site: unreachable from the cloud box.
-- [ ] A real menu PDF with tables (ask the pilot business for theirs).
+- [ ] A real menu PDF with tables (ask the pilot business for theirs). A real line menu without a table was checked 2026-11-01 (gnocco.com, above).
 - [ ] JS-rendered page comparison (needs a headless browser setup).

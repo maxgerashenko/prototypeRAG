@@ -15,6 +15,7 @@ from sqlalchemy import delete, select
 
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, Chunk, Location, Page
+from app.ingest import fetch as fetch_mod
 from app.ingest import organize, run, timezone
 from app.ingest.chunk import ChunkDraft, chunk_markdown, chunk_text, split_by_headers
 from app.ingest.clean import clean_page, content_hash, extract_html_lang, extract_og_site_name, extract_title, html_to_markdown
@@ -920,6 +921,28 @@ def test_extract_pdf_text_two_column_menu_keeps_item_with_price():
     text = extract_pdf_text(_grid_pdf(rows, [72, 200, 330, 460]))
     assert any("Negroni" in ln and "$13" in ln for ln in text.splitlines()), text
     assert any("Espresso" in ln and "$4" in ln for ln in text.splitlines()), text
+
+
+def test_extract_pdf_text_without_a_table_keeps_pypdf_lines(monkeypatch):
+    """A line menu with no table: MarkItDown glued gnocco.com's lines ("One choice of:GNOCCOHomemade"),
+    which made dish names unsearchable; pypdf keeps one line per item."""
+    glued = SimpleNamespace(text_content="APPETIZER One choice of:GNOCCOHomemade Deep Fried Dough")
+    monkeypatch.setattr(fetch_mod, "_markitdown", lambda: SimpleNamespace(convert_stream=lambda *a, **k: glued))
+    text = extract_pdf_text(_text_pdf(["APPETIZER", "One choice of:", "GNOCCO", "Homemade Deep Fried Dough"]))
+    assert text.splitlines() == ["APPETIZER", "One choice of:", "GNOCCO", "Homemade Deep Fried Dough"]
+
+
+def test_extract_pdf_text_markitdown_error_uses_pypdf_and_empty_pypdf_keeps_markitdown(monkeypatch):
+    def broken(*a, **k):
+        raise ValueError("pdfminer failed")
+
+    monkeypatch.setattr(fetch_mod, "_markitdown", lambda: SimpleNamespace(convert_stream=broken))
+    assert extract_pdf_text(_text_pdf(["Negroni 14"])) == "Negroni 14"
+
+    glued = SimpleNamespace(text_content="Negroni 14 Spritz 12")
+    monkeypatch.setattr(fetch_mod, "_markitdown", lambda: SimpleNamespace(convert_stream=lambda *a, **k: glued))
+    monkeypatch.setattr(fetch_mod, "_pypdf_text", lambda pdf_bytes: "")
+    assert extract_pdf_text(_text_pdf(["x"])) == "Negroni 14 Spritz 12"
 
 
 def test_extract_pdf_text_scanned_pdf_returns_empty():
