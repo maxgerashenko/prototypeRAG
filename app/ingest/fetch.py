@@ -137,9 +137,15 @@ def fetch_child_sitemaps(
     return bodies
 
 
+_TABLE_ROW_RE = re.compile(r"^\|.*\|[ \t]*$", re.MULTILINE)
+
+
 def extract_pdf_text(pdf_bytes: bytes) -> str:
-    """Markdown from a menu/price-list PDF via MarkItDown (pdfminer.six), so a table row
-    stays on one line ("| Negroni | $13 |") instead of one cell per line (#135, DEC-51).
+    """Text of a menu/price-list PDF. MarkItDown (pdfminer.six) when it finds a table, so a
+    row stays on one line ("| Negroni | $13 |") instead of one cell per line (#135, DEC-51);
+    otherwise pypdf, which keeps one line per item where MarkItDown can glue them together
+    (gnocco.com's line menu: "One choice of:GNOCCOHomemade", 30 of 163 words unsearchable).
+    A PDF with a table and prose keeps MarkItDown's text, so its prose may still be glued.
     Runs of blank lines and trailing spaces squeezed. "" on any failure or for a
     scanned-image-only PDF (no OCR yet, plan/01-crawler.md risks)."""
     if b"%PDF-" not in pdf_bytes[:1024]:
@@ -147,9 +153,19 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
     try:
         text = _markitdown().convert_stream(io.BytesIO(pdf_bytes), file_extension=".pdf").text_content or ""
     except Exception:
-        return ""
+        text = ""
+    if not _TABLE_ROW_RE.search(text):
+        text = _pypdf_text(pdf_bytes) or text
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _pypdf_text(pdf_bytes: bytes) -> str:
+    """Line-preserving text of every page; "" when pypdf can't read the file."""
+    try:
+        return "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf_bytes)).pages)
+    except Exception:
+        return ""
 
 
 @lru_cache(maxsize=1)
