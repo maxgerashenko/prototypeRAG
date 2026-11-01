@@ -57,7 +57,8 @@ export function BookingsScreen(p: Props) {
 
   return (
     <div className="screen slide screen-bookings" data-screen="bookings">
-      <ViewHeader name={biz.name} title="Bookings" sub={<>{biz.name} · {hostOf(biz)}</>} />
+      <ViewHeader name={biz.name} title="Bookings" sub={<>{biz.name} · {hostOf(biz)}</>}
+        onBack={p.onBack} />
 
       <div className="bk-bar">
         <button className="bk-date" aria-label="Choose date" aria-expanded={p.calOpen} onClick={p.onToggleCal}>

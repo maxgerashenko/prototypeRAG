@@ -417,6 +417,7 @@ export function App() {
           biz={fallbackBiz(selId)}
           convos={convos[selId]}
           newIds={newIds}
+          onBack={leaveConvos}
           onCall={() => startCall(selId)}
           onOpen={(convoId) => openConversation(selId, convoId, "convos")}
         />
@@ -427,6 +428,7 @@ export function App() {
           pull={ptr}
           bizName={fallbackBiz(transcript.bizId).name}
           convo={detail}
+          onBack={() => setStage(transcript.returnTo)}
           onContinue={() => startCall(transcript.bizId, transcript.convoId)}
         />
       )}

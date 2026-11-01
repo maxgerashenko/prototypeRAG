@@ -13,10 +13,11 @@ interface Props {
   pull: PullState;
   bizName: string;
   convo: Loadable<ConversationDetail>;
+  onBack: () => void;
   onContinue: () => void;
 }
 
-export function TranscriptScreen({ pull, bizName, convo, onContinue }: Props) {
+export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: Props) {
   const c = convo.data;
   const dur = c ? fmtClock(c.duration_s) : "";
   const when = c ? fmtWhen(c.started_at) : "";
@@ -30,6 +31,7 @@ export function TranscriptScreen({ pull, bizName, convo, onContinue }: Props) {
           name={bizName}
           title={c && !showSk ? c.title : convo.status === "error" ? "Conversation" : (<span className="sk-block sk-title" aria-hidden="true" />)}
           sub={bizName}
+          onBack={onBack}
         />
         {c && !showSk && (
           <div className="tr-meta">

@@ -61,7 +61,7 @@ export function SettingsScreen(p: Props) {
 
   return (
     <div className="screen slide screen-settings" data-screen="settings">
-      <ViewHeader name={biz.name} title="Settings" sub={<>{biz.name} · {hostOf(biz)}</>} />
+      <ViewHeader name={biz.name} title="Settings" sub={<>{biz.name} · {hostOf(biz)}</>} onBack={p.onBack} />
 
       <PullRegion state={p.pull} area="settings">
       <div className="scroll set-scroll">
