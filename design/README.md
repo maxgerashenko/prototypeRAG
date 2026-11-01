@@ -53,16 +53,16 @@ timers). Phone layout 390 × 844; touch targets ≥ 44 px.
 | 1 | Pick a business | `SelectScreen.tsx` | **Change:** no radio/check mark and no blue border on the open card — the card only expands (chevron flips). Open card: `#181b22` background; the monogram keeps its normal colours (no change on selection). List keeps its order and scrolls the open card to the top. |
 | 1a | Open-card panel | `SelectScreen.tsx` (`.recent`) | **New:** two rows above *Recent conversations*: **Business settings** (hint: number · greeting cached?) and **Bookings** (hint: today's count) — both built. |
 | 1b | Business settings | — **new** | See below. |
-| 1c | Bookings (day view) | `BookingsScreen.tsx`, `MonthCalendar.tsx`, `BookingSheet.tsx` | Built. **Change:** the top is the Settings-style header (`Businesses` back row, monogram, h1 *Bookings*, `name · host`), not the `BOOKINGS · <business>` caption; the date bar sits below it. See below. |
-| 2 | Previous conversations | `ConversationsScreen.tsx` | Matches. Header monogram is black with accent border. |
-| 3 | Transcript | `TranscriptScreen.tsx` | Matches. |
+| 1c | Bookings (day view) | `BookingsScreen.tsx`, `MonthCalendar.tsx`, `BookingSheet.tsx` | Built. **Change:** the top is the [ViewHeader](ViewHeader.md) (monogram, h1 *Bookings*, `name · host`; no back row), not the `BOOKINGS · <business>` caption; the date bar sits below it. See below. |
+| 2 | Previous conversations | `ConversationsScreen.tsx` | [ViewHeader](ViewHeader.md): h1 *Conversations*, `name · host`; no back row. |
+| 3 | Transcript | `TranscriptScreen.tsx` | [ViewHeader](ViewHeader.md): h1 is the conversation title, subtitle the business name; no back row. |
 | 4 | Connecting | `CallScreens.tsx` | Matches. |
 | 5 | Live call / phone call (watch-only) | `CallScreens.tsx` | Matches; the call opens with the business's saved greeting. |
 | 6 | Call ended | `CallScreens.tsx` | Matches. |
 
 ### 1b. Business settings (new)
 
-Back button → list (the business stays open). Header: monogram (black + accent border),
+Swipe right or Esc → list (the business stays open). Header ([ViewHeader](ViewHeader.md)): monogram (black + accent border),
 "Settings", `name · category`. One scroll column of compact cards, in this order:
 
 1. **Phone number** — one row: phone tile (green), number (mono), `area · Twilio · Voice & SMS`,
@@ -88,7 +88,7 @@ Back button → list (the business stays open). Header: monogram (black + accent
 
 ### 1c. Bookings — day view (built)
 
-Back button → list. Header as on Settings (see the table); under it a bar with the date button (`Today, Oct 31` ▾), **Today**
+Swipe right or Esc → list. Header as on Settings (see the table); under it a bar with the date button (`Today, Oct 31` ▾), **Today**
 (when not on today), ‹ › day arrows. Summary line `N bookings · K by assistant`.
 
 - **Day column** like Google Calendar, one day, vertical scroll. Visible hours = **1 h before
@@ -125,6 +125,7 @@ mobile, keyboard shortcuts (Space / Esc / Backspace). Keep them.
 
 - [colors.md](colors.md) — every `:root` color token and what it means. Pattern docs refer to
   these tokens, not to other components.
+- [ViewHeader.md](ViewHeader.md) — the header every business view starts with: monogram, view name, `business · host`; no Back button.
 - [PanelControls.md](PanelControls.md) — the big rows on a business's open card (Business settings, Bookings, Conversations): icon tile, title, grey hint, chevron.
 - [PullToRefresh.md](PullToRefresh.md) — pull a list down to reload it in place; spinner colour follows the opening control, Bookings aligns it with the "+" icons.
 - [SeatSlider.md](SeatSlider.md) — attendees bar 1-30 with a small Private switch.
