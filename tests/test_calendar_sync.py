@@ -243,3 +243,13 @@ def test_client_get_patch_insert_status_codes():
         c.patch_event("c@x", "a", {}, etag='"1"')
     with pytest.raises(EventExists):
         c.insert_event("c@x", {"id": "mine"})
+
+
+def test_configured_calendars_skips_businesses_without_a_calendar_id(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CALENDAR_ID", "env-cal@example.com")
+    cs.get_settings.cache_clear()
+    try:
+        ids = cs.configured_calendars()
+    finally:
+        cs.get_settings.cache_clear()
+    assert "env-cal@example.com" in ids and "None" not in ids

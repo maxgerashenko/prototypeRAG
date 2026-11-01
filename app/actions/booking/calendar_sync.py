@@ -243,7 +243,8 @@ def configured_calendars() -> list[str]:
     """The env default plus every `businesses.settings.google_calendar_id`."""
     ids = {get_settings().google_calendar_id.strip()}
     with SessionLocal() as session:
-        ids |= {str(v).strip() for v in session.scalars(select(Business.settings["google_calendar_id"].astext))}
+        # A business without the key yields NULL; str(None) would become the calendar "None".
+        ids |= {v.strip() for v in session.scalars(select(Business.settings["google_calendar_id"].astext)) if v}
     return sorted(i for i in ids if i)
 
 
