@@ -10,7 +10,8 @@ from sqlalchemy import delete, select
 from app.actions.booking import session_events as G
 from app.actions.booking import sessions as S
 from app.actions.booking import tools as T
-from app.actions.booking.google_client import CalendarError, PreconditionFailed
+from app.actions.booking import calendar_sync
+from app.actions.booking.google_client import CalendarError, EventsPage, PreconditionFailed
 from app.actions.registry import ActionContext
 from app.config import get_settings
 from app.db import tenant_session
@@ -28,6 +29,7 @@ class FakeCalendar:
         self.fail: set[str] = set()
         self.stale_etag_once = False
         self.n = 0
+        self.listed: list[dict] = []  # what events.list returns (Google wire format)
 
     def _check(self, op):
         if op in self.fail:
@@ -61,6 +63,10 @@ class FakeCalendar:
         ev.update(body)
         ev["etag"] = f"e{self.n}"
         return ev["etag"]
+
+    def list_events(self, calendar_id, *, sync_token=None, time_min=None, time_max=None, page_token=None):
+        self._check("list")
+        return EventsPage(events=list(self.listed), next_sync_token="tok")
 
     def busy(self, *a):
         return []
@@ -269,3 +275,23 @@ def test_tools(cal, biz):
     assert "full" in T.join_session(ctx, {"session": S.session_ref(sid), "name": "Bob"}).lower()
     assert "FULL" in T.list_sessions(ctx, {"date": DAY})
     assert T.join_session(ctx, {"session": S.session_ref(sid)}).startswith("Error")
+
+
+def test_sync_pass_turns_a_typed_event_into_a_session_and_deleting_cancels_it(cal, biz, monkeypatch):
+    _owner(biz, monkeypatch)
+    start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=2)
+    typed = {"id": "typed1", "etag": "t1", "status": "confirmed", "summary": "Evening Sauna",
+             "start": {"dateTime": start.isoformat()}, "end": {"dateTime": (start + timedelta(hours=2)).isoformat()},
+             "updated": start.isoformat()}
+    cal.events["typed1"] = dict(typed)
+    cal.listed = [typed]
+    calendar_sync.sync_now(CAL, cal)
+    rows = S.list_open(biz)
+    assert [r["name"] for r in rows] == ["Evening Sauna"]
+    assert cal.events["typed1"]["summary"].startswith("Evening Sauna · 0/")
+    S.join_session(biz, rows[0]["ref"], _conv(biz), "Ann")
+    cal.listed = [{**typed, "status": "cancelled"}]
+    calendar_sync.sync_now(CAL, cal)
+    assert S.list_open(biz) == []
+    with tenant_session(biz) as s:
+        assert s.scalar(select(Booking.status).where(Booking.name == "Ann")) == "cancelled"
