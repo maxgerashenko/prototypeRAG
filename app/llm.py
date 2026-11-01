@@ -60,10 +60,19 @@ def chat(messages: list[dict], **kwargs) -> str:
     return response.choices[0].message.content or ""
 
 
-def chat_json(messages: list[dict], schema: dict, schema_name: str = "result", model: str | None = None) -> dict:
+def chat_json(
+    messages: list[dict], schema: dict, schema_name: str = "result", model: str | None = None,
+    max_tokens: int | None = None, timeout: float | None = None,
+) -> dict:
     """Structured extraction (e.g. business profile, Part 1) via `response_format`.
-    `model` overrides `LLM_MODEL` for one call (e.g. `FACTS_LLM_MODEL`, OPEN-20)."""
+    `model` overrides `LLM_MODEL` for one call (e.g. `FACTS_LLM_MODEL`, OPEN-20).
+    `max_tokens` / `timeout` bound a runaway answer (a model looping inside the JSON);
+    with a `timeout` the call is not retried -- the caller decides what a failure means."""
     client = get_chat_client()
+    if timeout is not None:
+        # with_options copies the client, so the copy needs the call logging again
+        client = instrument(client.with_options(timeout=timeout, max_retries=0))
+    extra = {"max_tokens": max_tokens} if max_tokens is not None else {}
     response = client.chat.completions.create(
         model=model or get_settings().llm_model,
         messages=messages,
@@ -71,6 +80,7 @@ def chat_json(messages: list[dict], schema: dict, schema_name: str = "result", m
             "type": "json_schema",
             "json_schema": {"name": schema_name, "schema": schema, "strict": True},
         },
+        **extra,
     )
     message = response.choices[0].message
     # Some thinking-enabled models (e.g. qwen3.6-35b-a3b) emit the schema-conforming

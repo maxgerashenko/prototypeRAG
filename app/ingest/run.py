@@ -18,11 +18,13 @@ winner per fact; then one `kind='fact'` chunk per active fact for retrieval) -> 
 import argparse
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, Location, Page
 from app.db.session import SessionLocal
@@ -172,27 +174,40 @@ def extract_facts(
 
     stats = MergeStats()
     rejected = failed = 0
-    for page in todo:
-        try:
-            result = extract_page_facts(page, name, locations, location_names.get(page.location_id), model=model)
-        except Exception as exc:
-            print(f"facts failed, will retry next run: {page.url} ({exc})")
-            failed += 1
-            continue
-        rejected += len(result.rejected)
-        if verbose or dry_run:
-            print(f"\n== {page.url} ({page.page_type}): {len(result.facts)} facts, {len(result.rejected)} rejected")
-            for f in result.facts:
-                print(f"  + [{f.type}] {location_names.get(f.location_id, 'all')}: {f.statement}  | {f.quote!r}")
-            for raw, reason in result.rejected:
-                print(f"  - {reason}: {raw.get('statement') or raw}")
-        if dry_run:
-            continue
-        with tenant_session(business_id) as session:
-            live = session.get(Page, page.id)
-            if live is None or live.content_hash != page.content_hash:
-                continue  # re-crawled while the model ran; the next run extracts the new text
-            apply_page_facts(session, business_id, live, result.facts, stats)
+    # The LLM calls run FACTS_PARALLEL (env) at a time (LM Studio serves several requests per
+    # loaded model); the DB writes below stay on this thread, one page at a time and as
+    # each page finishes, so a stopped run keeps every page already done.
+    pool = ThreadPoolExecutor(max_workers=max(1, get_settings().facts_parallel))
+    futures = {
+        pool.submit(extract_page_facts, page, name, locations, location_names.get(page.location_id), model=model): page
+        for page in todo
+    }
+    try:
+        for future in as_completed(futures):
+            page = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                print(f"facts failed, will retry next run: {page.url} ({exc})", flush=True)
+                failed += 1
+                continue
+            rejected += len(result.rejected)
+            if verbose or dry_run:
+                print(f"\n== {page.url} ({page.page_type}): {len(result.facts)} facts, {len(result.rejected)} rejected")
+                for f in result.facts:
+                    print(f"  + [{f.type}] {location_names.get(f.location_id, 'all')}: {f.statement}  | {f.quote!r}")
+                for raw, reason in result.rejected:
+                    print(f"  - {reason}: {raw.get('statement') or raw}")
+            if dry_run:
+                continue
+            with tenant_session(business_id) as session:
+                live = session.get(Page, page.id)
+                if live is None or live.content_hash != page.content_hash:
+                    continue  # re-crawled while the model ran; the next run extracts the new text
+                apply_page_facts(session, business_id, live, result.facts, stats)
+    finally:
+        # Ctrl-C or a failed write: drop the queued pages instead of waiting for all of them
+        pool.shutdown(wait=False, cancel_futures=True)
     if not dry_run:
         with tenant_session(business_id) as session:
             settle_facts(session, business_id, stats)

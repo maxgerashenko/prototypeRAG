@@ -79,6 +79,14 @@ _SYSTEM_PROMPT = (
 )
 
 SECTION_CHARS = 12000  # ~3k tokens; longer pages are split at headings (plan §5.3)
+# A section's answer is a few dozen facts (bathhouse /flatiron: 2170 tokens, 105 s alone
+# on gemma-4-12b, ~20 tok/s). The token cap stops a runaway answer -- a cut-off answer is
+# invalid JSON -> the page fails and is retried next run. The timeout is only a last
+# resort: it must fit FACT_MAX_TOKENS with FACTS_PARALLEL requests sharing the GPU (300 s
+# timed out real location pages at 2-8 parallel; before any limit, one stuck page cost
+# up to 3 x 600 s).
+FACT_MAX_TOKENS = 4000
+FACT_TIMEOUT_SECONDS = 900
 
 _WS_RE = re.compile(r"\s+")
 _NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
@@ -284,6 +292,8 @@ def extract_page_facts(
             FACT_SCHEMA,
             "page_facts",
             model=model,
+            max_tokens=FACT_MAX_TOKENS,
+            timeout=FACT_TIMEOUT_SECONDS,
         )
         for item in raw.get("facts") or []:
             fact, reason = validate_fact(item, page_norm, page.page_type, by_lower, page.location_id)
