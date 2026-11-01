@@ -1,7 +1,8 @@
 """Bookings API for the Bookings screen (stage 1, no login yet):
 
-GET /businesses/{id}/bookings?start=YYYY-MM-DD&end=YYYY-MM-DD  confirmed bookings whose local
-start day is in [start, end] (at most 62 days), plus the hours the day view should show.
+GET /businesses/{id}/bookings?start=YYYY-MM-DD&end=YYYY-MM-DD[&sync=1]  confirmed bookings whose local
+start day is in [start, end] (at most 62 days), plus the hours the day view should show. `sync=1` (pull-to-refresh) first pulls the latest from
+Google Calendar; if Google can't be reached the mirror is returned with `stale: true`.
 
 Times are returned in the business timezone as minutes since local midnight, so the screen
 needs no timezone maths. `by_assistant` = the booking came out of a conversation (a call or
@@ -10,6 +11,7 @@ come in through the calendar sync as `sessions` with source "google" (#149/#167)
 other businesses' events as grey "Busy" blocks once calendars are per business: always [] in the demo. A booking that runs past local midnight is
 cut at 24:00 (the day view shows one day)."""
 
+import logging
 import uuid
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -18,11 +20,14 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from app.actions.booking import rules as R
+from app.actions.booking import session_events as G
+from app.actions.booking.google_client import CalendarError
 from app.actions.booking.internal import _load_rules
 from app.actions.booking.sessions import sessions_in_range
 from app.db import tenant_session
 from app.db.models import Booking, Business
 
+log = logging.getLogger(__name__)
 router = APIRouter()
 
 MAX_RANGE_DAYS = 62
@@ -60,10 +65,18 @@ def list_bookings(
     business_id: uuid.UUID,
     start: str = Query(...),
     end: str = Query(...),
+    sync: bool = Query(False),
 ) -> dict:
     first, last = _day(start, "start"), _day(end, "end")
     if last < first or (last - first).days >= MAX_RANGE_DAYS:
         raise HTTPException(status_code=422, detail=f"end must be on or after start, within {MAX_RANGE_DAYS} days")
+    stale = False
+    if sync:  # pull-to-refresh: fetch Google's latest first; if it can't be reached show the mirror, flagged
+        try:
+            G.sync_before_booking(business_id)
+        except CalendarError as exc:
+            log.warning("calendar sync before bookings list failed: %s", exc)
+            stale = True
     with tenant_session(business_id) as session:
         business = session.get(Business, business_id)
         if business is None:
@@ -92,4 +105,4 @@ def list_bookings(
                 "phone": b.phone, "notes": b.notes, "by_assistant": b.conversation_id is not None,
             })
         sessions = sessions_in_range(session, business_id, lo, hi, zone)
-    return {"timezone": zone.key, "hours": open_hours(rules), "bookings": out, "sessions": sessions, "busy": []}
+    return {"timezone": zone.key, "hours": open_hours(rules), "bookings": out, "sessions": sessions, "busy": [], "stale": stale}

@@ -18,6 +18,7 @@ import {
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 const CLOCK_MS = 30_000; // how often "now" is refreshed while the screen is on
+const REFRESH_MS = 60_000; // visible screen re-reads its month; the Google sync fills Postgres every 60 s
 const FRESH_MS = 1000; // a month loaded this recently is not fetched again on activation
 const NOTICE_MS = 5000; // how long the "texted" notice stays
 
@@ -105,7 +106,7 @@ export function useBookings(bizId: string | null, active: boolean) {
 
   // fetch one month; the old data stays while it reloads
   const load = useCallback(
-    (key: string) => {
+    (key: string, sync = false) => {
       if (!bizId) return Promise.resolve();
       const id = ++seq.current;
       const g = gen.current;
@@ -114,7 +115,7 @@ export function useBookings(bizId: string | null, active: boolean) {
       setCache((prev) => ({ ...prev, [key]: { ...prev[key], status: "loading" } }));
       const { start, end } = monthRange(key);
       const current = () => g === gen.current && reqs.current[key] === id;
-      return getBookings(bizId, start, end).then(
+      return getBookings(bizId, start, end, sync).then(
         (data) => current() && setCache((prev) => ({ ...prev, [key]: { status: "ok", data } })),
         (err) =>
           current() && setCache((prev) => ({ ...prev, [key]: { ...prev[key], status: "error", error: errorText(err) } })),
@@ -218,7 +219,25 @@ export function useBookings(bizId: string | null, active: boolean) {
   );
   const onCloseSheet = useCallback(() => setSelectedId(null), []);
   const onRetry = useCallback(() => void load(dayKey), [load, dayKey]);
-  const onRefresh = useCallback(() => Promise.resolve(load(dayKey)), [load, dayKey]);
+  // pull-to-refresh also asks the server to pull Google Calendar first
+  const onRefresh = useCallback(() => Promise.resolve(load(dayKey, true)), [load, dayKey]);
+
+  // edits made in Google Calendar show up without a pull: re-read the month while the screen is visible
+  useEffect(() => {
+    if (!active) return;
+    const reload = () => {
+      if (document.visibilityState === "visible") void load(dayKey);
+    };
+    const timer = setInterval(reload, REFRESH_MS);
+    const onVisible = () => {
+      if (Date.now() - (lastLoadAt.current[dayKey] ?? 0) >= REFRESH_MS / 2) reload();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [active, load, dayKey]);
 
   const onAddAt = useCallback(
     (hour: number) => {

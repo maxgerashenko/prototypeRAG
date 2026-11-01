@@ -308,8 +308,8 @@ export interface BusyItem {
 }
 
 /** Confirmed bookings whose local start day is in [start, end] (YYYY-MM-DD, at most 62 days). */
-export const getBookings = (businessId: string, start: string, end: string) =>
-  getJson<Bookings>(`${bizUrl(businessId)}/bookings?start=${start}&end=${end}`);
+export const getBookings = (businessId: string, start: string, end: string, sync = false) =>
+  getJson<Bookings>(`${bizUrl(businessId)}/bookings?start=${start}&end=${end}${sync ? "&sync=1" : ""}`);
 
 export const createSession = (businessId: string, s: NewSession) =>
   sendJson<SessionItem>(`${bizUrl(businessId)}/sessions`, "POST", s);

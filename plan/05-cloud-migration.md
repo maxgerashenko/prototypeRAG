@@ -153,3 +153,4 @@ Considered and rejected:
 - [ ] Gemini Live spike (live mode, same tools) → compare with pipeline mode: latency, quality, cost per minute → decide OPEN-08
 - [ ] `deploy.sh`
 - [ ] Compare with Vertex AI Search (DEC-02): pilot's website as a data store, run `tests/eval/bathhouse.yaml` questions, note answer quality and latency vs our RAG — benchmark only, not adopt
+- [ ] Instant Google Calendar updates: `events.watch` push notifications to a public HTTPS endpoint (the Cloud Run URL) instead of polling every 60 s; needs channel renewal before expiry and a fallback poll. Not worth it locally (no public URL) — see `plan/03-voice-channel.md` Google Calendar sync / #165

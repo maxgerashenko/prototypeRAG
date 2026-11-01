@@ -148,3 +148,21 @@ def test_get_lists_sessions_and_hides_attendee_rows(client, biz):
     assert [a["conversation_id"] for a in item["attendees"]] == [str(conv), None]
     other_day = client.get(f"/businesses/{biz}/bookings", params={"start": "2026-11-06", "end": "2026-11-06"}).json()
     assert other_day["sessions"] == []
+
+
+def test_sync_flag_pulls_google_first_and_flags_stale_when_unreachable(client, biz, monkeypatch):
+    from app.actions.booking import session_events as G
+    from app.actions.booking.google_client import CalendarError
+
+    calls = []
+    monkeypatch.setattr(G, "sync_before_booking", lambda bid: calls.append(bid))
+    url = f"/businesses/{biz}/bookings?start=2026-11-01&end=2026-11-30"
+    assert client.get(url).json()["stale"] is False and calls == []  # a plain load never calls Google
+    assert client.get(url + "&sync=1").json()["stale"] is False and calls == [biz]
+
+    def down(bid):
+        raise CalendarError("unreachable")
+
+    monkeypatch.setattr(G, "sync_before_booking", down)
+    r = client.get(url + "&sync=1")
+    assert r.status_code == 200 and r.json()["stale"] is True  # the mirror is still returned
