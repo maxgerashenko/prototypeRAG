@@ -73,6 +73,9 @@ sharing step. Do this logged in as the demo Gmail, about 15 minutes:
    organization policy) → APIs & Services → Library → enable **Google Calendar API**.
 2. APIs & Services → OAuth consent screen (Google Auth platform → Branding/Audience): user type
    **External**, app name e.g. "prototypeRAG demo", your Gmail as support and contact email.
+   Publishing also requires an **application home page** and a **privacy policy link**; any valid
+   https page works (e.g. the repo's GitHub page and its `#readme`), they are not verified.
+   Leave terms of service and authorized domains empty (add `github.com` only if Google asks).
    Under Audience add your Gmail as a **test user**, then click **Publish app** (status "In
    production"). Reason: in "Testing" status Google expires the refresh token after 7 days; an
    unverified published app only shows an "unverified app" warning to you, which is fine for a
