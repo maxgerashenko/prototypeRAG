@@ -135,9 +135,10 @@ function EditForm(p: Props & { session: SessionItem }) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const h = Math.floor(s.start_min / 60);
+  const google = s.source === "google"; // time and name come from Google Calendar; seats and Private are ours
   // no Save button: a change is saved 2 s after the last edit, and when the sheet closes (any way)
   const patch: { name?: string; max_attendees?: number; private?: boolean } = {};
-  if (name.trim() !== s.name) patch.name = name.trim();
+  if (!google && name.trim() !== s.name) patch.name = name.trim();
   if (seats !== s.max_attendees) patch.max_attendees = seats;
   if (priv !== s.private) patch.private = priv;
   const pending = !p.ended && name.trim() !== "" && Object.keys(patch).length > 0 ? patch : null;
@@ -175,6 +176,7 @@ function EditForm(p: Props & { session: SessionItem }) {
               {pending
                 ? <StatusChip kind={p.busy ? "saving" : "dirty"} label={p.busy ? "Saving\u2026" : "Unsaved changes"} testId="session-chip" />
                 : saved && <StatusChip kind="saved" label="Saved" testId="session-chip" />}
+              {google && <span className="ss-chip" data-testid="session-google">Google Calendar</span>}
               {p.ended && <span className="ss-chip">Ended</span>}
               {isFull(s) && <span className="ss-chip full">FULL</span>}
             </span>
@@ -185,7 +187,7 @@ function EditForm(p: Props & { session: SessionItem }) {
       <div className="ss-scroll">
         <label className="ss-field">
           <span>Name</span>
-          <input value={name} maxLength={SESSION_NAME_MAX} readOnly={p.ended} enterKeyHint="done"
+          <input value={name} maxLength={SESSION_NAME_MAX} readOnly={p.ended || google} enterKeyHint="done"
             autoCapitalize="sentences" onChange={(e) => setName(e.target.value)} />
         </label>
         <div className="ss-field">
@@ -225,6 +227,8 @@ function EditForm(p: Props & { session: SessionItem }) {
                 <button type="button" className="ss-btn danger fill" disabled={p.busy} onClick={() => { latest.current.skip = true; p.onDelete(); }}>Delete</button>
               </div>
             </div>
+          ) : google ? (
+            <p className="ss-none" data-testid="session-google-hint">From Google Calendar. Move or delete it there; this page updates on refresh.</p>
           ) : (
             <button type="button" className="ss-delete" disabled={p.busy} onClick={() => setDeleting(true)}>Delete session</button>
           )}

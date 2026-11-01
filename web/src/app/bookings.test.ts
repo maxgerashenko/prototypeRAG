@@ -54,7 +54,7 @@ describe("labels", () => {
 });
 
 describe("day column", () => {
-  const data = (hours: Bookings["hours"]): Bookings => ({ timezone: "UTC", hours, bookings: [], sessions: [] });
+  const data = (hours: Bookings["hours"]): Bookings => ({ timezone: "UTC", hours, bookings: [], sessions: [], busy: [] });
   it("is one hour wider than opening hours on both sides", () => {
     const v = viewHours(data({ open: 7, close: 23 }), []);
     expect([v.start, v.end]).toEqual([6, 24]);
@@ -84,6 +84,7 @@ describe("swipe and day lookups", () => {
     expect(daySwipe(60, 50)).toBe(0);
   });
   const withDays = (): Bookings => ({
+    busy: [],
     timezone: "UTC", hours: null, sessions: [],
     bookings: [
       { ...item(600, 660), id: "b", date: "2026-11-05" },
@@ -103,6 +104,7 @@ describe("swipe and day lookups", () => {
 });
 
 const sess = (start: number, end: number, booked = 0, max = 8, date = "2026-11-05"): SessionItem => ({
+  business_id: "b1", source: "app",
   id: `s${start}`, date, start_min: start, end_min: end, name: "Yoga", max_attendees: max, private: false, booked, attendees: [],
 });
 
@@ -137,6 +139,7 @@ describe("sessions", () => {
   });
   it("sessionsOn, daySummary, bookingDays and viewHours include sessions", () => {
     const data: Bookings = {
+      busy: [],
       timezone: "UTC", hours: { open: 9, close: 17 }, bookings: [],
       sessions: [sess(18 * 60, 19 * 60), sess(600, 660), sess(600, 660, 0, 8, "2026-11-09")],
     };

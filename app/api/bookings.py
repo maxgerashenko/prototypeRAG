@@ -6,7 +6,8 @@ start day is in [start, end] (at most 62 days), plus the hours the day view shou
 Times are returned in the business timezone as minutes since local midnight, so the screen
 needs no timezone maths. `by_assistant` = the booking came out of a conversation (a call or
 chat); a booking without one was made by hand (SQL). Events typed straight into Google Calendar
-are not in the `bookings` table and don't show. A booking that runs past local midnight is
+come in through the calendar sync as `sessions` with source "google" (#149/#167). `busy` is the switch for
+other businesses' events as grey "Busy" blocks once calendars are per business: always [] in the demo. A booking that runs past local midnight is
 cut at 24:00 (the day view shows one day)."""
 
 import uuid
@@ -91,4 +92,4 @@ def list_bookings(
                 "phone": b.phone, "notes": b.notes, "by_assistant": b.conversation_id is not None,
             })
         sessions = sessions_in_range(session, business_id, lo, hi, zone)
-    return {"timezone": zone.key, "hours": open_hours(rules), "bookings": out, "sessions": sessions}
+    return {"timezone": zone.key, "hours": open_hours(rules), "bookings": out, "sessions": sessions, "busy": []}

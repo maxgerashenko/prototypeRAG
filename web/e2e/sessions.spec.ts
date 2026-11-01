@@ -707,3 +707,31 @@ test("a swipe on an empty part of the day still changes the day", async ({ page 
   await touchDrag(page, b.x + 20, b.y - 80, -150); // above the block, free area
   await expect(title(page)).toHaveText("Fri, Nov 6");
 });
+
+// --- sessions imported from Google Calendar (#167) ---
+
+const GOOGLE = sessionWith([ANN], { id: "g1", source: "google", name: "Sauna social", start_min: 1080, end_min: 1170, max_attendees: 8 });
+
+test("a Google event shows as a session of its own length, without swipe-to-delete", async ({ page }) => {
+  await openBookings(page, { sessions: [GOOGLE] });
+  const block = blocks(page);
+  await expect(block).toHaveCount(1);
+  await expect(block).toContainText("Sauna social");
+  await expect(block).toContainText("Google");
+  expect((await block.boundingBox())!.height).toBeGreaterThan(80); // 90 minutes, not one hour
+  await expect(block).not.toHaveClass(/swipeable/);
+});
+
+test("a Google session opens a sheet with the name read-only, seats editable, and attendee rows that open their conversation", async ({ page }) => {
+  const api = await openBookings(page, { sessions: [GOOGLE] });
+  await blocks(page).click();
+  await expect(page.getByTestId("session-google")).toBeVisible();
+  await expect(sheet(page).getByLabel("Name")).toHaveAttribute("readonly", "");
+  await expect(page.getByTestId("session-google-hint")).toBeVisible();
+  await expect(sheet(page).getByText("Delete session")).toHaveCount(0);
+  await sheet(page).getByLabel("Attendees").first().fill("5");
+  await expect.poll(() => api.sessionRequests.filter((r) => r.method === "PATCH").length, { timeout: 5000 }).toBe(1);
+  expect(api.sessionRequests.find((r) => r.method === "PATCH")!.body).toEqual({ max_attendees: 5 });
+  await sheet(page).getByTestId("attendee-slide").first().click();
+  await expect(page.getByRole("heading", { name: "Booked the 3 PM class" })).toBeVisible();
+});

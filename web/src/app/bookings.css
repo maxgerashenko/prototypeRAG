@@ -121,6 +121,7 @@
 .bk-block.session { background: var(--bookings-fill); border: 1px solid var(--bookings-line); color: var(--bookings-text); }
 .bk-block.session.sel { outline: 2px solid var(--text); outline-offset: 0; }
 .bk-block.session .bk-block-line { display: flex; align-items: center; gap: 8px; }
+.bk-src { font-size: 10px; font-weight: 700; letter-spacing: .04em; opacity: .75; }
 .bk-full {
   font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 1px 6px; border-radius: 6px;
   background: var(--bookings-badge); color: var(--bookings-text);
