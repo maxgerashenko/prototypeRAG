@@ -22,7 +22,7 @@ export function BarsSpinner({ progress = 1, spinning = false, size = 32 }: { pro
           x="10.6" y="1.6" width="2.8" height="6" rx="1.4"
           transform={`rotate(${i * (360 / BARS)} 12 12)`}
           style={{
-            fill: "var(--accent)",
+            fill: "var(--conversations)",
             opacity: spinning ? undefined : Math.min(1, Math.max(0, progress * BARS - i)) * 0.9,
             animationDelay: spinning ? `${(i / BARS - 1).toFixed(3)}s` : undefined,
           }}
