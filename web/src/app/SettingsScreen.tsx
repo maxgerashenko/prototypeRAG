@@ -3,13 +3,15 @@ import type { Business } from "../api";
 import { ChevronDown, ChevronLeft, PhoneIcon } from "./icons";
 import { NumberSheet } from "./NumberSheet";
 import { StatusChip } from "./StatusChip";
-import { useMinShow } from "./PullIndicator";
+import { PullRegion, useMinShow } from "./PullIndicator";
+import type { PullState } from "./pullToRefresh";
 import { fmtPhone, hostOf, monogram } from "./format";
 import { GREETING_PREFIX, barWidth, capsLabel, greetingView, questionsSummary } from "./settings";
 import type { SettingsBindings } from "./useBusinessSettings";
 
 interface Props extends SettingsBindings {
   biz: Business;
+  pull: PullState;
   onBack: () => void;
 }
 
@@ -73,6 +75,7 @@ export function SettingsScreen(p: Props) {
         </div>
       </div>
 
+      <PullRegion state={p.pull} area="settings">
       <div className="scroll set-scroll">
         <section className="set-card num-card tap" aria-label="Phone number" onClick={p.onOpenSheet}>
           <div className="num-icon"><PhoneIcon size={17} /></div>
@@ -188,6 +191,7 @@ export function SettingsScreen(p: Props) {
           })}
         </section>
       </div>
+      </PullRegion>
 
       {p.sheetOpen && (
         <NumberSheet bizId={biz.id} currentNumber={number} numbers={p.numbers} assigning={p.assigning} error={p.assignError}

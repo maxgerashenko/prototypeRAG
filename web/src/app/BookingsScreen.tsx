@@ -112,7 +112,7 @@ export function BookingsScreen(p: Props) {
         </p>
       )}
 
-      {!skeleton && <PullRegion state={p.pull}>
+      {!skeleton && <PullRegion state={p.pull} area="bookings">
       <div className="scroll bk-day" data-swipe-back="off" data-testid="bk-day"
         onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={() => { down.current = null; }}>
         <div key={day} className={`bk-inner${dir > 0 ? " from-next" : dir < 0 ? " from-prev" : ""}`}

@@ -56,7 +56,7 @@ export function ConversationsScreen({ pull, biz, convos, newIds, onBack, onCall,
         <span>{convos?.status === "ok" ? list.length : ""}</span>
       </div>
 
-      <PullRegion state={pull}>
+      <PullRegion state={pull} area="conversations">
       <div
         className="scroll convo-list"
         ref={listRef}

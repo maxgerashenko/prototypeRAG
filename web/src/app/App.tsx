@@ -310,7 +310,7 @@ export function App() {
   // Not gated on call.phase: it starts as "connecting" before any call.
   const rootRef = useRef<HTMLDivElement>(null);
   const ptrEnabled =
-    (stage === "select" || (stage === "convos" && !!selId) || (stage === "transcript" && !!transcript) ||
+    (stage === "select" || (stage === "settings" && !settings.sheetOpen) || (stage === "convos" && !!selId) || (stage === "transcript" && !!transcript) ||
       (stage === "bookings" && !bookings.selected && !bookings.draft && !bookings.selectedSession && !bookings.busy)) && !live;
   const ptr = usePullToRefresh(rootRef, {
     enabled: ptrEnabled,
@@ -319,6 +319,7 @@ export function App() {
       if (stage === "convos" && selId) return Promise.allSettled([loadBusinesses(), loadConvos(selId)]);
       if (stage === "transcript") return refreshDetail();
       if (stage === "bookings") return bookings.onRefresh();
+      if (stage === "settings") return settings.onRefresh();
     },
     onArmed: () => {
       if (stage === "select") vibrateTick();
@@ -398,7 +399,7 @@ export function App() {
       )}
 
       {stage === "settings" && selId && (
-        <SettingsScreen biz={fallbackBiz(selId)} {...settings} onBack={leaveSettings} />
+        <SettingsScreen pull={ptr} biz={fallbackBiz(selId)} {...settings} onBack={leaveSettings} />
       )}
 
       {stage === "bookings" && selId && (

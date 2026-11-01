@@ -279,3 +279,54 @@ test("while a phone call is in progress: a pull on the picker does nothing", asy
   expect(await marker(page)).toBe(42);
   expect(await vib(page)).toEqual([]);
 });
+
+test("settings: pull refetches the greeting and questions in place; the spinner is the grey Settings colour", async ({ page }) => {
+  const api = await setup(page, { businesses: [BAKERY] });
+  await page.locator(".biz-pick").click();
+  await page.getByTestId("settings-row").click();
+  await expect(page.locator("[data-screen=settings]")).toBeVisible();
+  await expect.poll(() => count(api, "/businesses/b1/greeting")).toBeGreaterThan(0);
+  const before = count(api, "/businesses/b1/greeting");
+  await mark(page);
+  const f = await finger(page, "[data-screen=settings] .set-scroll", 200);
+  await expect(page.getByTestId("ptr")).toBeVisible();
+  const color = await page.locator("[data-screen=settings] .bars-spinner rect").first().evaluate((el) => getComputedStyle(el).fill);
+  const grey = await page.evaluate(() => {
+    const d = document.createElement("i");
+    d.style.color = "var(--misc)";
+    document.body.append(d);
+    const c = getComputedStyle(d).color;
+    d.remove();
+    return c;
+  });
+  expect(color).toBe(grey);
+  await f.end();
+  await expect.poll(() => count(api, "/businesses/b1/greeting")).toBe(before + 1);
+  expect(await marker(page)).toBe(42); // refetched in place, no page reload
+});
+
+test("bookings: the spinner uses the Bookings colour and lines up with the calendar's + icons", async ({ page }) => {
+  await setup(page, { businesses: [BAKERY] });
+  await page.locator(".biz-pick").click();
+  await page.getByTestId("bookings-row").click();
+  await expect(page.getByTestId("bk-day")).toBeVisible();
+  await expect(page.locator(".bk-hour-add").first()).toBeVisible();
+  await page.waitForTimeout(500); // the day's slide-in animation has settled
+  const f = await finger(page, "[data-testid=bk-day]", 200);
+  const spinner = page.locator("[data-screen=bookings] .bars-spinner");
+  await expect(spinner).toBeVisible();
+  const box = (await spinner.boundingBox())!;
+  const plus = (await page.locator(".bk-hour-add span").first().boundingBox())!;
+  expect(Math.abs(box.x + box.width / 2 - (plus.x + plus.width / 2))).toBeLessThan(2);
+  const fill = await spinner.locator("rect").first().evaluate((el) => getComputedStyle(el).fill);
+  const purple = await page.evaluate(() => {
+    const d = document.createElement("i");
+    d.style.color = "var(--bookings)";
+    document.body.append(d);
+    const c = getComputedStyle(d).color;
+    d.remove();
+    return c;
+  });
+  expect(fill).toBe(purple);
+  await f.end();
+});
