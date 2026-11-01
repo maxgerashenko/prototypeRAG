@@ -54,9 +54,9 @@ def get_client() -> CalendarClient | None:
     """None unless the Google Calendar backend is on: sessions then stay Postgres-only."""
     global _client
     if _client is None and get_settings().booking_backend == "google_calendar":
-        from app.actions.booking.google_client import GoogleCalendarClient
+        from app.actions.booking.google_client import client_from_settings
 
-        _client = GoogleCalendarClient(get_settings().google_calendar_credentials_file)
+        _client = client_from_settings()
     return _client
 
 

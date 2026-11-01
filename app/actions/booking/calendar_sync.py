@@ -31,7 +31,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.actions.booking.google_client import (
-    CalendarError, CalendarEventsClient, GoogleCalendarClient, SyncTokenExpired,
+    CalendarError, CalendarEventsClient, GoogleCalendarClient, SyncTokenExpired, client_from_settings,
 )
 from app.config import get_settings
 from app.db.models import Booking, Business, CalendarEvent, CalendarSyncState
@@ -229,7 +229,7 @@ _client: GoogleCalendarClient | None = None
 def default_client() -> GoogleCalendarClient:
     global _client
     if _client is None:
-        _client = GoogleCalendarClient(get_settings().google_calendar_credentials_file)
+        _client = client_from_settings()
     return _client
 
 

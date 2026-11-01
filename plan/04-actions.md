@@ -58,9 +58,55 @@ class BookingBackend(Protocol):
 | Backend | When | Notes |
 |---|---|---|
 | **Internal** (Postgres `bookings` table + capacity rules) | First — no external dependency | Tables/slots per time window, max party size |
-| **Google Calendar API** (DEC-48) | Pilot, right after the internal backend | Free/busy query + create event; pilot uses a service account with the calendar shared to it, per-business OAuth in stage 3 |
+| **Google Calendar API** (DEC-48) | Pilot, right after the internal backend | Free/busy query + create event; pilot auth is either OAuth user credentials of the calendar owner (no key, DEC-48) or a service account with the calendar shared to it; per-business self-service OAuth in stage 3 |
 | Cal.com / Calendly | Businesses using them | Cal.com is open-source with a good API |
 | OpenTable / Resy etc. | Later | Partner APIs, access is restricted |
+
+## Google Calendar auth setup (#163, no service account key)
+
+Some organizations block service account keys (`iam.disableServiceAccountKeyCreation`).
+**Recommended for the single demo calendar: OAuth user credentials.** The calendar owner
+(the demo Gmail) consents once; the app then acts as that user, so the calendar needs no
+sharing step. Do this logged in as the demo Gmail, about 15 minutes:
+
+1. console.cloud.google.com → create a project (a personal one under the Gmail account avoids the
+   organization policy) → APIs & Services → Library → enable **Google Calendar API**.
+2. APIs & Services → OAuth consent screen (Google Auth platform → Branding/Audience): user type
+   **External**, app name e.g. "prototypeRAG demo", your Gmail as support and contact email.
+   Under Audience add your Gmail as a **test user**, then click **Publish app** (status "In
+   production"). Reason: in "Testing" status Google expires the refresh token after 7 days; an
+   unverified published app only shows an "unverified app" warning to you, which is fine for a
+   personal demo (Advanced → Go to … (unsafe)). Data access/scopes: you can skip adding scopes here.
+3. APIs & Services → Credentials → Create credentials → **OAuth client ID** → application type
+   **Desktop app** → Download JSON. Save it as `~/.config/prototyperag/gcal-oauth-client.json`.
+   Never commit it.
+4. calendar.google.com → Other calendars → + → Create new calendar ("Demo bookings", timezone
+   America/New_York), created in the Gmail UI. Not the primary calendar. Settings and sharing →
+   Integrate calendar → copy the **Calendar ID** (`…@group.calendar.google.com`). Add a few test
+   events (one plain, one recurring weekly).
+5. On the Mac, once:
+   `uv run python scripts/google_calendar_login.py --client-file ~/.config/prototyperag/gcal-oauth-client.json`
+   A browser opens: pick the demo Gmail, accept the warning, allow "See, edit, share, and
+   permanently delete all the calendars you can access" (the Calendar `calendar.events` and
+   `calendar.freebusy` scopes). The script saves `~/.config/prototyperag/gcal-token.json` (mode 600)
+   and refuses to write inside the repo.
+6. `.env`:
+   ```
+   BOOKING_BACKEND=google_calendar
+   GOOGLE_CALENDAR_ID=<the calendar id from step 4>
+   GOOGLE_CALENDAR_TOKEN_FILE=/Users/<you>/.config/prototyperag/gcal-token.json
+   ```
+   Leave `GOOGLE_CALENDAR_CREDENTIALS_FILE` empty (the token file wins if both are set).
+7. Check: see "Google Calendar auth without a key" in the Test on Mac list
+   ([03-voice-channel.md](03-voice-channel.md)).
+
+Secrets: the OAuth client JSON and the token file (refresh token) give full access to the
+calendar. They live only in `~/.config/prototyperag/`, never in the repo, `.env.example`, issues
+or chat. If one leaks, revoke at myaccount.google.com/permissions and rerun step 5.
+If the token stops working (`invalid_grant`, `cannot load OAuth token file` in the log), rerun step 5.
+A **service account key** stays supported (`GOOGLE_CALENDAR_CREDENTIALS_FILE`, calendar shared to its
+email) where the organization allows keys. If the project must stay in the organization, the
+org policy can instead be relaxed by an Organization Policy Administrator.
 
 ## Conversation summaries
 
@@ -127,6 +173,7 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 - [x] Post-conversation summary job (#43): `actions/summary.py`, run from `POST /twilio/status`; stores a one-line summary, intent, outcome (info_request, booked, message, transferred, unresolved), follow_up on `conversations` (migration 0006). Sentiment, contact details and owner notification are not done yet. Needs a live check on the Mac (see 03 "Test on Mac")
 - [ ] Owner dashboard: conversations, bookings, unanswered questions
 - [ ] Google Calendar backend for the pilot (service account, free/busy, create event, `external_ref`) — DEC-48
+- [x] Calendar auth without a service account key (#163): `GOOGLE_CALENDAR_TOKEN_FILE` = OAuth user token from `scripts/google_calendar_login.py` (one-time consent, token saved outside the repo, refresh token → access tokens by google-auth); `GoogleCalendarClient(credentials_file, token_file)` prefers it over the service account key; setup steps in "Google Calendar auth setup" above; mocked tests in `tests/test_google_auth.py`; live check under "Test on Mac"
 - [x] Booking tools wired into chat and voice, per-business enabled tools (#151): booking tools are `Tool(optional=True)`, so `TOOLS` holds only the always-on tools; `registry.tools_for(business_id)` adds the ones listed in `businesses.settings["enabled_tools"]` (e.g. `{"enabled_tools": ["check_availability", "create_booking", "cancel_booking"]}`; missing/malformed/unknown names = off). The executor refuses an optional tool the business didn't enable, even if the model calls it. Chat (`answer.py`) and the voice session (`_load_business`, also the warm-up request) send the per-business list, and the prompt gets a booking rule (`prompt.BOOKING_PROMPT`) only then. Tested with fakes (`tests/test_enabled_tools.py`); live check under "Test on Mac". `list_sessions`/`join_session` follow the same way once the group-sessions tools (#149) register with `optional=True`; the setting already accepts their names. No settings UI yet (SQL, like `transfer_number`)
 - [ ] Google Calendar per-business OAuth (R14) — stage 3
 - [ ] Owner notifications
