@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+if str(REPO) not in sys.path:  # run by path (`python scripts/...`): only scripts/ is on sys.path
+    sys.path.insert(0, str(REPO))
 DEFAULT_TOKEN = "~/.config/prototyperag/gcal-token.json"
 
 
