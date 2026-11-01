@@ -95,6 +95,13 @@ def enabled_tool_names(business_id: uuid.UUID) -> frozenset[str]:
     with tenant_session(business_id) as session:
         settings = session.scalar(select(Business.settings).where(Business.id == business_id)) or {}
     names = settings.get("enabled_tools")
+    if "enabled_tools" not in settings:
+        # Calendar bookings (DEC-48) are the point of that backend: a business that never set
+        # the list gets every optional tool; an explicit list (even empty) still wins.
+        from app.config import get_settings
+
+        if get_settings().booking_backend == "google_calendar":
+            return frozenset(_OPTIONAL_SCHEMAS)
     if not isinstance(names, list):
         return frozenset()
     return frozenset(n for n in names if isinstance(n, str) and n in _OPTIONAL_SCHEMAS)

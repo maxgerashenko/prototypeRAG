@@ -96,6 +96,7 @@ def test_enabling_is_per_business(make_business):
 def test_prompt_mentions_bookings_only_when_enabled():
     assert tools_prompt(frozenset()) == "" and tools_prompt({"search_business_info"}) == ""
     assert tools_prompt(frozenset(BOOKING)) == BOOKING_PROMPT
+    assert "list_sessions" in tools_prompt({"list_sessions"}) and "create_booking" not in tools_prompt({"list_sessions"})
     off = build_prompt(None, [], [], "hi")[0]["content"]
     on = build_prompt(None, [], [], "hi", enabled_tools=frozenset(BOOKING))[0]["content"]
     assert "create_booking" not in off and off.startswith(SYSTEM_PROMPT)
@@ -137,3 +138,31 @@ def test_voice_call_without_the_setting_is_unchanged(make_business, monkeypatch)
     s = _start(make_business({}), monkeypatch)
     assert BOOKING_PROMPT not in s._system_prompt
     assert s._tools is session_mod.TOOLS
+
+
+def test_calendar_backend_enables_all_optional_tools_when_unset(monkeypatch):
+    """DB-free: the business settings are faked."""
+    from contextlib import contextmanager
+
+    from app.actions import registry
+    from app.config import get_settings
+
+    current = {}
+
+    @contextmanager
+    def fake_session(_bid):
+        class S:
+            def scalar(self, _q):
+                return current
+
+        yield S()
+
+    monkeypatch.setattr("app.db.tenant_session", fake_session)
+    bid = uuid.uuid4()
+    monkeypatch.setattr(get_settings(), "booking_backend", "google_calendar")
+    assert {"list_sessions", "join_session", *BOOKING} <= registry.enabled_tool_names(bid)
+    current["enabled_tools"] = []  # an explicit list still wins
+    assert registry.enabled_tool_names(bid) == frozenset()
+    current.clear()
+    monkeypatch.setattr(get_settings(), "booking_backend", "internal")
+    assert registry.enabled_tool_names(bid) == frozenset()
