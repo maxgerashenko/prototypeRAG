@@ -132,7 +132,7 @@ class FakeModel:
         self.calls = 0
         self.answers: dict[str, list[dict]] = {}  # substring of the user message -> raw facts
 
-    def __call__(self, messages, schema, name, model=None):
+    def __call__(self, messages, schema, name, model=None, **kwargs):
         self.calls += 1
         user = messages[-1]["content"]
         for needle, facts in self.answers.items():
@@ -206,18 +206,18 @@ def test_rerun_on_unchanged_pages_changes_nothing(business_id, chrome_text, mode
     assert first["facts_created"] == 1
     calls = model.calls
     with tenant_session(business_id) as s:
-        before = [(f.id, f.status, f.last_seen_at) for f in s.scalars(select(Fact))]
+        before = [(f.id, f.status, f.last_seen_at) for f in s.scalars(select(Fact).where(Fact.business_id == business_id))]
 
     again = run.extract_facts(business_id)
     assert model.calls == calls and again["pages_extracted"] == 0 and again["facts_created"] == 0
     with tenant_session(business_id) as s:
-        assert [(f.id, f.status, f.last_seen_at) for f in s.scalars(select(Fact))] == before
+        assert [(f.id, f.status, f.last_seen_at) for f in s.scalars(select(Fact).where(Fact.business_id == business_id))] == before
 
     # --force redoes the extraction but lands on the same single active fact and source
     run.extract_facts(business_id, force=True)
     with tenant_session(business_id) as s:
-        assert [f.status for f in s.scalars(select(Fact))] == ["active"]
-        assert len(s.scalars(select(FactSource)).all()) == 1
+        assert [f.status for f in s.scalars(select(Fact).where(Fact.business_id == business_id))] == ["active"]
+        assert len(s.scalars(select(FactSource).where(FactSource.business_id == business_id)).all()) == 1
 
 
 def test_dry_run_writes_nothing(business_id, chrome_text, model, capsys):
@@ -228,7 +228,7 @@ def test_dry_run_writes_nothing(business_id, chrome_text, model, capsys):
     assert "A Bathhouse Day Pass starts at $39." in out and "quote not found in page" in out
     assert _facts(business_id) == {}
     with tenant_session(business_id) as s:
-        assert all(p.extracted_hash is None for p in s.scalars(select(Page)))
+        assert all(p.extracted_hash is None for p in s.scalars(select(Page).where(Page.business_id == business_id)))
 
 
 def test_conflict_best_page_type_wins_and_loser_is_kept(business_id, chrome_text, model):
@@ -300,7 +300,7 @@ def test_failed_page_is_retried_and_does_not_stop_the_others(business_id, chrome
     real = FakeModel()
     real.answers["Starts at $39"] = [raw_fact(quote="Starts at $39")]
 
-    def flaky(messages, schema, name, model=None):
+    def flaky(messages, schema, name, model=None, **kwargs):
         if "header/footer" in messages[-1]["content"]:
             raise RuntimeError("LM Studio down")
         return real(messages, schema, name, model)
@@ -311,3 +311,15 @@ def test_failed_page_is_retried_and_does_not_stop_the_others(business_id, chrome
     with tenant_session(business_id) as s:
         chrome = s.scalar(select(Page).where(Page.business_id == business_id, Page.page_type == "site_chrome"))
         assert chrome.extracted_hash is None  # retried next run
+
+
+def test_fact_calls_are_bounded(monkeypatch):
+    # a model looping inside its JSON must fail the page, not hang the crawl
+    seen = []
+    monkeypatch.setattr(facts_mod, "chat_json", lambda *a, **kw: seen.append(kw) or {"facts": []})
+    page = Page(business_id=uuid.uuid4(), url="https://x.com/day-pass", markdown="# Day Pass\n\nStarts at $39.",
+                content_hash="d1", page_type="service")
+    facts_mod.extract_page_facts(page, "Bathhouse", {})
+    assert seen and all(
+        kw["max_tokens"] == facts_mod.FACT_MAX_TOKENS and kw["timeout"] == facts_mod.FACT_TIMEOUT_SECONDS for kw in seen
+    )

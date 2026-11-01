@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     # fact extraction (plan/07 §5.3, OPEN-20) is an offline job, so it may use a stronger
     # model than the chat one; empty = LLM_MODEL
     facts_llm_model: str = ""
+    # pages sent to the facts model at once; match LM Studio's parallel slots for that
+    # model (`lms ps`, `lms load --parallel N`) -- more requests than slots just queue.
+    # 4 for gemma-4-12b on the 64 GB Mac: at 8, long location pages ran past the 300 s
+    # fact-call timeout (bathhouse re-crawl, 2026-11-01)
+    facts_parallel: int = 4
     embed_base_url: str = "http://localhost:1234/v1"
     embed_api_key: str = "lm-studio"
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"
