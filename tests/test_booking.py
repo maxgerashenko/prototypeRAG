@@ -188,6 +188,8 @@ def test_tool_cancel_uses_caller_id(business_id):
     out = executor.execute(ctx, "create_booking", {"date": "2099-11-05", "time": "14:00", "name": "A", "confirmed": True})
     ref = out.split("Reference ")[1].split(".")[0]
     assert executor.execute(_ctx(business_id, "+15550777777"), "cancel_booking", {"reference": ref, "confirmed": True}).startswith("No upcoming")
+    with tenant_session(business_id) as s:
+        assert s.scalar(select(Booking.id)) is not None  # the stranger's attempt changed nothing
     assert executor.execute(ctx, "cancel_booking", {"reference": ref, "confirmed": True}).startswith("Cancelled")
 
 

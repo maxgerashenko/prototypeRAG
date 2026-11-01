@@ -1058,3 +1058,42 @@ def test_fetch_sitemap_falls_back_to_default_path():
     assert fetch_sitemap("https://x.test", client, ["https://x.test/gone.xml"]) == "<urlset/>"
     assert seen == ["https://x.test/gone.xml", "https://x.test/sitemap.xml"]
     assert fetch_sitemap("https://x.test", _sitemap_client({}, [])) is None
+
+
+# --- chunk_text: sizing, hard split, overlap (app/ingest/chunk.py) ---
+
+
+def test_chunk_text_empty_and_short_text():
+    from app.ingest.chunk import chunk_text
+
+    assert chunk_text("   \n ") == []
+    assert chunk_text(" short text ") == ["short text"]
+
+
+def test_chunk_text_packs_paragraphs_with_a_word_boundary_overlap():
+    from app.ingest.chunk import chunk_text
+
+    paras = [f"Paragraph {i} " + "word " * 30 for i in range(6)]  # ~160 chars each
+    chunks = chunk_text("\n\n".join(paras), target_tokens=100)  # 400-char chunks
+    assert len(chunks) >= 2
+    assert all(len(c) <= 400 + 50 + 4 for c in chunks)  # target + overlap (12.5%) + separator
+    first_tail = chunks[0].split()[-3:]
+    assert " ".join(first_tail) in chunks[1]  # the previous chunk's tail opens the next
+    assert not chunks[1].startswith("ord")  # never a half word
+
+
+def test_chunk_text_hard_splits_one_oversized_paragraph():
+    from app.ingest.chunk import chunk_text
+
+    chunks = chunk_text("alpha " * 500, target_tokens=50, overlap_ratio=0)  # 200-char chunks, no overlap
+    assert len(chunks) > 5 and all(len(c) <= 200 for c in chunks)
+    assert " ".join(chunks).split() == ["alpha"] * 500  # nothing lost
+
+
+def test_chunk_markdown_numbers_chunks_continuously_across_sections():
+    from app.ingest.chunk import chunk_markdown
+
+    md = "# A\n\nfirst body\n\n# B\n\nsecond body\n"
+    drafts = chunk_markdown(md)
+    assert [(d.section_heading, d.text, d.chunk_index) for d in drafts] == [
+        ("A", "first body", 0), ("B", "second body", 1)]
