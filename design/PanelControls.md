@@ -33,6 +33,8 @@ hints `settingsHint()` (settings.ts), `bookingsHint()` (bookings.ts), `conversat
   is empty. Bookings and Settings keep their count/status in the hint instead.
 - A new control picks the area of what it opens. No area fits: grey `--chip` / `--misc` like Settings.
 
+The loading spinner of the opened screen wears the same glyph colour ([PullToRefresh.md](PullToRefresh.md)).
+
 ## Hints so far
 
 | Control | Hint |

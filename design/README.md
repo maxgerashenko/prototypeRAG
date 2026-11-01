@@ -126,6 +126,7 @@ mobile, keyboard shortcuts (Space / Esc / Backspace). Keep them.
 - [colors.md](colors.md) — every `:root` color token and what it means. Pattern docs refer to
   these tokens, not to other components.
 - [PanelControls.md](PanelControls.md) — the big rows on a business's open card (Business settings, Bookings, Conversations): icon tile, title, grey hint, chevron.
+- [PullToRefresh.md](PullToRefresh.md) — pull a list down to reload it in place; spinner colour follows the opening control, Bookings aligns it with the "+" icons.
 - [SeatSlider.md](SeatSlider.md) — attendees bar 1-30 with a small Private switch.
 - [StatusChip.md](StatusChip.md) — save-state pill (Saving… / Unsaved changes / Saved), from the greeting "Cached" chip.
 - [ControlSubtitle.md](ControlSubtitle.md) — the grey `·`-separated line under a control's title.
