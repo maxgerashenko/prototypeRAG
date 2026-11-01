@@ -1,5 +1,5 @@
 // Shapes of the backend's JSON — app/api/chat.py, app/api/businesses.py, app/api/conversations.py,
-// app/api/business_settings.py, app/voice/twilio_numbers.py,
+// app/api/business_settings.py, app/api/sessions.py, app/voice/twilio_numbers.py,
 // app/voice/browser_ws.py, app/voice/twilio_routes.py, app/voice/call_feed.py.
 
 export interface Source {
@@ -255,15 +255,70 @@ export interface BookingItem {
   by_assistant: boolean; // booked on a call or chat (it has a conversation)
 }
 
+export interface SessionAttendee {
+  id: string;
+  name: string;
+  phone: string | null;
+  by_assistant: boolean;
+  conversation_id: string | null; // the conversation that booked them (null: added by hand)
+}
+
+/** A group session (class): one start hour, `max_attendees` seats; `attendees` are its bookings. */
+export interface SessionItem {
+  id: string;
+  date: string; // YYYY-MM-DD, business-local
+  start_min: number;
+  end_min: number;
+  name: string;
+  max_attendees: number;
+  private: boolean; // closed to the public: the assistant never books into it, only people added by hand
+  booked: number;
+  attendees: SessionAttendee[];
+}
+
+export interface NewSession {
+  date: string;
+  hour: number;
+  name: string;
+  max_attendees: number;
+  private: boolean;
+}
+
+export interface SessionDeleted {
+  cancelled_bookings: number;
+  texted: number;
+  no_phone: number;
+}
+
 export interface Bookings {
   timezone: string;
   hours: { open: number; close: number } | null; // hours of the booking rules; null = none set
   bookings: BookingItem[];
+  sessions: SessionItem[];
 }
 
 /** Confirmed bookings whose local start day is in [start, end] (YYYY-MM-DD, at most 62 days). */
 export const getBookings = (businessId: string, start: string, end: string) =>
   getJson<Bookings>(`${bizUrl(businessId)}/bookings?start=${start}&end=${end}`);
+
+export const createSession = (businessId: string, s: NewSession) =>
+  sendJson<SessionItem>(`${bizUrl(businessId)}/sessions`, "POST", s);
+
+export const updateSession = (
+  businessId: string,
+  id: string,
+  patch: { name?: string; max_attendees?: number; private?: boolean },
+) => sendJson<SessionItem>(`${bizUrl(businessId)}/sessions/${encodeURIComponent(id)}`, "PATCH", patch);
+
+/** Cancels the session and its bookings; the result says how many callers were texted. */
+export const deleteSession = (businessId: string, id: string) =>
+  sendJson<SessionDeleted>(`${bizUrl(businessId)}/sessions/${encodeURIComponent(id)}`, "DELETE");
+
+export const removeAttendee = (businessId: string, sessionId: string, bookingId: string) =>
+  sendJson<SessionItem & { texted: boolean }>(
+    `${bizUrl(businessId)}/sessions/${encodeURIComponent(sessionId)}/attendees/${encodeURIComponent(bookingId)}`,
+    "DELETE",
+  );
 
 // --- Twilio call page (app/voice/twilio_routes.py) ---
 

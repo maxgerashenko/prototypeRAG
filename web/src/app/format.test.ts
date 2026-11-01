@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatsLabel, outcomeLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText, fmtPhone } from "./format";
+import { chatsLabel, conversationsHint, outcomeLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText, fmtPhone } from "./format";
 
 // dates are built in local time, so the tests pass in any time zone
 const local = (y: number, mo: number, d: number, h: number, mi: number, s = 0) =>
@@ -65,6 +65,9 @@ describe("labels", () => {
     expect(chatsLabel(0)).toBe("No chats yet");
     expect(chatsLabel(1)).toBe("1 chat");
     expect(chatsLabel(3)).toBe("3 chats");
+    expect(conversationsHint(0)).toBe("None yet");
+    expect(conversationsHint(1)).toBe("All 1 conversation");
+    expect(conversationsHint(5)).toBe("All 5 conversations");
     expect(plural(1, "msg", "msgs")).toBe("1 msg");
     expect(plural(5, "msg", "msgs")).toBe("5 msgs");
   });

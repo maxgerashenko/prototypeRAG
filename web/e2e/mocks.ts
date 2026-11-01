@@ -3,7 +3,7 @@
 
 import type { Page, Request, Route, WebSocketRoute } from "@playwright/test";
 import type {
-  Business, BookingItem, ConversationDetail, ConversationSource, ConversationSummary, GreetingStatus, TopQuestions, TwilioNumbers, VoiceEvent,
+  Business, BookingItem, SessionItem, ConversationDetail, ConversationSource, ConversationSummary, GreetingStatus, TopQuestions, TwilioNumbers, VoiceEvent,
 } from "../src/api";
 
 const MIN = 60_000;
@@ -43,6 +43,18 @@ export function booking(over: Partial<BookingItem> = {}): BookingItem {
   };
 }
 
+/** A group session at 14:00 on 2026-11-05 (one hour, 8 seats, nobody booked) unless overridden. */
+export function session(over: Partial<SessionItem> = {}): SessionItem {
+  return {
+    id: "s1", date: "2026-11-05", start_min: 840, end_min: 900, name: "Yoga flow", max_attendees: 8, private: false, booked: 0, attendees: [], ...over,
+  };
+}
+
+/** A session with these attendees; `booked` follows the list. */
+export function sessionWith(attendees: SessionItem["attendees"], over: Partial<SessionItem> = {}): SessionItem {
+  return session({ attendees, booked: attendees.length, ...over });
+}
+
 export interface ApiState {
   businesses: Business[];
   conversations: Record<string, ConversationDetail[]>;
@@ -61,6 +73,12 @@ export interface ApiState {
   bookingRequests: string[];
   /** Confirmed bookings of every business; the route returns those inside ?start&end. */
   bookings: BookingItem[];
+  /** Group sessions of every business; GET bookings returns those inside ?start&end. */
+  sessions: SessionItem[];
+  /** Session writes seen: "POST|PATCH|DELETE path" with the JSON body (if any). */
+  sessionRequests: { method: string; path: string; body: unknown }[];
+  /** Answer the next POST /sessions with this status and a {detail}; cleared after use. */
+  sessionPostFail: { status: number; detail: string } | null;
   /** Opening hours of the booking rules; null = none set. */
   bookingHours: { open: number; close: number } | null;
   /** GET /twilio/number; null = TWILIO_PHONE_NUMBER not set. */
@@ -69,7 +87,7 @@ export interface ApiState {
 
 export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise<ApiState> {
   const api: ApiState = {
-    businesses: [], conversations: {}, fail: new Set(), delay: {}, requests: [], bookingRequests: [], bookings: [], bookingHours: null, mainNumber: null,
+    businesses: [], conversations: {}, fail: new Set(), delay: {}, requests: [], bookingRequests: [], bookings: [], sessions: [], sessionRequests: [], sessionPostFail: null, bookingHours: null, mainNumber: null,
     greeting: { text: "", is_default: true, cached: false, cached_at: null, max_length: 300 },
     questions: { total_questions: 0, conversations: 0, days: 30, questions: [] },
     numbers: { numbers: [], error: null },
@@ -114,6 +132,39 @@ export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise
         }
         return reply(route, "greeting-save", api.greeting);
       }
+      if (sub === "sessions") {
+        // like app/api/sessions.py; PATCH/DELETE/attendee-DELETE act on api.sessions
+        const [, , , , sid, , bid] = path.split("/");
+        const body = method === "POST" || method === "PATCH" ? route.request().postDataJSON() : undefined;
+        api.sessionRequests.push({ method, path, body });
+        const fix = (x: SessionItem) => ({ ...x, booked: x.attendees.length });
+        if (method === "POST") {
+          if (api.sessionPostFail) {
+            const f = api.sessionPostFail;
+            api.sessionPostFail = null;
+            return route.fulfill({ status: f.status, ...json({ detail: f.detail }) });
+          }
+          const b = body as { date: string; hour: number; name: string; max_attendees: number; private?: boolean };
+          const made = session({ id: `s${api.sessions.length + 100}`, date: b.date, start_min: b.hour * 60, end_min: b.hour * 60 + 60,
+            name: b.name, max_attendees: b.max_attendees, private: !!b.private });
+          api.sessions.push(made);
+          return route.fulfill(json(made));
+        }
+        const found = api.sessions.find((x) => x.id === sid);
+        if (!found) return route.fulfill({ status: 404, ...json({ detail: "session not found" }) });
+        if (method === "PATCH") {
+          Object.assign(found, body);
+          return route.fulfill(json(fix(found)));
+        }
+        if (bid) {
+          const gone = found.attendees.find((a) => a.id === bid);
+          found.attendees = found.attendees.filter((a) => a.id !== bid);
+          return route.fulfill(json({ ...fix(found), texted: !!gone?.phone }));
+        }
+        api.sessions = api.sessions.filter((x) => x.id !== sid);
+        const phones = found.attendees.filter((a) => a.phone).length;
+        return route.fulfill(json({ cancelled_bookings: found.attendees.length, texted: phones, no_phone: found.attendees.length - phones }));
+      }
       if (sub === "bookings") {
         const q = new URL(route.request().url());
         api.bookingRequests.push(q.pathname + q.search);
@@ -121,6 +172,7 @@ export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise
         return reply(route, "bookings", {
           timezone: "America/New_York", hours: api.bookingHours,
           bookings: api.bookings.filter((b) => b.date >= start && b.date <= end),
+          sessions: api.sessions.filter((x) => x.date >= start && x.date <= end).map((x) => ({ ...x, booked: x.attendees.length })),
         });
       }
       if (sub === "top-questions") return reply(route, "questions", api.questions);
