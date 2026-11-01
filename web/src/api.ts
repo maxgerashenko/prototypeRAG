@@ -266,6 +266,8 @@ export interface SessionAttendee {
 /** A group session (class): one start hour, `max_attendees` seats; `attendees` are its bookings. */
 export interface SessionItem {
   id: string;
+  business_id: string; // kept even though the demo shows every calendar event to every business
+  source: "app" | "google"; // google = imported from Google Calendar: time and name come from there
   date: string; // YYYY-MM-DD, business-local
   start_min: number;
   end_min: number;
@@ -295,6 +297,14 @@ export interface Bookings {
   hours: { open: number; close: number } | null; // hours of the booking rules; null = none set
   bookings: BookingItem[];
   sessions: SessionItem[];
+  busy: BusyItem[]; // other businesses' events as anonymous blocks; always [] in the demo (one shared calendar)
+}
+
+export interface BusyItem {
+  date: string;
+  start_min: number;
+  end_min: number;
+  label: string;
 }
 
 /** Confirmed bookings whose local start day is in [start, end] (YYYY-MM-DD, at most 62 days). */

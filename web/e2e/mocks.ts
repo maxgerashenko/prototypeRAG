@@ -46,7 +46,7 @@ export function booking(over: Partial<BookingItem> = {}): BookingItem {
 /** A group session at 14:00 on 2026-11-05 (one hour, 8 seats, nobody booked) unless overridden. */
 export function session(over: Partial<SessionItem> = {}): SessionItem {
   return {
-    id: "s1", date: "2026-11-05", start_min: 840, end_min: 900, name: "Yoga flow", max_attendees: 8, private: false, booked: 0, attendees: [], ...over,
+    id: "s1", business_id: "b1", source: "app", date: "2026-11-05", start_min: 840, end_min: 900, name: "Yoga flow", max_attendees: 8, private: false, booked: 0, attendees: [], ...over,
   };
 }
 
@@ -173,6 +173,7 @@ export async function mockApi(page: Page, init: Partial<ApiState> = {}): Promise
           timezone: "America/New_York", hours: api.bookingHours,
           bookings: api.bookings.filter((b) => b.date >= start && b.date <= end),
           sessions: api.sessions.filter((x) => x.date >= start && x.date <= end).map((x) => ({ ...x, booked: x.attendees.length })),
+          busy: [],
         });
       }
       if (sub === "top-questions") return reply(route, "questions", api.questions);

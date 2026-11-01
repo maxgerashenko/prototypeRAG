@@ -117,7 +117,7 @@ def _item(s: GroupSession, attendees: list[Booking], zone: ZoneInfo) -> dict:
     # length, not the wall clock (wrong on DST-change days); imported events may be longer than an hour
     end_min = min(start_min + int((s.ends_at - s.starts_at).total_seconds() // 60), 24 * 60)
     return {
-        "id": str(s.id), "date": a.date().isoformat(),
+        "id": str(s.id), "business_id": str(s.business_id), "date": a.date().isoformat(),
         "start_min": start_min, "end_min": end_min,
         "name": s.name, "max_attendees": s.max_attendees, "private": s.private, "source": s.source,
         "booked": len(attendees),
@@ -134,17 +134,28 @@ def session_item(session, business_id: uuid.UUID, s: GroupSession, zone: ZoneInf
 
 
 def sessions_in_range(session, business_id: uuid.UUID, lo: datetime, hi: datetime, zone: ZoneInfo) -> list[dict]:
-    """Active sessions starting in [lo, hi), with their confirmed attendees."""
+    """Active sessions starting in [lo, hi), with their confirmed attendees. Demo rule (Max, 2026-11-01): one
+    shared calendar, so sessions imported from Google show for every business; `business_id` stays in each item."""
     rows = session.scalars(
         select(GroupSession).where(
-            GroupSession.business_id == business_id, GroupSession.status == "active",
-            GroupSession.starts_at >= lo, GroupSession.starts_at < hi,
+            (GroupSession.business_id == business_id) | (GroupSession.source == "google"),
+            GroupSession.status == "active", GroupSession.starts_at >= lo, GroupSession.starts_at < hi,
         ).order_by(GroupSession.starts_at)
     ).all()
     by_session: dict[uuid.UUID, list[Booking]] = {}
-    for b in _confirmed(session, business_id, [r.id for r in rows]):
+    for b in session.scalars(
+        select(Booking).where(Booking.session_id.in_([r.id for r in rows]), Booking.status == "confirmed")
+        .order_by(Booking.created_at, Booking.name, Booking.id)
+    ).all() if rows else []:
         by_session.setdefault(b.session_id, []).append(b)
     return [_item(r, by_session.get(r.id, []), zone) for r in rows]
+
+
+def _owner(session, business_id: uuid.UUID, sid: uuid.UUID) -> uuid.UUID:
+    """The business a session belongs to: a Google session is editable from every business (demo rule), so
+    its seats, attendees and calendar title are looked up under its owner."""
+    owner = session.scalar(select(GroupSession.business_id).where(GroupSession.id == sid, GroupSession.source == "google"))
+    return owner or business_id
 
 
 def _check_not_ended(s: GroupSession, now: datetime) -> None:
@@ -207,9 +218,12 @@ def update_session(
     if not isinstance(max_attendees, _Unset):
         max_attendees = _max(max_attendees)
     with tenant_session(business_id) as session:
+        business_id = _owner(session, business_id, sid)
         business = _business(session, business_id)
         row = _get_session(session, business_id, sid, lock=True)
         _check_not_ended(row, now)
+        if name is not None and row.source == "google" and name != row.name:
+            raise SessionError(422, "The name comes from Google Calendar — rename the event there")
         attendees = _confirmed(session, business_id, [row.id])
         if isinstance(max_attendees, int) and max_attendees < len(attendees):
             raise SessionError(422, f"{len(attendees)} callers are booked — remove some first")
@@ -277,6 +291,7 @@ def remove_attendee(
 ) -> tuple[dict, bool]:
     now = now or datetime.now(timezone.utc)
     with tenant_session(business_id) as session:
+        business_id = _owner(session, business_id, sid)
         business = _business(session, business_id)
         row = _get_session(session, business_id, sid, lock=True)
         _check_not_ended(row, now)

@@ -25,7 +25,8 @@ export function SessionBlock(p: Props) {
   const [confirming, setConfirming] = useState(false);
   const g = useRef<{ x: number; y: number; id: number; swiping: boolean } | null>(null);
   const moved = useRef(false);
-  const can = !p.busy && !p.ended && !confirming;
+  const google = s.source === "google"; // delete it in Google Calendar, not here
+  const can = !p.busy && !p.ended && !confirming && !google;
   const style = { top: p.box.top, height: p.box.height };
   const done = (fire: boolean) => {
     g.current = null;
@@ -88,6 +89,7 @@ export function SessionBlock(p: Props) {
       </span>
       <span className="bk-block-line">
         {sessionCount(s)}
+        {google && <span className="bk-src">Google</span>}
         {isFull(s) && <span className="bk-full">FULL</span>}
       </span>
       <span className={`bk-reveal${dragging ? " dragging" : ""}`} aria-hidden="true" data-testid="session-reveal" style={{ width: off }}>
