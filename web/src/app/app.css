@@ -483,6 +483,8 @@ html, body { overscroll-behavior-y: none; } /* no native pull-to-refresh: it wou
 .ptr-region { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 /* the spinner sits at 1/4 of the strip the layer opens up (inline height is half the pull) (height set inline from the pull distance) */
 .ptr-under { position: absolute; top: 0; left: 0; right: 0; z-index: 0; display: flex; justify-content: center; align-items: flex-start; padding-top: 10px; pointer-events: none; }
+/* Bookings exception: the spinner lines up with the calendar's "+" icons (centre of the 62px-left / 10px-right event area) */
+.ptr-region[data-area="bookings"] .ptr-under { padding-left: 52px; }
 .ptr-layer { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; z-index: 1; background: var(--bg); }
 /* business picker: the whole screen slides down (full reload on release), no icon */
 .bars-spinner { display: block; transition: transform .1s linear; }
@@ -506,7 +508,7 @@ html, body { overscroll-behavior-y: none; } /* no native pull-to-refresh: it wou
 .sk-bubble-user { align-self: flex-end; }
 @keyframes vw-sk { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .sk-block, .sk-bubble { animation: none; } }
-.ptr-under.armed .bars-spinner { filter: drop-shadow(0 0 6px #8ab4f866); }
+.ptr-under.armed .bars-spinner { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--ptr-color, var(--conversations)) 40%, transparent)); }
 
 /* ---------- thin scrollbars, invisible until the element scrolls (reserves an 8px gutter on desktop) ---------- */
 .scroll::-webkit-scrollbar, .call-log::-webkit-scrollbar { width: 8px; }
