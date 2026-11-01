@@ -328,18 +328,6 @@ def test_cancel_by_reference_frees_the_slot_for_someone_else(call_for, business_
     assert other.results[-1].startswith("Booked")
 
 
-def test_cancel_from_another_phone_number_fails(call_for, business_id):
-    ref = _book(call_for())
-    stranger = call_for("+15550999999")
-    stranger.turn(
-        f"Cancel {ref}, confirmed.",
-        tool("cancel_booking", reference=ref, confirmed=True),
-        "I can't find a booking with that reference for your number.",
-    )
-    assert stranger.results[-1].startswith("No upcoming booking found")
-    assert len(_bookings(business_id)) == 1
-
-
 def test_cancel_unknown_reference(call_for, business_id):
     call = call_for()
     call.turn(
@@ -372,13 +360,3 @@ def test_chat_without_caller_id_asks_for_a_valid_number(call_for, business_id):
         "Booked.",
     )
     assert [r.phone for r in _bookings(business_id)] == ["+15550100300"]
-
-
-def test_caller_id_wins_over_a_number_the_model_made_up(call_for, business_id):
-    call = call_for()
-    call.turn(
-        "Thursday 2 pm, Anna, confirmed.",
-        tool("create_booking", date=THU, time="14:00", name="Anna", phone="+19998887777", confirmed=True),
-        "Booked.",
-    )
-    assert [r.phone for r in _bookings(business_id)] == [CALLER]

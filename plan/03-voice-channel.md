@@ -367,6 +367,12 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **Google Calendar booking backend (#105)**: in Google Cloud create a service account and a JSON key (outside the repo); share the owner's (test) calendar with the account's email ("Make changes to events"). In `.env`: `BOOKING_BACKEND=google_calendar`, `GOOGLE_CALENDAR_ID=<calendar id>`, `GOOGLE_CALENDAR_CREDENTIALS_FILE=<path>`. Then (1) `check_availability` for a free slot → Available; add an owner entry by hand in Google Calendar over that time → Not available with alternatives; (2) `create_booking` → an event appears with name, phone, service and reference, and `bookings.external_ref` holds its id; (3) `cancel_booking` with the reference and phone → event disappears, row `cancelled`; (4) unshare the calendar (or break the key path) → the bot says the calendar can't be reached and nothing is booked. Enable the booking tools for the business first (see the #55 item), then test in `/web/chat.html` or on a call
 - [ ] **Twilio playback marks (#76, V11/V26)**: on a real call (Voice SDK or phone), interrupt the bot
   right as a sentence ends and again just after it stops — no false barge-in, first word not swallowed
+- [ ] **Tests that need LM Studio's embedding model (coverage audit 2026-11-01)**: the cloud box has no
+  LM Studio, so these were not checked there. On the Mac run `uv run pytest -q tests/test_rag.py
+  tests/test_embed_dim.py tests/test_voice.py tests/test_voice_session.py` — they must pass with the
+  embedding model loaded. In the cloud box `test_barge_in_mid_reply_keeps_only_what_was_spoken` hangs
+  (a search tool call reaches the unreachable embedding server) and `test_call_feed.py::test_phone_call_shows_up_live`
+  fails (`mark` event where `clear` is expected), also on `main` — check both on the Mac.
 - [ ] **Hands-free calls on mobile** (#114): on a phone or tablet browser (Safari, Chrome) the voice app
   disables push-to-talk and uses `mode: "vad"` (mic always open, server VAD); desktop keeps push-to-talk. Watch echo on the phone
   speaker (#83) and the VAD-only silence re-prompt (V17)
