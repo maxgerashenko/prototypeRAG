@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     booking_backend: str = "internal"
     google_calendar_id: str = ""
     google_calendar_credentials_file: str = ""
+    # Calendar sync (#165): how often Google's events are mirrored into `calendar_events`.
+    calendar_sync_interval_seconds: int = 60
 
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 
