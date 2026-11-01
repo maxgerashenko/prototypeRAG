@@ -20,7 +20,7 @@ import {
 } from "../api";
 import { CallScreen, ConnectingScreen, EndedScreen, PhoneCallScreen } from "./CallScreens";
 import { BookingsScreen } from "./BookingsScreen";
-import { ConversationsScreen } from "./ConversationsScreen";
+import { ConversationsScreen, forgetConvosScroll } from "./ConversationsScreen";
 import { SelectScreen } from "./SelectScreen";
 import { SettingsScreen } from "./SettingsScreen";
 import { TranscriptScreen } from "./TranscriptScreen";
@@ -179,6 +179,10 @@ export function App() {
   };
 
   // Back from Bookings: the booking sheet closes first, then the calendar
+  const leaveConvos = () => {
+    if (selId) forgetConvosScroll(selId);
+    setStage("select");
+  };
   const leaveBookings = () => {
     if (!bookings.closeOverlay()) setStage("select");
   };
@@ -276,7 +280,7 @@ export function App() {
       else if (stage === "call") voice.hangUp();
       else if (stage === "settings") leaveSettings();
       else if (stage === "bookings") leaveBookings();
-      else if (stage === "convos") setStage("select");
+      else if (stage === "convos") leaveConvos();
       else if (stage === "transcript" && transcript) setStage(transcript.returnTo);
       else if (stage === "ended") backToConversations();
       else if (stage === "phone" || stage === "phoneEnded") closePhone();
@@ -330,7 +334,7 @@ export function App() {
   const goBack: (() => void) | null =
     stage === "settings" ? leaveSettings
     : stage === "bookings" ? leaveBookings
-    : stage === "convos" ? () => setStage("select")
+    : stage === "convos" ? leaveConvos
     : stage === "transcript" && transcript ? () => setStage(transcript.returnTo)
     : stage === "ended" ? backToConversations
     : stage === "phone" || stage === "phoneEnded" ? closePhone
@@ -413,7 +417,6 @@ export function App() {
           biz={fallbackBiz(selId)}
           convos={convos[selId]}
           newIds={newIds}
-          onBack={() => setStage("select")}
           onCall={() => startCall(selId)}
           onOpen={(convoId) => openConversation(selId, convoId, "convos")}
         />
@@ -424,7 +427,6 @@ export function App() {
           pull={ptr}
           bizName={fallbackBiz(transcript.bizId).name}
           convo={detail}
-          onBack={() => setStage(transcript.returnTo)}
           onContinue={() => startCall(transcript.bizId, transcript.convoId)}
         />
       )}

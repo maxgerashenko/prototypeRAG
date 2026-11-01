@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { Business } from "../api";
-import { ChevronDown, ChevronLeft, PhoneIcon } from "./icons";
+import { ChevronDown, PhoneIcon } from "./icons";
 import { NumberSheet } from "./NumberSheet";
+import { ViewHeader } from "./ViewHeader";
 import { StatusChip } from "./StatusChip";
 import { PullRegion, useMinShow } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
-import { fmtPhone, hostOf, monogram } from "./format";
+import { fmtPhone, hostOf } from "./format";
 import { GREETING_PREFIX, barWidth, capsLabel, greetingView, questionsSummary } from "./settings";
 import type { SettingsBindings } from "./useBusinessSettings";
 
@@ -60,20 +61,7 @@ export function SettingsScreen(p: Props) {
 
   return (
     <div className="screen slide screen-settings" data-screen="settings">
-      <div className="back-row">
-        <button className="back-btn" aria-label="Back to businesses" onClick={p.onBack}>
-          <span className="back-circle"><ChevronLeft /></span>
-          Businesses
-        </button>
-      </div>
-
-      <div className="biz-head">
-        <div className="big-mono">{monogram(biz.name)}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-          <h1>Settings</h1>
-          <div className="ellipsis">{biz.name} · {hostOf(biz)}</div>
-        </div>
-      </div>
+      <ViewHeader name={biz.name} title="Settings" sub={<>{biz.name} · {hostOf(biz)}</>} />
 
       <PullRegion state={p.pull} area="settings">
       <div className="scroll set-scroll">
