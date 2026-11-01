@@ -25,7 +25,7 @@
 /* ---------- screen ---------- */
 .screen-settings { position: relative; }
 .set-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
-.set-scroll { padding: 12px 14px 24px; display: flex; flex-direction: column; gap: 10px; }
+.set-scroll { padding: 0 14px 24px; display: flex; flex-direction: column; gap: 10px; }
 .set-card {
   flex-shrink: 0; padding: 12px; border-radius: 16px; background: #14171d; border: 1px solid #232731;
   display: flex; flex-direction: column; gap: 8px;

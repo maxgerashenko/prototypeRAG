@@ -233,6 +233,12 @@ a:hover { color: var(--conversations-light); }
 .call-btn:not(:disabled):active { transform: scale(.98); }
 
 /* ---------- 2. previous conversations ---------- */
+.back-hint {
+  display: flex; align-items: center; gap: 4px; align-self: flex-start; margin: -10px 20px 12px; padding: 2px 0; border: 0; background: none;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--faint); cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) { .back-hint:hover { color: var(--text); } }
+.back-hint:focus-visible { color: var(--text); }
 .biz-head { padding: 18px 20px 18px; display: flex; align-items: center; gap: 14px; }
 .biz-head .big-mono {
   width: 60px; height: 60px; flex-shrink: 0; border-radius: 18px; background: var(--chip);
@@ -276,7 +282,7 @@ a:hover { color: var(--conversations-light); }
 .empty p { margin: 0; font-size: 14px; line-height: 1.45; max-width: 260px; }
 
 /* ---------- 3. transcript + 5. live call bubbles ---------- */
-.tr-head { padding: 6px 20px 14px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--divider); }
+.tr-head { padding: 0 20px 14px; display: flex; flex-direction: column; gap: 0; border-bottom: 1px solid var(--divider); }
 .tr-head h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 800; letter-spacing: -.01em; }
 .tr-meta { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
 .bubbles { display: flex; flex-direction: column; gap: 14px; padding: 18px 16px 16px; }

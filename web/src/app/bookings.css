@@ -4,7 +4,7 @@
 .screen-bookings { position: relative; }
 
 /* date bar */
-.bk-bar { padding: 2px 12px 10px 20px; display: flex; align-items: center; gap: 10px; }
+.bk-bar { padding: 0 12px 10px 20px; display: flex; align-items: center; gap: 10px; }
 .bk-date {
   flex: 1; min-width: 0; height: 36px; padding: 0; border: 0; background: transparent; color: var(--text);
   display: flex; align-items: center; gap: 6px; font-family: inherit; font-size: 21px; font-weight: 800;
@@ -126,14 +126,14 @@
   background: var(--bookings-badge); color: var(--bookings-text);
 }
 
-/* a free hour is one wide tap target (the whole event area) with a faded "+" in the middle; the blocks and the
+/* a free hour is one wide tap target (the whole event area) with a "+" in the middle that shows only on hover / touch / focus; the blocks and the
    now-line sit above it. No touch-action: vertical drags still scroll the column. */
 .bk-hour-add {
   position: absolute; z-index: 0; left: 62px; right: 10px; height: 56px; padding: 0; border: 0; border-radius: 12px;
   display: flex; align-items: center; justify-content: center; background: transparent;
   color: var(--bookings); cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
-.bk-hour-add span { display: flex; opacity: .5; }
+.bk-hour-add span { display: flex; opacity: 0; }
 .bk-hour-add:focus-visible, .bk-hour-add:active { background: var(--bookings-hover); }
 .bk-hour-add:focus-visible span, .bk-hour-add:active span { opacity: 1; }
 @media (hover: hover) {  /* touch keeps :hover after the finger lifts */
@@ -142,7 +142,7 @@
 }
 
 .bk-notice {
-  position: absolute; z-index: 6; left: 18px; right: 18px; top: calc(12px + env(safe-area-inset-top)); padding: 10px 14px;
+  position: absolute; z-index: 6; left: 18px; right: 18px; bottom: calc(16px + env(safe-area-inset-bottom)); padding: 10px 14px;
   border-radius: 14px; background: var(--inset-line); border: 1px solid #2e333e; font-size: 13px; font-weight: 600; color: var(--text);
 }
 
