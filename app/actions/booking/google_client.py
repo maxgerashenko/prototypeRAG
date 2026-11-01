@@ -1,9 +1,18 @@
 """Thin Google Calendar REST client (DEC-48) behind a small protocol, so the backend is
 tested against a fake and only this file knows Google's wire format.
 
-Pilot auth: a service account whose key file is `GOOGLE_CALENDAR_CREDENTIALS_FILE`; the
-owner shares their calendar with its email ("make changes to events"). No OAuth. The
-credentials load on first use, so importing this module needs no key.
+Two ways to authenticate, no key needed for the first (some organizations block service
+account keys with `iam.disableServiceAccountKeyCreation`):
+
+1. **OAuth user credentials** (`GOOGLE_CALENDAR_TOKEN_FILE`, preferred for the demo): the calendar
+   owner consents once with `scripts/google_calendar_login.py`, which saves an authorized-user
+   JSON (client id/secret + refresh token) outside the repo. The app acts as that user, so the
+   calendar needs no sharing step.
+2. **Service account key** (`GOOGLE_CALENDAR_CREDENTIALS_FILE`): the owner shares the calendar
+   with the account's email ("make changes to events").
+
+The token file wins if both are set. Credentials load on first use, so importing this module
+needs no key.
 """
 
 from dataclasses import dataclass
@@ -76,24 +85,37 @@ class CalendarEventsClient(Protocol):
 
 
 class GoogleCalendarClient:
-    def __init__(self, credentials_file: str):
-        self.credentials_file = credentials_file
+    def __init__(self, credentials_file: str = "", token_file: str = ""):
+        self.credentials_file = credentials_file  # service account key
+        self.token_file = token_file  # authorized-user JSON from scripts/google_calendar_login.py
         self._session = None
 
-    def _http(self):
-        if self._session is None:
-            if not self.credentials_file:
-                raise CalendarError("GOOGLE_CALENDAR_CREDENTIALS_FILE is not set")
-            from google.auth.transport.requests import AuthorizedSession
+    def _credentials(self):
+        if self.token_file:
+            from google.oauth2.credentials import Credentials
+
+            try:
+                return Credentials.from_authorized_user_file(self.token_file, scopes=list(SCOPES))
+            except (OSError, ValueError) as exc:
+                raise CalendarError(
+                    f"cannot load OAuth token file (run scripts/google_calendar_login.py): {exc}"
+                ) from exc
+        if self.credentials_file:
             from google.oauth2 import service_account
 
             try:
-                creds = service_account.Credentials.from_service_account_file(
+                return service_account.Credentials.from_service_account_file(
                     self.credentials_file, scopes=list(SCOPES)
                 )
             except (OSError, ValueError) as exc:
                 raise CalendarError(f"cannot load service account key: {exc}") from exc
-            self._session = AuthorizedSession(creds)
+        raise CalendarError("set GOOGLE_CALENDAR_TOKEN_FILE (or GOOGLE_CALENDAR_CREDENTIALS_FILE)")
+
+    def _http(self):
+        if self._session is None:
+            from google.auth.transport.requests import AuthorizedSession
+
+            self._session = AuthorizedSession(self._credentials())
         return self._session
 
     def _call(self, method: str, url: str, **kw):
@@ -171,6 +193,14 @@ class GoogleCalendarClient:
         resp = self._call("DELETE", f"{API}/calendars/{_quote(calendar_id)}/events/{_quote(event_id)}")
         if resp.status_code not in (200, 204, 404, 410):
             raise CalendarError(f"events.delete {resp.status_code}: {resp.text[:200]}")
+
+
+def client_from_settings() -> GoogleCalendarClient:
+    """The client the app uses, built from `GOOGLE_CALENDAR_TOKEN_FILE` / `..._CREDENTIALS_FILE`."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    return GoogleCalendarClient(settings.google_calendar_credentials_file, settings.google_calendar_token_file)
 
 
 def _quote(value: str) -> str:

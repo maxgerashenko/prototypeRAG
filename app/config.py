@@ -69,11 +69,14 @@ class Settings(BaseSettings):
     twilio_validate_signature: bool = True
 
     # Booking backend (plan/04-actions.md, DEC-48): "internal" (Postgres only) or "google_calendar".
-    # Pilot auth is a service account key; the owner shares the calendar with its email.
+    # Auth: an OAuth token file from scripts/google_calendar_login.py (no key needed; preferred
+    # when the organization blocks service account keys), or a service account key whose email
+    # the owner shares the calendar with. The token file wins if both are set.
     # `businesses.settings.google_calendar_id` overrides the id per business.
     booking_backend: str = "internal"
     google_calendar_id: str = ""
     google_calendar_credentials_file: str = ""
+    google_calendar_token_file: str = ""
     # Where the app is reached; calendar events link back to the conversation with it.
     app_base_url: str = "http://localhost:8000"
     # Calendar sync (#165): how often Google's events are mirrored into `calendar_events`.

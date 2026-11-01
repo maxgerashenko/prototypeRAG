@@ -37,11 +37,9 @@ def make_backend() -> BookingBackend:
     settings = get_settings()
     if settings.booking_backend == "google_calendar":
         from app.actions.booking.google_calendar import GoogleCalendarBackend
-        from app.actions.booking.google_client import GoogleCalendarClient
+        from app.actions.booking.google_client import client_from_settings
 
-        return GoogleCalendarBackend(
-            GoogleCalendarClient(settings.google_calendar_credentials_file), settings.google_calendar_id
-        )
+        return GoogleCalendarBackend(client_from_settings(), settings.google_calendar_id)
     return InternalBackend()
 
 
