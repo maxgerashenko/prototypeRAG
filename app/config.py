@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     google_calendar_credentials_file: str = ""
     # Calendar sync (#165): how often Google's events are mirrored into `calendar_events`.
     calendar_sync_interval_seconds: int = 60
+    # Business that events typed in Google are imported under as sessions (#149). Empty: the oldest
+    # business using the calendar. Demo rule: every session is open to every business anyway.
+    google_calendar_owner_business_id: str = ""
 
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 
