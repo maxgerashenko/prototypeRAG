@@ -21,6 +21,10 @@ class CalendarError(Exception):
     """Google could not be reached or refused the call. The message is for logs, not callers."""
 
 
+class PreconditionFailed(CalendarError):
+    """events.patch with `If-Match` got 412: the event changed since the etag was read."""
+
+
 class CalendarClient(Protocol):
     def busy(self, calendar_id: str, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
         """Busy intervals (tz-aware) of the calendar inside [start, end)."""
@@ -32,6 +36,15 @@ class CalendarClient(Protocol):
 
     def delete_event(self, calendar_id: str, event_id: str) -> None:
         """Delete an event; an already deleted one is not an error."""
+        ...
+
+    def get_event(self, calendar_id: str, event_id: str) -> dict | None:
+        """The event as Google returns it ('id', 'etag', 'summary', 'start', 'end', 'status'); None on 404."""
+        ...
+
+    def patch_event(self, calendar_id: str, event_id: str, body: dict, etag: str | None = None) -> str:
+        """Change fields of an event; with `etag` sent as `If-Match` (PreconditionFailed on 412).
+        Returns the new etag."""
         ...
 
 
@@ -83,6 +96,8 @@ class GoogleCalendarClient:
 
     def insert_event(self, calendar_id, body):
         resp = self._call("POST", f"{API}/calendars/{_quote(calendar_id)}/events", json=body)
+        if resp.status_code == 409 and body.get("id"):  # our own id: an earlier try already created it
+            return body["id"]
         if resp.status_code not in (200, 201):
             raise CalendarError(f"events.insert {resp.status_code}: {resp.text[:200]}")
         return resp.json()["id"]
@@ -91,6 +106,25 @@ class GoogleCalendarClient:
         resp = self._call("DELETE", f"{API}/calendars/{_quote(calendar_id)}/events/{_quote(event_id)}")
         if resp.status_code not in (200, 204, 404, 410):
             raise CalendarError(f"events.delete {resp.status_code}: {resp.text[:200]}")
+
+    def get_event(self, calendar_id, event_id):
+        resp = self._call("GET", f"{API}/calendars/{_quote(calendar_id)}/events/{_quote(event_id)}")
+        if resp.status_code in (404, 410):
+            return None
+        if resp.status_code != 200:
+            raise CalendarError(f"events.get {resp.status_code}: {resp.text[:200]}")
+        return resp.json()
+
+    def patch_event(self, calendar_id, event_id, body, etag=None):
+        headers = {"If-Match": etag} if etag else {}
+        resp = self._call(
+            "PATCH", f"{API}/calendars/{_quote(calendar_id)}/events/{_quote(event_id)}", json=body, headers=headers
+        )
+        if resp.status_code == 412:
+            raise PreconditionFailed(f"events.patch {event_id}: changed since it was read")
+        if resp.status_code != 200:
+            raise CalendarError(f"events.patch {resp.status_code}: {resp.text[:200]}")
+        return resp.json().get("etag", "")
 
 
 def _quote(value: str) -> str:
