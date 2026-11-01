@@ -48,7 +48,7 @@ type Stage = "select" | "settings" | "bookings" | "convos" | "transcript" | "con
 interface TranscriptRef {
   bizId: string;
   convoId: string;
-  returnTo: "select" | "convos";
+  returnTo: "select" | "convos" | "bookings";
 }
 
 /** The picker's pull-to-refresh: a full reload (its own function so e2e can watch the navigation). */
@@ -127,7 +127,8 @@ export function App() {
   }, []);
   const settings = useBusinessSettings(selId, stage === "settings", onAssigned);
 
-  const bookings = useBookings(selId, stage === "bookings");
+  // stays active while a conversation opened from the session sheet is shown, so Back finds the sheet as it was
+  const bookings = useBookings(selId, stage === "bookings" || (stage === "transcript" && transcript?.returnTo === "bookings"));
   const refreshToday = useRef(bookings.refreshToday);
   refreshToday.current = bookings.refreshToday;
 
@@ -250,8 +251,13 @@ export function App() {
     // typing in a field: only Esc, and only to close the number picker (the filter field is in it)
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
       if (down && e.key === "Escape" && stage === "settings" && settings.sheetOpen) settings.onCloseSheet();
+      else if (down && e.key === "Escape" && stage === "bookings" && (bookings.selectedSession || bookings.draft) && !bookings.busy) {
+        bookings.onCloseSession();
+      }
       return;
     }
+    // a bookings sheet is open: Space belongs to the page (select, buttons), not to the call shortcut
+    if (e.key === " " && stage === "bookings" && (bookings.selected || bookings.selectedSession || bookings.draft)) return;
     if (e.key === " ") {
       e.preventDefault();
       if (!down) {
@@ -264,7 +270,7 @@ export function App() {
       else if (stage === "transcript" && transcript) startCall(transcript.bizId, transcript.convoId);
       else if (stage === "call") voice.pttDown();
     } else if (down && stage === "bookings" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
-      if (!bookings.selected) bookings.onShiftDay(e.key === "ArrowLeft" ? -1 : 1);
+      if (!bookings.selected && !bookings.selectedSession && !bookings.draft) bookings.onShiftDay(e.key === "ArrowLeft" ? -1 : 1);
     } else if (down && e.key === "Escape") {
       if (stage === "connecting") cancelCall();
       else if (stage === "call") voice.hangUp();
@@ -304,13 +310,15 @@ export function App() {
   // Not gated on call.phase: it starts as "connecting" before any call.
   const rootRef = useRef<HTMLDivElement>(null);
   const ptrEnabled =
-    (stage === "select" || (stage === "convos" && !!selId) || (stage === "transcript" && !!transcript)) && !live;
+    (stage === "select" || (stage === "convos" && !!selId) || (stage === "transcript" && !!transcript) ||
+      (stage === "bookings" && !bookings.selected && !bookings.draft && !bookings.selectedSession && !bookings.busy)) && !live;
   const ptr = usePullToRefresh(rootRef, {
     enabled: ptrEnabled,
     onRefresh: () => {
       if (stage === "select") return reloadPage();
       if (stage === "convos" && selId) return Promise.allSettled([loadBusinesses(), loadConvos(selId)]);
       if (stage === "transcript") return refreshDetail();
+      if (stage === "bookings") return bookings.onRefresh();
     },
     onArmed: () => {
       if (stage === "select") vibrateTick();
@@ -394,7 +402,8 @@ export function App() {
       )}
 
       {stage === "bookings" && selId && (
-        <BookingsScreen biz={fallbackBiz(selId)} {...bookings} onBack={leaveBookings} />
+        <BookingsScreen pull={ptr} biz={fallbackBiz(selId)} {...bookings} onBack={leaveBookings}
+          onOpenConversation={(convoId) => openConversation(selId, convoId, "bookings")} />
       )}
 
       {stage === "convos" && selId && (

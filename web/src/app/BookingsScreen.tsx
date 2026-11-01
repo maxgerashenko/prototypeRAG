@@ -2,11 +2,15 @@ import { useRef } from "react";
 import type { Business } from "../api";
 import { MonthCalendar } from "./MonthCalendar";
 import { BookingSheet } from "./BookingSheet";
-import { useMinShow } from "./PullIndicator";
-import { ChevronDown, ChevronLeft, ChevronRight, MicSmallIcon } from "./icons";
+import { SessionBlock } from "./SessionBlock";
+import { SessionSheet } from "./SessionSheet";
+import { PullRegion, useMinShow } from "./PullIndicator";
+import type { PullState } from "./pullToRefresh";
+import { ChevronDown, ChevronLeft, ChevronRight, MicSmallIcon, PlusIcon } from "./icons";
 import { hostOf, monogram } from "./format";
 import {
-  TAP_GUARD_MS, blockBox, bookingLine, dayTitle, daySummary, daySwipe, fmtMin, isClosedHour, viewHours,
+  TAP_GUARD_MS, blockBox, bookingLine, dayTitle, daySummary, daySwipe, fmtMin, hourCreatable, isClosedHour,
+  viewHours,
 } from "./bookings";
 import type { BookingsBindings } from "./useBookings";
 import "./bookings.css";
@@ -14,18 +18,29 @@ import "./bookings.css";
 interface Props extends BookingsBindings {
   biz: Business;
   onBack: () => void;
+  onOpenConversation: (conversationId: string) => void;
+  pull: PullState;
 }
+
+/** Ghost blocks of the loading calendar: [hours after the first hour, length in hours, extra right inset in %]. */
+const SKELETON_BLOCKS: [number, number, number][] = [[1, 1, 0], [3, 1.5, 25], [5, 1, 10]];
 
 export function BookingsScreen(p: Props) {
   const { biz, day, todayIso, nowMin, dir, month, dayList } = p;
   const skeleton = useMinShow(month.status === "loading" && !month.data);
   const down = useRef<{ x: number; y: number } | null>(null);
   const swipedAt = useRef(0);
-  const v = viewHours(month.data, dayList);
+  const { sessions, selectedSession } = p;
+  const v = viewHours(month.data, dayList, sessions);
   const hours = Array.from({ length: Math.max(0, v.end - v.start) }, (_, i) => v.start + i);
   const showNow = day === todayIso && nowMin >= v.start * 60 && nowMin <= v.end * 60;
 
+  const onDown = (e: React.PointerEvent) => {
+    if (e.isPrimary) down.current = { x: e.clientX, y: e.clientY };
+  };
+
   const onUp = (e: React.PointerEvent) => {
+    if (!e.isPrimary) return;
     const s = down.current;
     down.current = null;
     if (!s) return;
@@ -35,6 +50,9 @@ export function BookingsScreen(p: Props) {
       p.onShiftDay(d);
     }
   };
+
+  const ended = !!selectedSession
+    && (day < todayIso || (day === todayIso && selectedSession.end_min <= nowMin));
 
   return (
     <div className="screen slide screen-bookings" data-screen="bookings">
@@ -68,13 +86,23 @@ export function BookingsScreen(p: Props) {
       )}
 
       <div className="bk-summary">
-        {skeleton ? <div className="sk-block sk-line short" /> : <span data-testid="bk-summary">{month.status === "error" && !month.data ? "—" : daySummary(dayList)}</span>}
+        {skeleton ? <div className="sk-block sk-line short" /> : <span data-testid="bk-summary">{month.status === "error" && !month.data ? "—" : daySummary(dayList, sessions)}</span>}
         <span>Swipe to change day</span>
       </div>
 
       {skeleton && (
-        <div className="skeleton bk-skeleton" role="status" aria-busy="true">
-          {[80, 60, 72, 50].map((w, i) => <div key={i} className="sk-block sk-line" style={{ width: `${w}%` }} />)}
+        <div className="scroll bk-day" role="status" aria-busy="true" data-testid="bk-skeleton">
+          <div className="bk-inner" style={{ height: (v.end - v.start) * 60 }}>
+            {hours.map((h) => (
+              <div key={h} className="bk-hour" style={{ top: (h - v.start) * 60 }}>
+                <span className="bk-hour-label sk-block sk-hour-label" />
+              </div>
+            ))}
+            {SKELETON_BLOCKS.filter(([at, len]) => at + len <= v.end - v.start).map(([at, len, inset], i) => (
+              <div key={i} className="bk-block sk-block sk-cal-block"
+                style={{ top: at * 60 + 2, height: len * 60 - 4, right: `calc(10px + ${inset}%)` }} />
+            ))}
+          </div>
           <span className="sr-only">Loading bookings</span>
         </div>
       )}
@@ -84,9 +112,9 @@ export function BookingsScreen(p: Props) {
         </p>
       )}
 
+      {!skeleton && <PullRegion state={p.pull}>
       <div className="scroll bk-day" data-swipe-back="off" data-testid="bk-day"
-        onPointerDown={(e) => { down.current = { x: e.clientX, y: e.clientY }; }}
-        onPointerUp={onUp} onPointerCancel={() => { down.current = null; }}>
+        onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={() => { down.current = null; }}>
         <div key={day} className={`bk-inner${dir > 0 ? " from-next" : dir < 0 ? " from-prev" : ""}`}
           style={{ height: (v.end - v.start) * 60 }}>
           <div className="bk-last">
@@ -98,6 +126,13 @@ export function BookingsScreen(p: Props) {
               <span className="bk-hour-label">{fmtMin(h * 60)}</span>
               <div className="bk-half" />
             </div>
+          ))}
+          {hours.filter((h) => hourCreatable(h, day, todayIso, nowMin, dayList, sessions)).map((h) => (
+            <button key={h} className="bk-hour-add" data-testid={`hour-add-${h}`}
+              style={{ top: (h - v.start) * 60 + 2 }} aria-label={`Add session at ${fmtMin(h * 60)}`}
+              onClick={() => { if (Date.now() - swipedAt.current < TAP_GUARD_MS) return; p.onAddAt(h); }}>
+              <span><PlusIcon size={16} /></span>
+            </button>
           ))}
           {dayList.map((b) => {
             const box = blockBox(b, v.start);
@@ -115,6 +150,11 @@ export function BookingsScreen(p: Props) {
               </button>
             );
           })}
+          {sessions.map((s) => (
+            <SessionBlock key={s.id} s={s} box={blockBox(s, v.start)} sel={selectedSession?.id === s.id} busy={p.busy}
+              ended={day < todayIso || (day === todayIso && s.end_min <= nowMin)} swipedAt={swipedAt}
+              onOpen={() => p.onSelectSession(s.id)} onDelete={() => p.onDeleteSession(s.id)} />
+          ))}
           {showNow && (
             <div className="bk-now" data-testid="now-line" style={{ top: nowMin - v.start * 60 }}>
               <i />
@@ -122,8 +162,17 @@ export function BookingsScreen(p: Props) {
           )}
         </div>
       </div>
+      </PullRegion>}
+
+      {p.notice && <div className="bk-notice" role="status">{p.notice}</div>}
 
       {p.selected && <BookingSheet booking={p.selected} onClose={p.onCloseSheet} />}
+      {(p.draft || selectedSession) && (
+        <SessionSheet draft={p.draft} session={selectedSession} ended={ended} day={day} todayIso={todayIso}
+          hoursOpen={{ open: v.open, close: v.close }} busy={p.busy} error={p.sheetError}
+          freeHourList={p.freeHourList} onClose={p.onCloseSession} onCreate={p.onCreate} onSave={p.onSaveSession}
+          onDelete={p.onDeleteSession} onRemove={p.onRemoveAttendee} onOpenConversation={p.onOpenConversation} />
+      )}
     </div>
   );
 }

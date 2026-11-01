@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { TwilioNumbers } from "../api";
 import type { Loadable } from "./App";
-import { CloseIcon, SearchIcon } from "./icons";
+import { SearchIcon } from "./icons";
 import { fmtPhone } from "./format";
 import { assignLabel, canAssign, filterNumbers, numberSubtitle } from "./settings";
 
@@ -38,9 +38,6 @@ export function NumberSheet({ bizId, currentNumber, numbers, assigning, error, o
             <h2>Choose a number</h2>
             <p>Numbers in your Twilio account</p>
           </div>
-          <button className="sheet-close" aria-label="Close" onClick={close}>
-            <CloseIcon />
-          </button>
         </div>
         <label className="sheet-filter">
           <SearchIcon />

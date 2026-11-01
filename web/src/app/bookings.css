@@ -43,10 +43,10 @@
   cursor: pointer; transition: background .2s ease; background: transparent; color: #e7e9ee;
 }
 .bk-cal-day.out { color: #4b515c; }
-.bk-cal-day.today { color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
-.bk-cal-day.sel { background: var(--accent); color: var(--ink); box-shadow: none; }
+.bk-cal-day.today { color: var(--bookings); box-shadow: inset 0 0 0 1.5px var(--bookings); }
+.bk-cal-day.sel { background: var(--bookings); color: var(--ink); box-shadow: none; }
 .bk-dot { width: 4px; height: 4px; border-radius: 50%; background: transparent; }
-.bk-dot.on { background: var(--call); }
+.bk-dot.on { background: var(--bookings); }
 .bk-cal-day.sel .bk-dot.on { background: var(--ink); }
 
 /* summary + states */
@@ -55,13 +55,18 @@
   font-size: 12px; color: #8a919d; border-bottom: 1px solid #1c2029;
 }
 .bk-summary .sk-line.short { width: 120px; }
-.bk-skeleton { padding: 14px 20px; gap: 14px; }
+.sk-hour-label { height: 10px; border-radius: 5px; left: -44px; width: 30px; }
+.sk-cal-block { border: 0; animation: vw-sk 1.2s ease-in-out infinite; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .sk-cal-block { animation: none; } }
 .bk-error { padding: 14px 20px; }
 .bk-error .see-all { display: inline-flex; align-items: center; height: 32px; margin: 0; padding: 0 6px; }
 
 /* day column */
-.bk-day { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
-.bk-inner { position: relative; margin: 12px 0 28px; }
+.bk-day {
+  touch-action: pan-y; user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.bk-inner { position: relative; margin: 12px 0 24px; }
 .bk-inner.from-next { animation: bk-from-next .26s ease-out; }
 .bk-inner.from-prev { animation: bk-from-prev .26s ease-out; }
 @keyframes bk-from-next { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
@@ -81,16 +86,16 @@
   font-family: inherit; animation: vw-rise .3s ease-out;
 }
 .bk-block.short { padding: 0 10px; flex-direction: row; align-items: center; gap: 8px; }
-.bk-block.ai { background: rgba(127, 214, 168, .15); border: 1px solid rgba(127, 214, 168, .38); color: #c3edd7; }
-.bk-block.manual { background: rgba(138, 180, 248, .15); border: 1px solid rgba(138, 180, 248, .38); color: #cfddfb; }
+.bk-block.ai { background: var(--assistant-fill); border: 1px solid var(--assistant-line); color: var(--assistant-text); }
+.bk-block.manual { background: var(--bookings-fill); border: 1px solid var(--bookings-line); color: var(--bookings-text); }
 .bk-block-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .bk-block-top svg { flex-shrink: 0; }
 .bk-block-name { font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bk-block-line { font-size: 12px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.bk-now { position: absolute; left: 50px; right: 0; height: 2px; background: #f28b82; pointer-events: none; }
+.bk-now { position: absolute; left: 50px; right: 0; height: 2px; background: var(--danger-text); pointer-events: none; }
 .bk-now i {
-  position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: #f28b82;
+  position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--danger-text);
   animation: vw-blink 2s ease-in-out infinite;
 }
 
@@ -102,7 +107,7 @@
 .bk-sheet-service { font-size: 15px; color: #b3b9c4; }
 .bk-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .bk-tile {
-  padding: 10px 12px; border-radius: 12px; background: #0f1217; border: 1px solid #1f232c;
+  padding: 10px 12px; border-radius: 12px; background: var(--inset); border: 1px solid var(--inset-line);
   display: flex; flex-direction: column; gap: 2px;
 }
 .bk-tile span { font-size: 11px; color: #8a919d; }
@@ -111,3 +116,167 @@
   height: 52px; border-radius: 26px; border: 1px solid #2e333e; background: transparent; color: var(--text);
   font-size: 15px; font-weight: 700; cursor: pointer;
 }
+
+/* group sessions */
+.bk-block.session { background: var(--bookings-fill); border: 1px solid var(--bookings-line); color: var(--bookings-text); }
+.bk-block.session.sel { outline: 2px solid var(--text); outline-offset: 0; }
+.bk-block.session .bk-block-line { display: flex; align-items: center; gap: 8px; }
+.bk-full {
+  font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 1px 6px; border-radius: 6px;
+  background: var(--bookings-badge); color: var(--bookings-text);
+}
+
+/* a free hour is one wide tap target (the whole event area) with a faded "+" in the middle; the blocks and the
+   now-line sit above it. No touch-action: vertical drags still scroll the column. */
+.bk-hour-add {
+  position: absolute; z-index: 0; left: 62px; right: 10px; height: 56px; padding: 0; border: 0; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; background: transparent;
+  color: var(--bookings); cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.bk-hour-add span { display: flex; opacity: .5; }
+.bk-hour-add:focus-visible, .bk-hour-add:active { background: var(--bookings-hover); }
+.bk-hour-add:focus-visible span, .bk-hour-add:active span { opacity: 1; }
+@media (hover: hover) {  /* touch keeps :hover after the finger lifts */
+  .bk-hour-add:hover { background: var(--bookings-hover); }
+  .bk-hour-add:hover span { opacity: 1; }
+}
+
+.bk-notice {
+  position: absolute; z-index: 6; left: 18px; right: 18px; top: calc(12px + env(safe-area-inset-top)); padding: 10px 14px;
+  border-radius: 14px; background: var(--inset-line); border: 1px solid #2e333e; font-size: 13px; font-weight: 600; color: var(--text);
+}
+
+/* session sheet */
+.ss-panel { padding: 8px 18px 18px; gap: 10px; border-color: #262a33; }
+/* the grip is also a mouse drag handle: a taller invisible hit area, no text selection */
+.ss-panel .sheet-grip { position: relative; cursor: grab; user-select: none; touch-action: none; }
+.ss-panel .sheet-grip::before { content: ""; position: absolute; inset: -12px -40px; }
+.ss-scroll { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }  /* grip, title, fields and buttons stay put; only the attendees list scrolls */
+.ss-attendees { flex: 1; min-height: 0; }
+.ss-attendees .ss-list { flex: 1; min-height: 96px; overflow-y: auto; overscroll-behavior: contain; }
+.ss-field { display: flex; flex-direction: column; gap: 4px; }
+.ss-field > span { font-size: 12px; font-weight: 700; color: var(--faint); }
+.ss-field input, .ss-field select {
+  height: 42px; padding: 0 14px; border-radius: 12px; background: var(--inset); border: 1px solid var(--line); color: var(--text);
+  font-family: inherit; font-size: 16px; outline: none; min-width: 0;
+}
+.ss-field input:focus, .ss-field select:focus { border-color: var(--conversations); }
+.ss-field input:read-only { color: var(--muted); }
+.ss-none { margin: 0; font-size: 14px; color: var(--muted); }
+.ss-warn { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--amber-bg); color: var(--amber); font-size: 13px; font-weight: 600; }
+.ss-error { margin: 0; }
+.ss-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ss-tags { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ss-panel:focus { outline: none; }
+.ss-chip { font-size: 11px; font-weight: 800; letter-spacing: .05em; padding: 2px 8px; border-radius: 7px; background: var(--inset-line); color: #b3b9c4; }
+.ss-chip.full { background: var(--bookings-badge); color: var(--bookings-text); }
+.ss-seats { display: flex; align-items: center; gap: 12px; }
+/* volume-style bar: the fill grows with the number, icon left, number right; the range input is the invisible hit area */
+.ss-bar {
+  --r: 0; position: relative; flex: 1; min-width: 0; height: 40px; border-radius: 12px; overflow: hidden; background: var(--inset-line);
+  display: flex; align-items: center; padding: 0 14px; color: #fff; touch-action: pan-y;
+}
+.ss-bar-fill { position: absolute; inset: 0 auto 0 0; width: calc(38px + (100% - 38px) * var(--r)); background: var(--bookings-fill); border-right: 2px solid var(--bookings); }
+.ss-bar > svg { position: relative; pointer-events: none; }
+.ss-bar > svg { color: var(--bookings); }
+.ss-seats-value { flex: none; min-width: 22px; text-align: right; font-size: 16px; color: var(--bookings); font-weight: 800; font-variant-numeric: tabular-nums; }
+.ss-bar input[type="range"] { position: absolute; inset: 0 0 0 38px; width: calc(100% - 38px); height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+.ss-bar.disabled { opacity: .5; }
+.ss-bar.disabled input { cursor: not-allowed; }
+.ss-bar:focus-within { box-shadow: 0 0 0 2px var(--bookings-badge); }
+/* small Private switch */
+.ss-private { flex: none; display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: var(--misc); cursor: pointer; font: inherit; }
+.ss-private:disabled { opacity: .5; cursor: not-allowed; }
+.ss-private-text { font-size: 13px; font-weight: 700; color: var(--text); }
+.ss-switch { position: relative; flex: none; width: 34px; height: 20px; border-radius: 10px; background: #343a46; transition: background .15s; }
+.ss-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.ss-private.on .ss-switch { background: var(--bookings); }
+.ss-private.on .ss-switch::after { transform: translateX(14px); }
+@media (prefers-reduced-motion: reduce) { .ss-switch, .ss-switch::after { transition: none; } }
+.ss-primary {
+  width: 100%; height: 52px; flex-shrink: 0; border-radius: 26px; border: 0; background: var(--conversations); color: var(--ink);
+  font-size: 16px; font-weight: 700; cursor: pointer;
+}
+.ss-primary:disabled { background: var(--inset-line); color: #6e7582; cursor: not-allowed; }
+.ss-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.ss-row {
+  position: relative; overflow: hidden; min-height: 56px; border-radius: 12px; background: var(--inset); border: 1px solid var(--inset-line);
+  display: flex; align-items: stretch;
+}
+.ss-row > .ss-confirm { padding: 6px 12px; }
+/* swipe left: the row text stays put; the Remove block grows in from the right edge over the row's end */
+.ss-reveal {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 0; overflow: hidden; box-sizing: border-box; pointer-events: none;
+  display: flex; justify-content: flex-end; white-space: nowrap; transition: width .2s ease-out;
+  background: var(--danger-tint); color: var(--danger-text); font-size: 15px; font-weight: 700; /* text = .ss-delete */
+}
+.ss-reveal.dragging { transition: none; }
+.ss-reveal > span { flex: 1 0 62px; display: flex; align-items: center; justify-content: center; }
+.ss-slide {
+  position: relative; flex: 1; min-width: 0; padding: 6px 6px 6px 12px; background: var(--inset);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.ss-slide.openable { cursor: pointer; }
+.ss-slide.openable:focus-visible { outline: 2px solid var(--conversations); outline-offset: -2px; border-radius: 11px; }
+.ss-slide.swipeable { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+@media (prefers-reduced-motion: reduce) { .ss-reveal { transition: none; } }
+/* transparent "x" in a thin circle, grey like the list ">" chevrons (--faint), at the right-middle of a row: tap to remove (asks Keep / Remove).
+   Its centre is 31px from the row's right edge = the middle of the word "Remove" when the 62px block is open.
+   The Remove block covers it during a swipe. */
+.ss-x {
+  flex: none; width: 44px; height: 44px; margin: -6px 3px -6px 0; padding: 0; border: 0; background: transparent;
+  display: flex; align-items: center; justify-content: center; color: var(--faint); opacity: 1; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ss-x span { width: 28px; height: 28px; border-radius: 50%; border: 1px solid currentColor; display: flex; align-items: center; justify-content: center; }
+.ss-x:hover, .ss-x:focus-visible { color: var(--text); }
+.ss-x:disabled { opacity: .3; cursor: default; }
+.ss-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ss-who-name { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; }
+.ss-who-name > span:nth-child(1) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ss-sep { flex: none; font-size: 12px; color: var(--faint); }  /* the " · " of the Settings row hint */
+.ss-hint { min-width: 0; font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* same as the hint under a Settings row */
+.ss-phone { flex: none; -webkit-tap-highlight-color: transparent; display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--misc); text-decoration: none; }
+.ss-phone svg { color: var(--phone); }                  /* phone icon: always green */
+.ss-phone.conv svg { color: var(--conversations); }     /* mic icon: always blue */
+/* the number is grey at rest and takes its icon's colour only while the row is touched */
+.ss-slide.openable:active .ss-phone, .ss-slide.openable:focus-visible .ss-phone,
+.ss-slide.openable:active .ss-hint, .ss-slide.openable:focus-visible .ss-hint { color: var(--phone); }
+.ss-slide.openable:active .ss-phone.conv, .ss-slide.openable:focus-visible .ss-phone.conv,
+.ss-slide.openable:active .ss-hint.conv, .ss-slide.openable:focus-visible .ss-hint.conv { color: var(--conversations); }
+@media (hover: hover) {  /* touch screens keep :hover after a tap, so only a real pointer gets it */
+  .ss-slide.openable:hover .ss-phone, .ss-slide.openable:hover .ss-hint { color: var(--phone); }
+  .ss-slide.openable:hover .ss-phone.conv, .ss-slide.openable:hover .ss-hint.conv { color: var(--conversations); }
+}
+.ss-btn {
+  min-height: 44px; min-width: 64px; padding: 0 14px; flex-shrink: 0; border-radius: 22px; border: 1px solid #2e333e;
+  background: transparent; color: var(--text); font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.ss-btn.danger { border-color: var(--danger); color: var(--danger-text); }
+.ss-btn.danger.fill { background: var(--danger); color: #fff; }
+.ss-btn:disabled { opacity: .5; cursor: default; }
+.ss-confirm { flex: 1; display: flex; flex-direction: column; gap: 10px; font-size: 14px; font-weight: 600; padding: 6px 0; }
+.ss-confirm-btns { display: flex; gap: 8px; }
+.ss-confirm-btns .ss-btn { flex: 1; }
+.ss-footer { margin-top: 8px; flex-shrink: 0; }
+.ss-delete {
+  width: 100%; height: 48px; border-radius: 24px; border: 1px solid var(--danger); background: transparent; color: var(--danger-text);
+  font-family: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.ss-delete:disabled { opacity: .5; cursor: default; }
+.ss-panel .sheet-head > div { flex: 1; min-width: 0; gap: 2px; }
+
+/* session block: swipe left to delete (design/ItemSwipeToRemove.md), confirm inside the block */
+.bk-block.session.swipeable { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.bk-reveal {
+  position: absolute; top: 0; right: 0; bottom: 0; overflow: hidden; display: flex; justify-content: flex-end; pointer-events: none;
+  background: var(--danger-tint); color: var(--danger-text); font-size: 15px; font-weight: 700; transition: width .2s ease-out;
+}
+.bk-reveal.dragging { transition: none; }
+.bk-reveal > span { flex: 1 0 62px; display: flex; align-items: center; justify-content: center; }
+.bk-block.session.confirming { cursor: default; justify-content: center; gap: 4px; }
+.bk-confirm-text { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-confirm-btns { display: flex; gap: 8px; }
+.bk-confirm-btns .ss-btn { flex: 1; min-height: 0; padding: 3px 8px; font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .bk-reveal { transition: none; } }

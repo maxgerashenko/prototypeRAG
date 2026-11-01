@@ -12,7 +12,7 @@ export function BookingSheet({ booking: b, onClose }: { booking: BookingItem; on
       <div className="sheet-panel bk-sheet-panel" role="dialog" aria-modal="true" aria-label="Booking details">
         <div className="sheet-grip" />
         <div className="bk-sheet-head">
-          <span className="bk-sheet-source" style={{ color: b.by_assistant ? "var(--call)" : "var(--accent)" }}>
+          <span className="bk-sheet-source" style={{ color: b.by_assistant ? "var(--assistant)" : "var(--bookings)" }}>
             {b.by_assistant ? "Booked by assistant on a call" : "Booked manually"}
           </span>
           <span className="bk-sheet-name">{b.name}</span>

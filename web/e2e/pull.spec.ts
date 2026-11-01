@@ -118,7 +118,7 @@ test("picker: a short pull springs back, with no reload and no vibration", async
 test("conversations: a release refetches the list in place", async ({ page }) => {
   const api = await setup(page);
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   const screen = page.locator("[data-screen=convos]");
   await expect(screen.locator(".convo-card")).toHaveCount(4);
   api.conversations.b1.unshift(c("c5", "Brand new question"));
@@ -146,7 +146,7 @@ test("conversations: a release refetches the list in place", async ({ page }) =>
 test("transcript: a release refetches the conversation, the title never flashes Loading", async ({ page }) => {
   const api = await setup(page);
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   await page.locator(".convo-card").first().click();
   const screen = page.locator("[data-screen=transcript]");
   await expect(screen.locator("h1")).toHaveText("Sunday hours");
@@ -173,7 +173,7 @@ test("a pull that starts while the list is scrolled down does nothing", async ({
   const many = Array.from({ length: 30 }, (_, i) => c(`x${i}`, `Question ${i}`));
   const api = await setup(page, { businesses: [BAKERY], conversations: { b1: many } });
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   const list = page.locator("[data-screen=convos] .convo-list");
   await expect(list.locator(".convo-card").first()).toBeVisible();
   await list.evaluate((el) => (el.scrollTop = 300));
@@ -192,7 +192,7 @@ test("a pull that starts on the header while the list is scrolled down does noth
   const many = Array.from({ length: 30 }, (_, i) => c(`x${i}`, `Question ${i}`));
   const api = await setup(page, { businesses: [BAKERY], conversations: { b1: many } });
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   const list = page.locator("[data-screen=convos] .convo-list");
   await expect(list.locator(".convo-card").first()).toBeVisible();
   await list.evaluate((el) => (el.scrollTop = 300));
@@ -208,7 +208,7 @@ test("Back from a transcript restores the list scroll position", async ({ page }
   const many = Array.from({ length: 30 }, (_, i) => c(`x${i}`, `Question ${i}`));
   await setup(page, { businesses: [BAKERY], conversations: { b1: many } });
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   const list = page.locator("[data-screen=convos] .convo-list");
   await expect(list.locator(".convo-card").first()).toBeVisible();
   await list.evaluate((el) => (el.scrollTop = 600));

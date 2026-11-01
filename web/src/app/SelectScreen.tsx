@@ -1,12 +1,13 @@
 import { useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
-import { CalendarIcon, ChevronDown, ChevronRight, GearIcon, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
+import { CalendarIcon, ChatCountIcon, ChevronDown, ChevronRight, GearIcon, GlobeIcon, MicIcon, PhoneIcon, SearchIcon } from "./icons";
 import { SkeletonGate } from "./PullIndicator";
 import { SourceBadge } from "./SourceIcon";
 import { chatsLabel, fmtClock, fmtPhone, fmtWhen, hostOf, matchesQuery, monogram, plural } from "./format";
 import { settingsHint } from "./settings";
 import { bookingsHint } from "./bookings";
+import { conversationsHint } from "./format";
 
 const RECENT = 3;
 
@@ -61,7 +62,7 @@ export function SelectScreen(p: Props) {
     <div className="screen rise" data-screen="select">
       {p.mainNumber ? (
         <div className="sel-head">
-          <div className="eyebrow">
+          <div className="eyebrow phone">
             <PhoneIcon size={16} />
             Call by phone
           </div>
@@ -152,17 +153,22 @@ export function SelectScreen(p: Props) {
                     <ChevronRight />
                   </button>
                   <button className="set-row" data-testid="bookings-row" onClick={() => p.onBookings(b.id)}>
-                    <span className="set-row-icon call"><CalendarIcon /></span>
+                    <span className="set-row-icon bookings"><CalendarIcon /></span>
                     <span className="set-row-text">
                       <span className="set-row-title">Bookings</span>
                       <span className="set-row-hint">{bookingsHint(p.todayBookings)}</span>
                     </span>
                     <ChevronRight />
                   </button>
-                  <div className="recent-head">
-                    <span>Recent conversations</span>
-                    <span>{countLabel}</span>
-                  </div>
+                  <button className="set-row" data-testid="conversations-row" onClick={() => p.onSeeAll(b.id)}>
+                    <span className="set-row-icon conversations"><ChatCountIcon count={convos?.status === "error" ? null : n} /></span>
+                    <span className="set-row-text">
+                      <span className="set-row-title">Conversations</span>
+                      <span className="set-row-hint">{conversationsHint(n)}</span>
+                    </span>
+                    <ChevronRight />
+                  </button>
+                  <div className="recent-head">Recent conversations</div>
                   <SkeletonGate loading={convos?.status === "loading" && !convos.data} kind="recent" label="Loading conversations">
                   {convos?.status === "error" && (
                     <div className="recent-empty" role="alert">Couldn’t load conversations ({convos.error}).</div>
@@ -184,9 +190,6 @@ export function SelectScreen(p: Props) {
                   ))}
                   {convos?.status === "ok" && n === 0 && (
                     <div className="recent-empty">No conversations yet. Start a call below and it will show up here.</div>
-                  )}
-                  {n > RECENT && convos?.status === "ok" && (
-                    <button className="see-all" onClick={() => p.onSeeAll(b.id)}>See all {n} conversations</button>
                   )}
                   </SkeletonGate>
                 </div>

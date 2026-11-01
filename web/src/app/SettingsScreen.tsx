@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Business } from "../api";
-import { CheckIcon, ChevronDown, ChevronLeft, PhoneIcon } from "./icons";
+import { ChevronDown, ChevronLeft, PhoneIcon } from "./icons";
 import { NumberSheet } from "./NumberSheet";
+import { StatusChip } from "./StatusChip";
 import { useMinShow } from "./PullIndicator";
 import { fmtPhone, hostOf, monogram } from "./format";
 import { GREETING_PREFIX, barWidth, capsLabel, greetingView, questionsSummary } from "./settings";
@@ -99,13 +100,8 @@ export function SettingsScreen(p: Props) {
             onClick={() => setGreetOpen((o) => !o)}>
             <h2>First greeting</h2>
             {greeting.data && (
-              <div className={`chip chip-${view.kind === "cached" ? "cached" : view.kind === "saving" ? "saving" : "warn"}`}
-                aria-live="polite" data-testid="greeting-chip">
-                {view.kind === "saving" && <span className="spin" />}
-                {view.kind === "cached" && <CheckIcon size={11} stroke={3} />}
-                {(view.kind === "dirty" || view.kind === "notCached") && <span className="chip-dot" />}
-                <span>{view.chip}</span>
-              </div>
+              <StatusChip kind={view.kind === "cached" ? "saved" : view.kind === "notCached" ? "warn" : view.kind}
+                label={view.chip} testId="greeting-chip" />
             )}
             <span className={`greet-chev${greetOpen ? " open" : ""}`}><ChevronDown /></span>
           </button>

@@ -160,7 +160,6 @@ test.describe("1 · pick a business", () => {
     await expect(rows.nth(0)).toContainText("Today · 2:58 PM · 4:12 · 5 msgs");
     await expect(rows.nth(1)).toContainText("Yesterday · 1:00 PM · 1:35 · 3 msgs");
     await expect(rows.nth(2)).toContainText("Aug 25 · 3:00 PM · 1:35 · 2 msgs");
-    await expect(bakery.getByRole("button", { name: /See all/ })).toHaveCount(0); // exactly 3
     await expect(bakery.locator(".badge-new")).toHaveCount(0);
     expect(api.requests).toContain("/businesses/b1/conversations");
 
@@ -181,11 +180,22 @@ test.describe("1 · pick a business", () => {
     await expect(callButton(page)).toBeDisabled();
   });
 
-  test("more than 3 conversations: 'See all N' opens the list", async ({ page }) => {
+  test("more than 3 conversations: the Conversations control opens the list", async ({ page }) => {
     await openApp(page);
     await pick(page, "Bloom & Stem");
     await expect(card(page, "Bloom & Stem").locator(".recent-row")).toHaveCount(3);
-    await card(page, "Bloom & Stem").getByRole("button", { name: "See all 5 conversations" }).click();
+    await card(page, "Bloom & Stem").getByTestId("conversations-row").click();
+    await expect(page.locator("[data-screen=convos]")).toBeVisible();
+  });
+
+  test("the Conversations control shows the count inside its icon and opens the full list", async ({ page }) => {
+    await openApp(page);
+    await pick(page, "Bloom & Stem");
+    const row = card(page, "Bloom & Stem").getByTestId("conversations-row");
+    await expect(row).toContainText("Conversations");
+    await expect(row).toContainText("All 5 conversations");
+    await expect(row.locator("svg text").first()).toHaveText("5");
+    await row.click();
     await expect(page.locator("[data-screen=convos]")).toBeVisible();
   });
 
@@ -257,7 +267,7 @@ test.describe("2 · a business's previous conversations", () => {
   test("header, start call, cards with preview, meta, Back and Esc", async ({ page }) => {
     await openApp(page);
     await pick(page, "Bloom & Stem");
-    await page.getByRole("button", { name: "See all 5 conversations" }).click();
+    await page.getByTestId("conversations-row").click();
     const screen = page.locator("[data-screen=convos]");
     await expect(screen.getByRole("heading", { level: 1 })).toHaveText("Bloom & Stem");
     await expect(screen.locator(".big-mono")).toHaveText("BS");
@@ -271,7 +281,7 @@ test.describe("2 · a business's previous conversations", () => {
     await page.getByRole("button", { name: "Back to businesses" }).click();
     await expect(page.locator("[data-screen=select]")).toBeVisible();
 
-    await page.getByRole("button", { name: "See all 5 conversations" }).click();
+    await page.getByTestId("conversations-row").click();
     await page.keyboard.press("Escape");
     await expect(page.locator("[data-screen=select]")).toBeVisible();
   });
@@ -281,7 +291,7 @@ test.describe("2 · a business's previous conversations", () => {
     init.conversations!.b3 = [...florist.slice(0, 3), convo("f9", "Hung up early", [greet, "Hello?"]), florist[4]];
     await openApp(page, init);
     await pick(page, "Bloom & Stem");
-    await page.getByRole("button", { name: /See all/ }).click();
+    await page.getByTestId("conversations-row").click();
     const early = page.locator(".convo-card").filter({ hasText: "Hung up early" });
     await expect(early.locator(".convo-preview")).toHaveText("You: Hello?");
     await early.click();
@@ -299,7 +309,7 @@ test.describe("2 · a business's previous conversations", () => {
     init.conversations!.b3 = [done, ...florist.slice(1)];
     await openApp(page, init);
     await pick(page, "Bloom & Stem");
-    await page.getByRole("button", { name: /See all/ }).click();
+    await page.getByTestId("conversations-row").click();
     const cards = page.locator(".convo-card");
     await expect(cards.first().locator(".convo-summary")).toHaveText("Caller booked the sauna for Friday evening.");
     await expect(cards.first().locator(".badge-outcome")).toHaveText("Booked");
@@ -327,7 +337,7 @@ test.describe("2 · a business's previous conversations", () => {
     expect(await color(0)).toBe("rgb(138, 180, 248)");
     expect(await color(1)).toBe("rgb(127, 214, 168)");
 
-    await page.getByRole("button", { name: "See all 4 conversations" }).click();
+    await page.getByTestId("conversations-row").click();
     const cards = page.locator(".convo-card");
     await expect(cards.nth(0).locator(".convo-top .src-badge")).toHaveClass(/src-web/);
     await expect(cards.nth(1).locator(".convo-top .src-badge")).toHaveClass(/src-twilio/);
@@ -338,7 +348,7 @@ test.describe("2 · a business's previous conversations", () => {
   test("'Start new call' and Space call this business", async ({ page }) => {
     await openApp(page);
     await pick(page, "Bloom & Stem");
-    await page.getByRole("button", { name: /See all/ }).click();
+    await page.getByTestId("conversations-row").click();
     await page.keyboard.press(" ");
     await voice.connected;
     expect(voice.url()).toContain("business_id=b3");
@@ -349,7 +359,7 @@ test.describe("2 · a business's previous conversations", () => {
   test("'Start new call' button calls this business", async ({ page }) => {
     await openApp(page);
     await pick(page, "Bloom & Stem");
-    await page.getByRole("button", { name: /See all/ }).click();
+    await page.getByTestId("conversations-row").click();
     await page.getByRole("button", { name: "Start new call" }).click();
     await expect(page.locator("[data-screen=call]")).toBeVisible();
     expect(Object.fromEntries(new URL(voice.url()).searchParams)).toEqual({ business_id: "b3", mode: "ptt" });
