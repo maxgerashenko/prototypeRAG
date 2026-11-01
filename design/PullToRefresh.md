@@ -41,7 +41,7 @@ History: [plan/feature-pull-to-refresh.md](../plan/feature-pull-to-refresh.md).
 
 - **Exception, Bookings:** the spinner is not centred; it lines up with the calendar's "+" icons
   (centre of the event area, 62 px from the left, 10 px from the right), so `padding-left: 52px` shifts it.
-  Other screens stay centred.
+  The "+" itself shows only on hover / touch, but the spinner keeps its column. Other screens stay centred.
 - Reduced motion: the spinner still rotates (it is a progress signal); the layer follows the finger as usual.
 
 ## Do not

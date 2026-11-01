@@ -7,6 +7,7 @@ The header at the top of every view opened from a business card: **Settings**, *
 ┌──────────────────────────────────┐
 │ [BS]  Bookings                   │   h1: the view's name
 │       Bloom & Stem · bloomstem…  │   grey subtitle: business · host
+│ ‹ Swipe to go back               │   small grey line, clickable
 └──────────────────────────────────┘
 ```
 
@@ -15,16 +16,16 @@ The header at the top of every view opened from a business card: **Settings**, *
 | Monogram | `.big-mono`, 60 px, the business's initials; same colours on every view (black + accent border). Does not change with the view. |
 | Title | `h1`, 24 px / 800. The **view's name** (*Settings*, *Bookings*, *Conversations*), not the business. |
 | Subtitle | 14 px `--muted`, one line, ellipsis: `business name · host` (`hostOf`). |
-| Padding | `18px 20px`; no row above it. |
+| Padding | `18px 20px`; the hint line follows with small margins. |
 
-## No Back button
+## "Swipe to go back" line
 
-There is no `‹ Businesses` row and no on-screen back control. Going back is:
+Under the header sits one small grey line, `‹ Swipe to go back` (`.back-hint`, 12 px / 600, `--faint`, tight
+margins: 6 px below, pulled up under the subtitle). It tells touch users the gesture and is a plain
+button for mouse users: a click goes back. There is no `‹ Businesses` row.
 
-- **swipe right** anywhere except where a view opts out (`data-swipe-back="off"`, e.g. the booking day column);
-- **Esc** on desktop. Overlays close first (sheet → calendar → leave).
-
-Consequence: a mouse-only desktop user has no click target to go back; Esc is the way.
+Going back is: the line, **swipe right** (except where a view opts out with `data-swipe-back="off"`,
+e.g. the booking day column) or **Esc**. Overlays close first (sheet → calendar → leave).
 
 ## Transcript
 

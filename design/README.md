@@ -54,8 +54,8 @@ timers). Phone layout 390 × 844; touch targets ≥ 44 px.
 | 1a | Open-card panel | `SelectScreen.tsx` (`.recent`) | **New:** two rows above *Recent conversations*: **Business settings** (hint: number · greeting cached?) and **Bookings** (hint: today's count) — both built. |
 | 1b | Business settings | — **new** | See below. |
 | 1c | Bookings (day view) | `BookingsScreen.tsx`, `MonthCalendar.tsx`, `BookingSheet.tsx` | Built. **Change:** the top is the [ViewHeader](ViewHeader.md) (monogram, h1 *Bookings*, `name · host`; no back row), not the `BOOKINGS · <business>` caption; the date bar sits below it. See below. |
-| 2 | Previous conversations | `ConversationsScreen.tsx` | [ViewHeader](ViewHeader.md): h1 *Conversations*, `name · host`; no back row. |
-| 3 | Transcript | `TranscriptScreen.tsx` | [ViewHeader](ViewHeader.md): h1 is the conversation title, subtitle the business name; no back row. |
+| 2 | Previous conversations | `ConversationsScreen.tsx` | [ViewHeader](ViewHeader.md): h1 *Conversations*, `name · host`; small "Swipe to go back" line. |
+| 3 | Transcript | `TranscriptScreen.tsx` | [ViewHeader](ViewHeader.md): h1 is the conversation title, subtitle the business name; small "Swipe to go back" line. |
 | 4 | Connecting | `CallScreens.tsx` | Matches. |
 | 5 | Live call / phone call (watch-only) | `CallScreens.tsx` | Matches; the call opens with the business's saved greeting. |
 | 6 | Call ended | `CallScreens.tsx` | Matches. |
@@ -111,7 +111,7 @@ Swipe right or Esc → list. Header as on Settings (see the table); under it a b
   previous/next year and month; tapping a day jumps to it and closes the grid.
 
 - **Group sessions** (not in the original design): a 1-hour event with a name and max attendees,
-  added with the faded **+** in the middle of any free future hour, or the round **+** button (bottom right). Violet
+  added with the **+** (shown only on hover, touch or focus) in the middle of any free future hour, or the round **+** button (bottom right). Violet
   block `name · 3/8` (+ FULL chip); tap → sheet: rename, change max, remove a caller (inline confirm),
   delete (callers are cancelled and texted through a mock sender). Past sessions are read-only. See
   [feature-bookings-sessions.md](../plan/feature-bookings-sessions.md), DEC-54/DEC-55.
@@ -125,7 +125,7 @@ mobile, keyboard shortcuts (Space / Esc / Backspace). Keep them.
 
 - [colors.md](colors.md) — every `:root` color token and what it means. Pattern docs refer to
   these tokens, not to other components.
-- [ViewHeader.md](ViewHeader.md) — the header every business view starts with: monogram, view name, `business · host`; no Back button.
+- [ViewHeader.md](ViewHeader.md) — the header every business view starts with: monogram, view name, `business · host`, small clickable "Swipe to go back" line.
 - [PanelControls.md](PanelControls.md) — the big rows on a business's open card (Business settings, Bookings, Conversations): icon tile, title, grey hint, chevron.
 - [PullToRefresh.md](PullToRefresh.md) — pull a list down to reload it in place; spinner colour follows the opening control, Bookings aligns it with the "+" icons.
 - [SeatSlider.md](SeatSlider.md) — attendees bar 1-30 with a small Private switch.
