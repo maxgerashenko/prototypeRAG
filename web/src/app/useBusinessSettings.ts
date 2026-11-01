@@ -33,6 +33,8 @@ export interface SettingsBindings {
   onOpenSheet: () => void;
   onCloseSheet: () => void;
   onAssign: (number: string) => void;
+  /** Pull-to-refresh: refetch in place (the old data stays on screen), resolved when done. */
+  onRefresh: () => Promise<unknown>;
 }
 
 export function useBusinessSettings(
@@ -147,9 +149,25 @@ export function useBusinessSettings(
     [bizId, onAssigned],
   );
 
+  const onRefresh = useCallback(() => {
+    if (!bizId) return Promise.resolve();
+    const g = ++greetingReq.current;
+    const q = ++questionsReq.current;
+    return Promise.allSettled([
+      getGreeting(bizId).then(
+        (data) => g === greetingReq.current && setGreeting({ status: "ok", data }),
+        (err) => g === greetingReq.current && !greeting.data && setGreeting({ status: "error", error: errorText(err) }),
+      ),
+      getTopQuestions(bizId).then(
+        (data) => q === questionsReq.current && setQuestions({ status: "ok", data }),
+        (err) => q === questionsReq.current && !questions.data && setQuestions({ status: "error", error: errorText(err) }),
+      ),
+    ]);
+  }, [bizId, greeting.data, questions.data]);
+
   const bindings: SettingsBindings = {
     greeting, savingGreeting, greetingError, questions, numbers, sheetOpen, assigning, assignError,
-    onSaveGreeting, onOpenSheet, onCloseSheet, onAssign,
+    onSaveGreeting, onOpenSheet, onCloseSheet, onAssign, onRefresh,
   };
   return { ...bindings, greetingCached: greeting.data ? greeting.data.cached : null };
 }

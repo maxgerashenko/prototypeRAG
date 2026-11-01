@@ -16,8 +16,8 @@ async function openList(page: Page) {
   });
   await page.goto("/web/");
   await page.locator(".biz-pick").click();
-  await page.getByText(/see all/i).first().click();
-  await expect(page.getByRole("button", { name: "Back to businesses" })).toBeVisible();
+  await page.getByTestId("conversations-row").click();
+  await expect(page.locator("[data-screen=convos] h1")).toBeVisible();
 }
 
 async function swipe(page: Page, dx: number, release = true) {
@@ -41,7 +41,7 @@ test("a long swipe right goes back, the screen nudged at most 20 px", async ({ p
 test("a short swipe springs back without going back", async ({ page }) => {
   await openList(page);
   await swipe(page, 50);
-  await expect(page.getByRole("button", { name: "Back to businesses" })).toBeVisible();
+  await expect(page.locator("[data-screen=convos] h1")).toBeVisible();
   expect(await page.getByTestId("vapp").evaluate((el) => el.style.transform)).toBe("");
 });
 

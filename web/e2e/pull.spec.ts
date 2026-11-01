@@ -118,7 +118,7 @@ test("picker: a short pull springs back, with no reload and no vibration", async
 test("conversations: a release refetches the list in place", async ({ page }) => {
   const api = await setup(page);
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   const screen = page.locator("[data-screen=convos]");
   await expect(screen.locator(".convo-card")).toHaveCount(4);
   api.conversations.b1.unshift(c("c5", "Brand new question"));
@@ -146,7 +146,7 @@ test("conversations: a release refetches the list in place", async ({ page }) =>
 test("transcript: a release refetches the conversation, the title never flashes Loading", async ({ page }) => {
   const api = await setup(page);
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   await page.locator(".convo-card").first().click();
   const screen = page.locator("[data-screen=transcript]");
   await expect(screen.locator("h1")).toHaveText("Sunday hours");
@@ -173,7 +173,7 @@ test("a pull that starts while the list is scrolled down does nothing", async ({
   const many = Array.from({ length: 30 }, (_, i) => c(`x${i}`, `Question ${i}`));
   const api = await setup(page, { businesses: [BAKERY], conversations: { b1: many } });
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   const list = page.locator("[data-screen=convos] .convo-list");
   await expect(list.locator(".convo-card").first()).toBeVisible();
   await list.evaluate((el) => (el.scrollTop = 300));
@@ -192,7 +192,7 @@ test("a pull that starts on the header while the list is scrolled down does noth
   const many = Array.from({ length: 30 }, (_, i) => c(`x${i}`, `Question ${i}`));
   const api = await setup(page, { businesses: [BAKERY], conversations: { b1: many } });
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   const list = page.locator("[data-screen=convos] .convo-list");
   await expect(list.locator(".convo-card").first()).toBeVisible();
   await list.evaluate((el) => (el.scrollTop = 300));
@@ -208,14 +208,14 @@ test("Back from a transcript restores the list scroll position", async ({ page }
   const many = Array.from({ length: 30 }, (_, i) => c(`x${i}`, `Question ${i}`));
   await setup(page, { businesses: [BAKERY], conversations: { b1: many } });
   await page.locator(".biz-pick").click();
-  await page.getByRole("button", { name: /See all/ }).click();
+  await page.getByTestId("conversations-row").click();
   const list = page.locator("[data-screen=convos] .convo-list");
   await expect(list.locator(".convo-card").first()).toBeVisible();
   await list.evaluate((el) => (el.scrollTop = 600));
   await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(600);
   await list.locator(".convo-card").nth(12).click();
   await expect(page.locator("[data-screen=transcript]")).toBeVisible();
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.keyboard.press("Escape");
   await expect(page.locator("[data-screen=convos] .convo-list")).toBeVisible();
   await expect.poll(() => page.locator("[data-screen=convos] .convo-list").evaluate((el) => el.scrollTop)).toBe(600);
 });
@@ -278,4 +278,57 @@ test("while a phone call is in progress: a pull on the picker does nothing", asy
   await page.waitForTimeout(700);
   expect(await marker(page)).toBe(42);
   expect(await vib(page)).toEqual([]);
+});
+
+test("settings: pull refetches the greeting and questions in place; the spinner is the grey Settings colour", async ({ page }) => {
+  const api = await setup(page, { businesses: [BAKERY] });
+  await page.locator(".biz-pick").click();
+  await page.getByTestId("settings-row").click();
+  await expect(page.locator("[data-screen=settings]")).toBeVisible();
+  await expect.poll(() => count(api, "/businesses/b1/greeting")).toBeGreaterThan(0);
+  const before = count(api, "/businesses/b1/greeting");
+  await mark(page);
+  const f = await finger(page, "[data-screen=settings] .set-scroll", 200);
+  await expect(page.getByTestId("ptr")).toBeVisible();
+  const color = await page.locator("[data-screen=settings] .bars-spinner rect").first().evaluate((el) => getComputedStyle(el).fill);
+  const grey = await page.evaluate(() => {
+    const d = document.createElement("i");
+    d.style.color = "var(--misc)";
+    document.body.append(d);
+    const c = getComputedStyle(d).color;
+    d.remove();
+    return c;
+  });
+  expect(color).toBe(grey);
+  await f.end();
+  await expect.poll(() => count(api, "/businesses/b1/greeting")).toBe(before + 1);
+  expect(await marker(page)).toBe(42); // refetched in place, no page reload
+});
+
+test("bookings: the spinner uses the Bookings colour and lines up with the calendar's + icons", async ({ page }) => {
+  await setup(page, { businesses: [BAKERY] });
+  await page.locator(".biz-pick").click();
+  await page.getByTestId("bookings-row").click();
+  await expect(page.getByTestId("bk-day")).toBeVisible();
+  await expect(page.getByTestId("bk-day")).toBeVisible();
+  await page.waitForTimeout(500); // the day's slide-in animation has settled
+  const f = await finger(page, "[data-testid=bk-day]", 200);
+  const spinner = page.locator("[data-screen=bookings] .bars-spinner");
+  await expect(spinner).toBeVisible();
+  const box = (await spinner.boundingBox())!;
+  const hour = page.locator(".bk-hour-add").first();
+  await expect(hour).toBeVisible();
+  const plus = (await hour.locator("span").boundingBox())!; // the glyph is hidden (opacity 0) but still laid out
+  expect(Math.abs(box.x + box.width / 2 - (plus.x + plus.width / 2))).toBeLessThan(2);
+  const fill = await spinner.locator("rect").first().evaluate((el) => getComputedStyle(el).fill);
+  const purple = await page.evaluate(() => {
+    const d = document.createElement("i");
+    d.style.color = "var(--bookings)";
+    document.body.append(d);
+    const c = getComputedStyle(d).color;
+    d.remove();
+    return c;
+  });
+  expect(fill).toBe(purple);
+  await f.end();
 });

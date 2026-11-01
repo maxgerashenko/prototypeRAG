@@ -50,6 +50,11 @@ export function plural(n: number, one: string, many: string): string {
 }
 
 /** Business card subtitle count: "No chats yet", "1 chat", "3 chats". */
+/** Hint under the Conversations control on the open card. */
+export function conversationsHint(n: number): string {
+  return n === 0 ? "None yet" : `All ${plural(n, "conversation", "conversations")}`;
+}
+
 export function chatsLabel(n: number): string {
   return n === 0 ? "No chats yet" : plural(n, "chat", "chats");
 }

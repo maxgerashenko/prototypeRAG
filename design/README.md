@@ -11,6 +11,10 @@ implementing or changing `web/src/app/`.
 Snapshot: 2026-10-31, synced with `web/src/app` at `146556a` plus the new Settings and
 Bookings screens. When the design changes, replace `Main.dc.html` and update this file.
 
+> **`Main.dc.html` may be outdated.** The app has changed since it was exported (area colours, sessions,
+> sheets, subtitles). Treat it as a reference only: before implementing from it, compare it with the
+> running app and the docs in this folder, and ask the user which is right where they differ.
+
 ## How to read `Main.dc.html`
 
 - Markup is between `<x-dc>` tags; `{{name}}` holes come from `renderVals()` in the
@@ -24,7 +28,7 @@ Bookings screens. When the design changes, replace `Main.dc.html` and update thi
 
 ## Tokens
 
-Same values as `web/src/app/app.css` `:root` — keep them in one place.
+Same values as `web/src/app/app.css` `:root` — the complete list is in [colors.md](colors.md).
 
 | Token | Value | Use |
 |---|---|---|
@@ -46,19 +50,19 @@ timers). Phone layout 390 × 844; touch targets ≥ 44 px.
 
 | # | Screen | In the app today | Notes |
 |---|---|---|---|
-| 1 | Pick a business | `SelectScreen.tsx` | **Change:** no radio/check mark and no blue border on the open card — the card only expands (chevron flips). Open card: `#181b22` background, monogram black `#07090c` with a 1.5 px accent border. List keeps its order and scrolls the open card to the top. |
-| 1a | Open-card panel | `SelectScreen.tsx` (`.recent`) | **New:** two rows above *Recent conversations*: **Business settings** (hint: number · greeting cached?) and **Bookings** (hint: today's count). |
+| 1 | Pick a business | `SelectScreen.tsx` | **Change:** no radio/check mark and no blue border on the open card — the card only expands (chevron flips). Open card: `#181b22` background; the monogram keeps its normal colours (no change on selection). List keeps its order and scrolls the open card to the top. |
+| 1a | Open-card panel | `SelectScreen.tsx` (`.recent`) | **New:** two rows above *Recent conversations*: **Business settings** (hint: number · greeting cached?) and **Bookings** (hint: today's count) — both built. |
 | 1b | Business settings | — **new** | See below. |
-| 1c | Bookings (day view) | — **new** | See below. |
-| 2 | Previous conversations | `ConversationsScreen.tsx` | Matches. Header monogram is black with accent border. |
-| 3 | Transcript | `TranscriptScreen.tsx` | Matches. |
+| 1c | Bookings (day view) | `BookingsScreen.tsx`, `MonthCalendar.tsx`, `BookingSheet.tsx` | Built. **Change:** the top is the [ViewHeader](ViewHeader.md) (monogram, h1 *Bookings*, `name · host`; no back row), not the `BOOKINGS · <business>` caption; the date bar sits below it. See below. |
+| 2 | Previous conversations | `ConversationsScreen.tsx` | [ViewHeader](ViewHeader.md): h1 *Conversations*, `name · host`; small "Swipe to go back" line. |
+| 3 | Transcript | `TranscriptScreen.tsx` | [ViewHeader](ViewHeader.md): h1 is the conversation title, subtitle the business name; small "Swipe to go back" line. |
 | 4 | Connecting | `CallScreens.tsx` | Matches. |
 | 5 | Live call / phone call (watch-only) | `CallScreens.tsx` | Matches; the call opens with the business's saved greeting. |
 | 6 | Call ended | `CallScreens.tsx` | Matches. |
 
 ### 1b. Business settings (new)
 
-Back button → list (the business stays open). Header: monogram (black + accent border),
+Swipe right or Esc → list (the business stays open). Header ([ViewHeader](ViewHeader.md)): monogram (black + accent border),
 "Settings", `name · category`. One scroll column of compact cards, in this order:
 
 1. **Phone number** — one row: phone tile (green), number (mono), `area · Twilio · Voice & SMS`,
@@ -82,9 +86,9 @@ Back button → list (the business stays open). Header: monogram (black + accent
    first open by default). Needs an aggregate over conversations (question clustering) — no
    API yet.
 
-### 1c. Bookings — day view (new)
+### 1c. Bookings — day view (built)
 
-Back button → list. Header: `BOOKINGS · <business>`, date button (`Today, Oct 31` ▾), **Today**
+Swipe right or Esc → list. Header as on Settings (see the table); under it a bar with the date button (`Today, Oct 31` ▾), **Today**
 (when not on today), ‹ › day arrows. Summary line `N bookings · K by assistant`.
 
 - **Day column** like Google Calendar, one day, vertical scroll. Visible hours = **1 h before
@@ -92,16 +96,46 @@ Back button → list. Header: `BOOKINGS · <business>`, date button (`Today, Oct
   are hatched (closed). Opens scrolled to the top.
 - **Every booking is 1 hour and starts on the hour** — matches `Rules.slot_minutes = 60` in
   `app/actions/booking/rules.py`; take hours from the rules' `hours`.
-- Block colors: green tint + mic icon = booked by the assistant on a call; blue tint = manual.
+- Block colors ([areas.md](areas.md)): strong purple (Assistant) tint + mic icon = booked by the assistant on a call; light purple (Bookings) tint = manual and group sessions.
   Tap → bottom sheet: source, name, service, time, duration, Close.
 - Red current-time line on today.
 - **Swipe** left/right (horizontal, `touch-action: pan-y`) = next/previous day, with a short
   slide-in animation; a swipe must not also open the booking under the finger.
+- Built with `GET /businesses/{id}/bookings` (one month per request, times in the business
+  timezone as minutes since local midnight). "Today" and the red line follow the device clock.
+  The day column opts out of swipe-back (`data-swipe-back="off"`); the header and bar still
+  swipe back. Known limits: overlapping bookings are drawn on top of each other; the sheet
+  shows only the design's fields (no phone/notes).
 - **Mini calendar**: tapping the date opens a month grid inline — circles, selected day
   filled accent, today outlined accent, green dot = day has bookings; `«` `‹` `›` `»` =
   previous/next year and month; tapping a day jumps to it and closes the grid.
+
+- **Group sessions** (not in the original design): a 1-hour event with a name and max attendees,
+  added with the **+** (shown only on hover, touch or focus) in the middle of any free future hour, or the round **+** button (bottom right). Violet
+  block `name · 3/8` (+ FULL chip); tap → sheet: rename, change max, remove a caller (inline confirm),
+  delete (callers are cancelled and texted through a mock sender). Past sessions are read-only. See
+  [feature-bookings-sessions.md](../plan/feature-bookings-sessions.md), DEC-54/DEC-55.
 
 ## Already in the app, not in the design
 
 Pull-to-refresh, skeleton loaders, error banners, the hands-free *End call* button on
 mobile, keyboard shortcuts (Space / Esc / Backspace). Keep them.
+
+## Reusable patterns
+
+- [colors.md](colors.md) — every `:root` color token and what it means. Pattern docs refer to
+  these tokens, not to other components.
+- [ViewHeader.md](ViewHeader.md) — the header every business view starts with: monogram, view name, `business · host`, small clickable "Swipe to go back" line.
+- [PanelControls.md](PanelControls.md) — the big rows on a business's open card (Business settings, Bookings, Conversations): icon tile, title, grey hint, chevron.
+- [PullToRefresh.md](PullToRefresh.md) — pull a list down to reload it in place; spinner colour follows the opening control, Bookings aligns it with the "+" icons.
+- [SeatSlider.md](SeatSlider.md) — attendees bar 1-30 with a small Private switch.
+- [StatusChip.md](StatusChip.md) — save-state pill (Saving… / Unsaved changes / Saved), from the greeting "Cached" chip.
+- [ControlSubtitle.md](ControlSubtitle.md) — the grey `·`-separated line under a control's title.
+- [BottomSheet.md](BottomSheet.md) — the panel that slides up from the bottom (name, size rules, swipe down to
+  close, known gaps).
+- [areas.md](areas.md) — the app's areas (Assistant, Bookings, Phone, Conversations, Misc), the
+  colour each owns and how to mark things that cross areas; includes the list of inconsistencies.
+- [ListItem.md](ListItem.md) — the list row and its features; [ListItemAction.md](ListItemAction.md) — what
+  pressing the row does (open or call); [ItemSwipeToRemove.md](ItemSwipeToRemove.md),
+  [ItemIconToRemove.md](ItemIconToRemove.md), [ItemRemoveConfirmation.md](ItemRemoveConfirmation.md) —
+  the three parts of removing a row, consistent across every removable list.

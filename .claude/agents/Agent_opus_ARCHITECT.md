@@ -24,6 +24,11 @@ the code the feature touches (Read/Grep; read the real files, do not guess). Che
 for recent changes. If the request conflicts with a recorded decision, say so first and
 plan the least-conflicting version; do not silently overrule a DEC-xx.
 
+For anything touching `web/src/app/`, also read `design/README.md` and the pattern docs it lists
+(`areas.md`, `colors.md`, `ListItem.md`, `BottomSheet.md`, `ControlSubtitle.md`, ...). Name the
+applicable docs in the plan, reuse their patterns, quote their rules in the UI specs, and list any
+new or changed pattern as a step that updates `design/`. `design/Main.dc.html` may be outdated: if it differs from the app or these docs, ask the user before following it.
+
 ## What the local qwen model can and cannot do (use this to tag steps)
 
 The local model is `qwen/qwen3.6-35b-a3b` (the user calls it "qwen 3.5"), thinking on,

@@ -1,12 +1,13 @@
 import type { ConversationDetail } from "../api";
 import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
-import { ChevronLeft, GlobeIcon } from "./icons";
+import { GlobeIcon } from "./icons";
 import { OutcomeBadge } from "./OutcomeBadge";
 import { PullRegion, Skeleton, useMinShow } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
 import { SourceBadge } from "./SourceIcon";
-import { fmtClock, fmtWhen, monogram, plural } from "./format";
+import { ViewHeader } from "./ViewHeader";
+import { fmtClock, fmtWhen, plural } from "./format";
 
 interface Props {
   pull: PullState;
@@ -25,20 +26,16 @@ export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: P
   const kind = c?.channel === "chat" ? "Chat" : "Call";
   return (
     <div className="screen slide" data-screen="transcript">
-      <div className="back-row">
-        <button className="back-btn" aria-label="Back" onClick={onBack}>
-          <span className="back-circle"><ChevronLeft /></span>
-          <span className="back-mono" aria-hidden="true">{monogram(bizName)}</span>
-          <span className="ellipsis">{bizName}</span>
-        </button>
-      </div>
       <div className="tr-head">
-        <div className="tr-title">
-          {c && !showSk && <SourceBadge source={c.source} size={20} />}
-          <h1>{c && !showSk ? c.title : convo.status === "error" ? "Conversation" : (<span className="sk-block sk-title" aria-hidden="true" />)}</h1>
-        </div>
+        <ViewHeader
+          name={bizName}
+          title={c && !showSk ? c.title : convo.status === "error" ? "Conversation" : (<span className="sk-block sk-title" aria-hidden="true" />)}
+          sub={bizName}
+          onBack={onBack}
+        />
         {c && !showSk && (
           <div className="tr-meta">
+            <SourceBadge source={c.source} size={20} />
             <span>{when}</span>
             <span>·</span>
             <span>{dur}</span>

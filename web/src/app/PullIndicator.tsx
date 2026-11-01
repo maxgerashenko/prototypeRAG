@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { PULL_THRESHOLD, isArmed, pullProgress, type PullState } from "./pullToRefresh";
 
 const BARS = 8;
@@ -22,7 +22,7 @@ export function BarsSpinner({ progress = 1, spinning = false, size = 32 }: { pro
           x="10.6" y="1.6" width="2.8" height="6" rx="1.4"
           transform={`rotate(${i * (360 / BARS)} 12 12)`}
           style={{
-            fill: "var(--accent)",
+            fill: "var(--ptr-color, var(--conversations))",
             opacity: spinning ? undefined : Math.min(1, Math.max(0, progress * BARS - i)) * 0.9,
             animationDelay: spinning ? `${(i / BARS - 1).toFixed(3)}s` : undefined,
           }}
@@ -34,12 +34,21 @@ export function BarsSpinner({ progress = 1, spinning = false, size = 32 }: { pro
 
 /** A list that slides down to reveal a spinner behind it while it is pulled or refreshing.
  * Only the list moves; the screen's header and footer stay put. */
-export function PullRegion({ state, children }: { state: PullState; children: ReactNode }) {
+export type PullArea = "conversations" | "bookings" | "settings";
+
+/** The spinner wears the colour of the control that opens the screen (PanelControls tile glyph). */
+const PULL_COLOR: Record<PullArea, string> = {
+  conversations: "var(--conversations)",
+  bookings: "var(--bookings)",
+  settings: "var(--misc)",
+};
+
+export function PullRegion({ state, area = "conversations", children }: { state: PullState; area?: PullArea; children: ReactNode }) {
   const pulling = state.phase === "pulling";
   const refreshing = state.phase === "refreshing";
   const p = pullProgress(state);
   return (
-    <div className="ptr-region">
+    <div className="ptr-region" data-area={area} style={{ "--ptr-color": PULL_COLOR[area] } as CSSProperties}>
       {(pulling || refreshing) && (
         <div className={"ptr-under" + (pulling && isArmed(state) ? " armed" : "")} data-testid="ptr" role={refreshing ? "status" : undefined}
           style={{ height: (pulling ? state.distance : PULL_THRESHOLD) / 2 }}>

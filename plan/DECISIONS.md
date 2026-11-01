@@ -126,6 +126,9 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-51 | Keep our crawler; use MarkItDown for PDF text (issue #116) | `app/ingest/` stays (Scrapy found the same pages and has no priority/cap logic or extraction); add robots.txt `Sitemap:` lines to discovery; PDF extraction moves from `pypdf` page text to MarkItDown (`markitdown[pdf]`, pdfminer.six) because it keeps tables as Markdown rows; scanned PDFs still need OCR | 1 | ✅ (comparison [done 2026-10-28](comparison-scrapy-markitdown.md); follow-up issues open) |
 | DEC-52 | Phone numbers are assigned per business in Settings (user decision 2026-10-31, #147) | Settings lists the Twilio account's numbers (`GET /twilio/numbers`) and `PUT /businesses/{id}/number` moves one to the business (off any other holder); numbers held by another business are shown as "Used by X" with a *Move* action, not hidden; opening a card no longer moves the main number (`App.tsx` `assignMainNumber` removed, `/main-number` endpoints unused). Only numbers the account owns can be assigned; buying one stays out (DEC-34) | 1 | ✅ |
 | DEC-53 | The greeting always starts with a fixed AI disclosure (user decision 2026-10-31, #145) | The spoken opening = fixed sentence "Hi, I am an AI assistant." + the owner's greeting text (nothing more when empty; a copy of the sentence typed by the owner is dropped) — wording changed 2026-10-31; the owner edits only the second part and the Settings screen shows a hint below the input saying the first sentence is added. Keeps the R15/DEC-17 disclosure without rejecting text. Greeting text lives in `businesses.settings.greeting` (no migration); audio cached per final text (`greeting_audio`) | 1 | ✅ |
+| DEC-54 | Group sessions: data model (user decisions 2026-10-31, branch `feature-bookings-sessions`) | `sessions` table (1 h, name, `max_attendees` 1–50, soft delete) + attendees as `bookings` rows (`type='session'`, `session_id`); partial unique `(business_id, starts_at) WHERE status='active'`; server validates DST gap, future/ended, 409 on overlap with a 1:1 booking or a session at the same hour. Sessions do **not** yet block the assistant's 1:1 bookings (left to #149). Deleting a session or removing a caller cancels the booking and texts the caller through a **mock** sender (`app/actions/sms.py`, never Twilio) | 1 | ✅ |
+| DEC-55 | Hold-to-add gesture in the day view | Mouse: click an empty hour. Touch/pen: hold 1.5 s (`HOLD_MS`) with a fill-ghost after 150 ms; cancel on move > 10 px, scroll, `pointercancel`, second pointer. A short tap shows a hint. A 56 px **+** button is the fallback and the VoiceOver route. Never `preventDefault` on pointerdown/touchstart; iOS callout off. iPhone has no Vibration API, so the fill is the only feedback | 1 | **Superseded by DEC-56** |
+| DEC-56 | Add a session with a faded **+** in each free hour (user decision 2026-10-31, supersedes DEC-55) | The hold gesture and mouse click-to-add are removed (`holdToAdd.ts` deleted). Every free future hour shows a faded 44 px **+** centred in the row (`hour-add-<h>`); the round bottom-right **+** stays. Visible on touch without hover; no timing to tune, no iOS gesture risks | 1 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
@@ -858,6 +861,35 @@ Issue #145; driver R15/DEC-17 (legal priority).
 | Reject text without "AI" (422) | Simple | The design's sample ("virtual assistant") is rejected; owner must remember the rule | ❌ |
 | Fixed sentence "Hi, I am an AI assistant." prepended to the owner's text, hint under the input, disclosure alone if empty | Disclosure can't be removed or forgotten; no validation errors | Greeting is a little longer | ✅ |
 
+### DEC-54 — Group sessions: data model (stage 1)
+
+Plan [feature-bookings-sessions.md](feature-bookings-sessions.md).
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| Separate `sessions` table + attendees as `bookings` rows (`session_id`) | Reuses cancel/list code; one place for a caller's bookings | `list_bookings` must exclude attendee rows | ✅ |
+| Sessions as bookings with a capacity column | One table | Name/max don't fit a 1:1 row; unique-hour rule differs | ❌ |
+| Hard delete | Simple | Loses who was texted/cancelled | ❌ (soft delete) |
+
+Mock SMS stays until #138 (OPEN-24). Sessions blocking 1:1 bookings: #149.
+
+### DEC-55 — Hold-to-add gesture (stage 1) — **Superseded by DEC-56**
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| Touch hold 1.5 s + mouse click + **+** button | Matches the request; no accidental adds while scrolling | Unverified on iOS until the iPhone check | ✅ |
+| Tap to create on touch | Fast | Accidental sessions while scrolling/swiping | ❌ |
+| 500 ms hold, ring at the finger, haptics as main feedback | — | Too easy to trigger; ring hidden under the thumb; no iOS vibration | ❌ |
+
+### DEC-56 — Faded + in each free hour replaces hold-to-add (stage 1)
+
+User decision 2026-10-31; supersedes DEC-55.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| Faded **+** centred in every free future hour (+ the round **+** button) | Discoverable, one tap, nothing to time, works the same on touch and mouse | 44 px targets sit in the day column next to the swipe (guarded by `TAP_GUARD_MS`) | ✅ |
+| Touch hold 1.5 s + mouse click (DEC-55) | No extra buttons on the grid | Hidden gesture, iOS risks (pointercancel, callout), needs timing tuning | ❌ superseded |
+
 ### DEC-51 — Keep our crawler, use MarkItDown for PDF text (stage 1)
 
 Issue #116. Evidence and numbers: [comparison-scrapy-markitdown.md](comparison-scrapy-markitdown.md).
@@ -972,6 +1004,7 @@ Grouped by the stage in which the answer is needed.
 | OPEN-05 | 1 | Embeddings locally | Local `nomic` + re-index · Gemini embeddings everywhere | Offline learning vs index parity |
 | OPEN-18 | 1 | Phone/booking tests with the pilot (DEC-31) | Browser test calls by the developer only (Voice SDK, DEC-34), with the pilot's data as a fixture · swap in a consenting business first | DEC-31 caveat (R10) — needed before stage 1 step 4 (Twilio) |
 | OPEN-20 | 1 | Local model for fact extraction (DEC-38) | `google/gemma-4-12b` with thinking on (already loaded) · `qwen/qwen3.6-35b-a3b` thinking on (stronger, ~27 GB, shares memory with code delegation) · Gemini Flash already in stage 1 (cents per crawl, approx.) | Precision audit on 5 pilot pages (`run --only facts --dry-run --model <id>`, built 2026-10-19; needs the Mac) — `facts.py` runs meanwhile on `FACTS_LLM_MODEL`/`LLM_MODEL` ([07-knowledge-quality.md](07-knowledge-quality.md)) |
+| OPEN-24 | 1 | Real SMS to callers when a session is deleted / a caller is removed (#138) | Twilio SMS from the business number · email · none | Opt-in/consent and wording; replaces the mock `send_sms` in `app/actions/sms.py` (it also logs the full phone number — drop that) |
 | OPEN-22 | 1 | Role of raw page chunks once facts exist (DEC-38) | Fallback only when no fact scores above a threshold · always 1–2 chunks after the facts · equal ranking with a fact boost · facts only | A/B eval with `RETRIEVAL_MODE` + V16 latency — needed before the retrieval change is final. Duplicates between a fact and its source chunk: DEC-47 |
 | OPEN-02 | 2 | Target country / region | EU (`europe-west3` Frankfurt — next to Neon `aws-eu-central-1`) · US (`us-east4` — next to Neon `aws-us-east-1`) · other | Where the pilot business is (R16) |
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
@@ -998,6 +1031,7 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Vertex AI Vector Search | Always-on endpoint → not cheap at small scale | DEC-02 |
 | Gemini 1.5 Flash "2M context" | Was 1M (2M was Pro); model generations change — check current model at deploy | DEC-07 |
 | Scrapy `CLOSESPIDER_PAGECOUNT` | Counts every response including robots.txt and sitemaps; cap pages with `CLOSESPIDER_ITEMCOUNT` | DEC-51 |
+| iPhone Safari / home-screen PWA | No `navigator.vibrate` (Vibration API unsupported), so haptic feedback cannot be relied on | DEC-55 (superseded; still true for pull-to-refresh) |
 | Qdrant snapshot migration | Doesn't help when switching embedding models — vectors must be recomputed anyway | DEC-08 |
 | Twilio webhook timing | While our webhook runs, the caller hears ringing (Twilio waits up to 15 s) — no dead air | DEC-17 |
 | Cloud Run CPU | With request-based billing CPU is throttled when no request is active; an open WebSocket counts as active — so "CPU always allocated" doesn't fix streaming | DEC-35, DEC-24, DEC-25 |

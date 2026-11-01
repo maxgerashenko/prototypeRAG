@@ -1,12 +1,13 @@
 import { useLayoutEffect, useRef } from "react";
 import type { Business, ConversationSummary } from "../api";
 import type { Loadable } from "./App";
-import { ChatIcon, ChevronLeft, ClockIcon, GlobeIcon } from "./icons";
+import { ChatIcon, ClockIcon, GlobeIcon } from "./icons";
+import { ViewHeader } from "./ViewHeader";
 import { SourceBadge } from "./SourceIcon";
 import { OutcomeBadge } from "./OutcomeBadge";
 import { PullRegion, SkeletonGate } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
-import { fmtClock, fmtWhen, hostOf, monogram, plural, previewText } from "./format";
+import { fmtClock, fmtWhen, hostOf, plural, previewText } from "./format";
 
 interface Props {
   pull: PullState;
@@ -21,6 +22,9 @@ interface Props {
 /** Scroll position of each business's list, so Back from a transcript lands where the user left. */
 const scrollMemo = new Map<string, number>();
 
+/** Forget the list scroll of a business, so the next visit starts at the top. */
+export const forgetConvosScroll = (id: string) => { scrollMemo.delete(id); };
+
 export function ConversationsScreen({ pull, biz, convos, newIds, onBack, onCall, onOpen }: Props) {
   const list = convos?.data ?? [];
   const listRef = useRef<HTMLDivElement>(null);
@@ -29,22 +33,9 @@ export function ConversationsScreen({ pull, biz, convos, newIds, onBack, onCall,
   }, [biz.id, list.length > 0]); // again once the data arrives: an empty list clamps scrollTop to 0
   return (
     <div className="screen slide" data-screen="convos">
-      <div className="back-row">
-        <button className="back-btn" aria-label="Back to businesses" onClick={() => { scrollMemo.delete(biz.id); onBack(); }}>
-          <span className="back-circle"><ChevronLeft /></span>
-          Businesses
-        </button>
-      </div>
+      <ViewHeader name={biz.name} title="Conversations" sub={<>{biz.name} · {hostOf(biz)}</>} onBack={onBack} />
 
-      <div className="biz-head">
-        <div className="big-mono">{monogram(biz.name)}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-          <h1>{biz.name}</h1>
-          <div>{hostOf(biz)}</div>
-        </div>
-      </div>
-
-      <div style={{ padding: "0 20px 20px" }}>
+      <div style={{ padding: "0 20px 10px" }}>
         <button className="btn-pill btn-call" onClick={onCall}>
           <GlobeIcon />
           Start new call
@@ -56,7 +47,7 @@ export function ConversationsScreen({ pull, biz, convos, newIds, onBack, onCall,
         <span>{convos?.status === "ok" ? list.length : ""}</span>
       </div>
 
-      <PullRegion state={pull}>
+      <PullRegion state={pull} area="conversations">
       <div
         className="scroll convo-list"
         ref={listRef}

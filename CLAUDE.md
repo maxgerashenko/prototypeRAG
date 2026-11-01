@@ -318,6 +318,26 @@ labels are `area:*`, `type:*`, `blocked` and `in-progress`. When working on an i
   Closing an issue without writing the result into the plan file (or vice versa) leaves
   one of the two sources stale — do both before considering the finding "recorded."
 
+## Design docs (`design/`) are part of the spec
+
+Any plan, spec or change that touches `web/src/app/` (a screen, row, sheet, colour, text) starts
+from `design/README.md`, which indexes the pattern docs: `areas.md` + `colors.md` (area colours and
+tokens), `ListItem.md` / `ListItemAction.md` / `ItemSwipeToRemove.md` / `ItemIconToRemove.md` /
+`ItemRemoveConfirmation.md` (list rows), `BottomSheet.md` (sheets), `ControlSubtitle.md` (grey `·`
+subtitles). Rules for everyone (Claude, architect, Sonnet, qwen specs, reviewer):
+
+- **`design/Main.dc.html` may be outdated** (the app has moved on: sessions, area colours, sheets,
+  subtitles). It is a reference, not the spec: the pattern docs and the running app win. Before
+  implementing anything from it, compare it with the app and the docs and **ask the user which one
+  is right wherever they differ**; do not pick silently and do not copy its values into code.
+- **Planning:** the plan names which design docs apply and reuses the pattern instead of inventing
+  one; its qwen/Sonnet specs quote the relevant rules (colours by area token, sizes, states).
+- **Implementing:** use the tokens and patterns from the docs, no new hex literals or one-off
+  variants. If the feature needs something the docs don't cover or contradict, say so first.
+- **Reviewing:** the reviewer checks the changed UI against the applicable docs.
+- **Finishing:** a new reusable pattern or a changed rule is written into `design/` (new doc linked
+  from `design/README.md`, or an edit of the existing one) in the same change as the code.
+
 ## Writing style for plan files
 
 - English, concise, tables for comparisons, checklists (`- [ ]`) for tasks.

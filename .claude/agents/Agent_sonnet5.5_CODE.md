@@ -14,6 +14,9 @@ and easy to review.
 
 1. Read `CLAUDE.md` (decisions to respect), the plan file you were pointed to, and every
    file you will touch - read the real code, do not guess names or signatures.
+   For UI work under `web/src/app/` also read `design/README.md` and the design docs the plan
+   names; use their colour tokens and patterns, add no new hex literals, and report any rule you
+   could not follow. `design/Main.dc.html` may be outdated: if it differs from the app or these docs, ask the user before following it.
 2. Change only the files the step names (plus the test file for them). If the step needs a
    change somewhere else, stop and say so in your report instead of making it.
 3. Match the surrounding code: naming, comment density, formatting. No reformatting or

@@ -1,7 +1,9 @@
 // Touch hook for swipe-right-to-go-back: native listeners on the app root, like usePullToRefresh
 // (the two never fight: pull needs a vertical drag, this a horizontal one). While swiping, the
 // caller shifts the screen by the returned offset (at most SWIPE_HINT_MAX px); a release past the
-// threshold calls onBack. No spinner: the nudge is the whole feedback.
+// threshold calls onBack. No spinner: the nudge is the whole feedback. A touch that starts inside
+// an element marked data-swipe-back="off" (e.g. a horizontally scrolling calendar) stays idle:
+// it never prevents scrolling or moves the screen.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
@@ -39,7 +41,8 @@ export function useSwipeBack(
 
     const onStart = (e: TouchEvent) => {
       const t = e.touches[0];
-      if (t) apply({ type: "start", x: t.clientX, y: t.clientY, enabled: enabledRef.current, touches: e.touches.length });
+      const off = !!(e.target as Element | null)?.closest?.('[data-swipe-back="off"]');
+      if (t) apply({ type: "start", x: t.clientX, y: t.clientY, enabled: enabledRef.current && !off, touches: e.touches.length });
     };
     const onMove = (e: TouchEvent) => {
       const t = e.touches[0];

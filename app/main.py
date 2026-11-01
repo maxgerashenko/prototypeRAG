@@ -10,11 +10,13 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from app.api.bookings import router as bookings_router
 from app.api.business_settings import router as business_settings_router
 from app.api.businesses import router as businesses_router
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.custom_replies import router as custom_replies_router
+from app.api.sessions import router as sessions_router
 from app.config import get_settings
 from app.db import engine
 from app.voice import google_auth, tts
@@ -56,6 +58,8 @@ app.include_router(twilio_stream_router)
 app.include_router(call_feed_router)
 app.include_router(businesses_router)
 app.include_router(business_settings_router)
+app.include_router(bookings_router)
+app.include_router(sessions_router)
 app.include_router(twilio_numbers_router)
 app.include_router(conversations_router)
 if get_settings().dev_reload:

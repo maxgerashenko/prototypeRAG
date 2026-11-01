@@ -22,6 +22,9 @@ then answer:
    a prefix (`lstrip`), code that passes its own tests only because the tests mirror it.
 3. **Project rules**: business-scoped DB queries filter by `business_id`; no LangChain /
    LlamaIndex; no new dependencies; match the surrounding code's style and comment density.
+   For UI under `web/src/app/`: check it against the applicable docs in `design/` (see
+   `design/README.md`): area colour tokens, no new hex literals, list-row, sheet and subtitle
+   patterns. Report each deviation. `design/Main.dc.html` may be outdated: if it differs from the app or these docs, ask the user before following it.
 4. **Tests**: do the tests check behaviour or just repeat the implementation? What is not
    covered? Run the project's checks if they are cheap and read-only to run
    (`uv run pytest -q <file>`, `cd web && npx tsc -b && npm test`) and report the result lines.

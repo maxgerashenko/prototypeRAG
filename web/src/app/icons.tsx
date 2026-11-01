@@ -46,19 +46,57 @@ export const ChatIcon = ({ size = 15, stroke = 2 }: { size?: number; stroke?: nu
     <path d={CHAT} />
   </Icon>
 );
-export const ChevronRight = () => (
-  <Icon size={16} color="#8A919D">
+/** Speech bubble with the number inside (99+ above 99); the bubble alone while the count is unknown. */
+export const ChatCountIcon = ({ count, size = 20 }: { count: number | null; size?: number }) => {
+  const text = count === null ? "" : count > 99 ? "99+" : String(count);
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={CHAT} />
+      {text && (
+        <text x="12" y="11.6" textAnchor="middle" dominantBaseline="central" stroke="none" fill="currentColor"
+          fontSize={text.length > 2 ? 7 : text.length > 1 ? 9 : 11} fontWeight="800" fontFamily="inherit">{text}</text>
+      )}
+    </svg>
+  );
+};
+export const ChevronRight = ({ size = 16, color = "#8A919D", stroke = 2 }: {
+  size?: number; color?: string; stroke?: number;
+}) => (
+  <Icon size={size} color={color} stroke={stroke}>
     <polyline points="9 18 15 12 9 6" />
   </Icon>
 );
-export const ChevronDown = () => (
-  <Icon size={16} color="#8A919D" stroke={2.4}>
+export const ChevronDown = ({ size = 16, color = "#8A919D", stroke = 2.4 }: {
+  size?: number; color?: string; stroke?: number;
+}) => (
+  <Icon size={size} color={color} stroke={stroke}>
     <polyline points="6 9 12 15 18 9" />
   </Icon>
 );
-export const ChevronLeft =() => (
-  <Icon size={22}>
+export const ChevronLeft = ({ size = 22, stroke = 2 }: { size?: number; stroke?: number }) => (
+  <Icon size={size} stroke={stroke}>
     <polyline points="15 18 9 12 15 6" />
+  </Icon>
+);
+export const DoubleChevronLeft = () => (
+  <Icon size={16} stroke={2.4}>
+    <polyline points="11 17 6 12 11 7" />
+    <polyline points="18 17 13 12 18 7" />
+  </Icon>
+);
+export const DoubleChevronRight = () => (
+  <Icon size={16} stroke={2.4}>
+    <polyline points="13 17 18 12 13 7" />
+    <polyline points="6 17 11 12 6 7" />
+  </Icon>
+);
+export const CalendarIcon = ({ size = 16 }: { size?: number }) => (
+  <Icon size={size}>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
   </Icon>
 );
 export const PhoneIcon = ({ size = 20 }: { size?: number }) => (
@@ -85,9 +123,30 @@ export const GearIcon = ({ size = 16 }: { size?: number }) => (
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
   </Icon>
 );
-export const CloseIcon = ({ size = 18 }: { size?: number }) => (
-  <Icon size={size}>
+export const CloseIcon = ({ size = 18, stroke }: { size?: number; stroke?: number }) => (
+  <Icon size={size} stroke={stroke}>
     <line x1="18" y1="6" x2="6" y2="18" />
     <line x1="6" y1="6" x2="18" y2="18" />
+  </Icon>
+);
+export const LockIcon = ({ size = 13 }: { size?: number }) => (
+  <Icon size={size} stroke={2.2}>
+    <rect x="4" y="11" width="16" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </Icon>
+);
+
+export const PeopleIcon = ({ size = 13 }: { size?: number }) => (
+  <Icon size={size} stroke={2.2}>
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </Icon>
+);
+export const PlusIcon = ({ size = 26 }: { size?: number }) => (
+  <Icon size={size} stroke={2.6}>
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
   </Icon>
 );

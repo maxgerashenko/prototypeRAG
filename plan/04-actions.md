@@ -129,6 +129,7 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 - [ ] Google Calendar per-business OAuth (R14) — stage 3
 - [ ] Owner notifications
 - [x] Test scripts: simulated conversations for booking happy path + edge cases (#55): `tests/test_booking_conversations.py` — scripted calls where a fake model plays tool calls and answers through the real tool loop (`answer_question`), executor, booking tools, rules and Postgres. Covers happy path, appointment with a service, closed day, outside hours, full slot (+ alternatives), party too large, change of mind, declining at the read-back, bad date / missing name, cancellation (frees the slot, wrong phone, unknown reference), text chat without caller ID, caller ID beating a made-up number. Tests only: the booking tools are still not wired into live calls (#151), and a fake model doesn't show how a real model behaves — live run under 03 "Test on Mac"
+- [x] Owner-side group sessions in the Bookings view (branch `feature-bookings-sessions`, DEC-54/DEC-56): `sessions` table + `bookings.session_id` (migration 0012), `POST/PATCH/DELETE /businesses/{id}/sessions[/{sid}]` and attendee removal, faded per-hour **+** UI, mock SMS (`app/actions/sms.py`, OPEN-24). Sessions do not yet block 1:1 bookings and have no real attendees until the assistant side (#149) lands; iPhone check pending. [plan](feature-bookings-sessions.md)
 
 ## Notes
 

@@ -19,10 +19,12 @@ import {
   type ConversationSummary,
 } from "../api";
 import { CallScreen, ConnectingScreen, EndedScreen, PhoneCallScreen } from "./CallScreens";
-import { ConversationsScreen } from "./ConversationsScreen";
+import { BookingsScreen } from "./BookingsScreen";
+import { ConversationsScreen, forgetConvosScroll } from "./ConversationsScreen";
 import { SelectScreen } from "./SelectScreen";
 import { SettingsScreen } from "./SettingsScreen";
 import { TranscriptScreen } from "./TranscriptScreen";
+import { useBookings } from "./useBookings";
 import { useBusinessSettings } from "./useBusinessSettings";
 import { useVoiceCall } from "./useVoiceCall";
 import { PhoneIcon } from "./icons";
@@ -41,12 +43,12 @@ export interface Loadable<T> {
   error?: string;
 }
 
-type Stage = "select" | "settings" | "convos" | "transcript" | "connecting" | "call" | "ended" | "phone" | "phoneEnded";
+type Stage = "select" | "settings" | "bookings" | "convos" | "transcript" | "connecting" | "call" | "ended" | "phone" | "phoneEnded";
 
 interface TranscriptRef {
   bizId: string;
   convoId: string;
-  returnTo: "select" | "convos";
+  returnTo: "select" | "convos" | "bookings";
 }
 
 /** The picker's pull-to-refresh: a full reload (its own function so e2e can watch the navigation). */
@@ -125,6 +127,11 @@ export function App() {
   }, []);
   const settings = useBusinessSettings(selId, stage === "settings", onAssigned);
 
+  // stays active while a conversation opened from the session sheet is shown, so Back finds the sheet as it was
+  const bookings = useBookings(selId, stage === "bookings" || (stage === "transcript" && transcript?.returnTo === "bookings"));
+  const refreshToday = useRef(bookings.refreshToday);
+  refreshToday.current = bookings.refreshToday;
+
   const openConversation = (bizId: string, convoId: string, returnTo: TranscriptRef["returnTo"]) => {
     const req = ++detailReq.current;
     // Opening a conversation counts as seeing it: drop its NEW mark however the user leaves.
@@ -171,6 +178,15 @@ export function App() {
     else setStage("select");
   };
 
+  // Back from Bookings: the booking sheet closes first, then the calendar
+  const leaveConvos = () => {
+    if (selId) forgetConvosScroll(selId);
+    setStage("select");
+  };
+  const leaveBookings = () => {
+    if (!bookings.closeOverlay()) setStage("select");
+  };
+
   const cancelCall = () => {
     setStage("select");
     voice.hangUp();
@@ -193,6 +209,7 @@ export function App() {
     }
     if (stage === "call" && call.phase === "ended") {
       loadBusinesses();
+      refreshToday.current();
       if (callBizId) loadConvos(callBizId);
       if (call.endCode === 4404) {
         setBanner(closeMessage(call.endCode, call.endReason));
@@ -217,6 +234,7 @@ export function App() {
   useEffect(() => {
     if (stage !== "phone" || !phone || phone.state.phase !== "ended") return;
     loadBusinesses();
+    refreshToday.current();
     loadConvos(phone.info.business_id);
     const { conversationId } = phone.state;
     if (conversationId && callerSpoke(phone.state)) setNewIds((prev) => new Set(prev).add(conversationId));
@@ -237,8 +255,13 @@ export function App() {
     // typing in a field: only Esc, and only to close the number picker (the filter field is in it)
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
       if (down && e.key === "Escape" && stage === "settings" && settings.sheetOpen) settings.onCloseSheet();
+      else if (down && e.key === "Escape" && stage === "bookings" && (bookings.selectedSession || bookings.draft) && !bookings.busy) {
+        bookings.onCloseSession();
+      }
       return;
     }
+    // a bookings sheet is open: Space belongs to the page (select, buttons), not to the call shortcut
+    if (e.key === " " && stage === "bookings" && (bookings.selected || bookings.selectedSession || bookings.draft)) return;
     if (e.key === " ") {
       e.preventDefault();
       if (!down) {
@@ -250,11 +273,14 @@ export function App() {
       else if (stage === "convos" && selId) startCall(selId);
       else if (stage === "transcript" && transcript) startCall(transcript.bizId, transcript.convoId);
       else if (stage === "call") voice.pttDown();
+    } else if (down && stage === "bookings" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      if (!bookings.selected && !bookings.selectedSession && !bookings.draft) bookings.onShiftDay(e.key === "ArrowLeft" ? -1 : 1);
     } else if (down && e.key === "Escape") {
       if (stage === "connecting") cancelCall();
       else if (stage === "call") voice.hangUp();
       else if (stage === "settings") leaveSettings();
-      else if (stage === "convos") setStage("select");
+      else if (stage === "bookings") leaveBookings();
+      else if (stage === "convos") leaveConvos();
       else if (stage === "transcript" && transcript) setStage(transcript.returnTo);
       else if (stage === "ended") backToConversations();
       else if (stage === "phone" || stage === "phoneEnded") closePhone();
@@ -288,13 +314,16 @@ export function App() {
   // Not gated on call.phase: it starts as "connecting" before any call.
   const rootRef = useRef<HTMLDivElement>(null);
   const ptrEnabled =
-    (stage === "select" || (stage === "convos" && !!selId) || (stage === "transcript" && !!transcript)) && !live;
+    (stage === "select" || (stage === "settings" && !settings.sheetOpen) || (stage === "convos" && !!selId) || (stage === "transcript" && !!transcript) ||
+      (stage === "bookings" && !bookings.selected && !bookings.draft && !bookings.selectedSession && !bookings.busy)) && !live;
   const ptr = usePullToRefresh(rootRef, {
     enabled: ptrEnabled,
     onRefresh: () => {
       if (stage === "select") return reloadPage();
       if (stage === "convos" && selId) return Promise.allSettled([loadBusinesses(), loadConvos(selId)]);
       if (stage === "transcript") return refreshDetail();
+      if (stage === "bookings") return bookings.onRefresh();
+      if (stage === "settings") return settings.onRefresh();
     },
     onArmed: () => {
       if (stage === "select") vibrateTick();
@@ -304,7 +333,8 @@ export function App() {
   // swipe right = the screen's Back button (mobile). Off on the picker and during a call of our own.
   const goBack: (() => void) | null =
     stage === "settings" ? leaveSettings
-    : stage === "convos" ? () => setStage("select")
+    : stage === "bookings" ? leaveBookings
+    : stage === "convos" ? leaveConvos
     : stage === "transcript" && transcript ? () => setStage(transcript.returnTo)
     : stage === "ended" ? backToConversations
     : stage === "phone" || stage === "phoneEnded" ? closePhone
@@ -358,6 +388,11 @@ export function App() {
             setSelId(bizId);
             setStage("settings");
           }}
+          onBookings={(bizId) => {
+            setSelId(bizId);
+            setStage("bookings");
+          }}
+          todayBookings={bookings.todayCount}
           greetingCached={settings.greetingCached}
           mainNumber={mainNumber}
           onRetry={loadBusinesses}
@@ -368,7 +403,12 @@ export function App() {
       )}
 
       {stage === "settings" && selId && (
-        <SettingsScreen biz={fallbackBiz(selId)} {...settings} onBack={leaveSettings} />
+        <SettingsScreen pull={ptr} biz={fallbackBiz(selId)} {...settings} onBack={leaveSettings} />
+      )}
+
+      {stage === "bookings" && selId && (
+        <BookingsScreen pull={ptr} biz={fallbackBiz(selId)} {...bookings} onBack={leaveBookings}
+          onOpenConversation={(convoId) => openConversation(selId, convoId, "bookings")} />
       )}
 
       {stage === "convos" && selId && (
@@ -377,7 +417,7 @@ export function App() {
           biz={fallbackBiz(selId)}
           convos={convos[selId]}
           newIds={newIds}
-          onBack={() => setStage("select")}
+          onBack={leaveConvos}
           onCall={() => startCall(selId)}
           onOpen={(convoId) => openConversation(selId, convoId, "convos")}
         />
