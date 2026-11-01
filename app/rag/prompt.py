@@ -24,11 +24,26 @@ BOOKING_PROMPT = (
     "a yes. Never say something is booked or cancelled unless the tool said so."
 )
 
+SESSION_TOOLS = ("list_sessions", "join_session")
+
+SESSION_PROMPT = (
+    "Sessions: for any question about sessions, classes, schedule, specials, what is on today or "
+    "what is available, call list_sessions (pass a date if the caller names a day) instead of "
+    "saying you have no information. Read the names and times aloud, never the codes. If it lists "
+    "none, say there are no open sessions then. To sign someone up, ask for their name, read back "
+    "the session and time, and after a clear yes call join_session with confirmed=true. Never say "
+    "someone is booked unless the tool said so."
+)
+
 
 def tools_prompt(enabled: frozenset[str] | set[str]) -> str:
     """Prompt rules for the optional tools this business enabled (#151); "" when there are none.
     Only tools that are really offered are described, so the model isn't told about others."""
-    return BOOKING_PROMPT if any(t in enabled for t in BOOKING_TOOLS) else ""
+    parts = [
+        text for names, text in ((BOOKING_TOOLS, BOOKING_PROMPT), (SESSION_TOOLS, SESSION_PROMPT))
+        if any(t in enabled for t in names)
+    ]
+    return "\n\n".join(parts)
 
 
 def format_profile(profile: BusinessProfile | None) -> str:
