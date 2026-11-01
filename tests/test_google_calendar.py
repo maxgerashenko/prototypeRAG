@@ -5,6 +5,7 @@ Rules/availability/create/cancel are checked with `FakeCalendar`; the wire forma
 check with a real service account is on the "Test on Mac" list (plan/03-voice-channel.md)."""
 
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -12,9 +13,10 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.actions.booking import rules as R
-from app.actions.booking.google_calendar import GoogleCalendarBackend
-from app.actions.booking.google_client import CalendarError, GoogleCalendarClient
+from app.actions.booking.google_calendar import GoogleCalendarBackend, event_id_for
+from app.actions.booking.google_client import CalendarError, EventExists, GoogleCalendarClient
 from app.actions.booking.internal import BookingRequest
+from app.actions.booking.mirror import BusyEvent
 from app.db import tenant_session
 from app.db.models import Booking, BookingRule, Business, Conversation
 
@@ -30,6 +32,7 @@ class FakeCalendar:
         self.external_busy: list[tuple[datetime, datetime]] = []  # owner's own entries
         self.fail: set[str] = set()
         self.calls: list[str] = []
+        self.timeout_after_insert = 0  # inserts that reach Google but whose answer is lost
 
     def _check(self, op):
         self.calls.append(op)
@@ -45,13 +48,37 @@ class FakeCalendar:
     def insert_event(self, calendar_id, body):
         self._check("insert")
         assert calendar_id == CAL
-        eid = f"ev{len(self.events) + 1}"
+        eid = body.get("id") or f"ev{len(self.events) + 1}"
+        if eid in self.events:
+            raise EventExists(f"{eid} exists")  # Google's 409
         self.events[eid] = body
+        if self.timeout_after_insert:
+            self.timeout_after_insert -= 1
+            raise CalendarError("insert timed out")
         return eid
 
     def delete_event(self, calendar_id, event_id):
         self._check("delete")
         self.events.pop(event_id, None)
+
+
+class FakeMirror:
+    """The #165 mirror as the backend sees it: every event of the calendar, one entry each."""
+    def __init__(self, cal: FakeCalendar):
+        self.cal = cal
+        self.syncs = 0
+        self.delay = 0.0  # widens the check-then-insert window so a missing lock shows
+
+    def sync(self, calendar_id):
+        self.cal._check("sync")
+        self.syncs += 1
+
+    def busy_events(self, calendar_id, start, end):
+        own = [BusyEvent(datetime.fromisoformat(e["start"]["dateTime"]), datetime.fromisoformat(e["end"]["dateTime"]), eid)
+               for eid, e in self.cal.events.items()]
+        found = [e for e in own + [BusyEvent(a, b) for a, b in self.cal.external_busy] if e.start < end and e.end > start]
+        time.sleep(self.delay)  # the answer is stale by the time the caller acts on it
+        return found
 
 
 @pytest.fixture
@@ -61,7 +88,7 @@ def cal():
 
 @pytest.fixture
 def backend(cal):
-    return GoogleCalendarBackend(cal, CAL)
+    return GoogleCalendarBackend(cal, CAL, FakeMirror(cal))
 
 
 @pytest.fixture
@@ -102,8 +129,11 @@ def test_create_inserts_event_and_stores_its_id(backend, cal, business_id):
     assert event["start"] == {"dateTime": "2026-11-05T14:00:00-05:00", "timeZone": NY}
     assert event["end"]["dateTime"] == "2026-11-05T15:00:00-05:00"
     assert "Anna" in event["summary"] and "table for 2" in event["summary"]
-    for want in ("Name: Anna", "Phone: +15550100100", "People: 2", "Notes: window seat", f"Reference: {res.reference}"):
+    for want in ("Name: Anna", "Phone: ...0100", "People: 2", "Notes: window seat", f"Reference: {res.reference}",
+                 f"Conversation: http://localhost:8000/web/#conversation={cid}"):
         assert want in event["description"]
+    assert "+15550100100" not in event["description"]  # only the last 4 digits leave our DB
+    assert event["id"] == event_id_for(res.booking_id) == next(iter(cal.events)) and len(event["id"]) == 26
     assert event["extendedProperties"]["private"] == {
         "business_id": str(business_id), "booking_id": str(res.booking_id), "conversation_id": str(cid)}
     assert "attendees" not in event  # a service account can't invite without delegation
@@ -126,13 +156,13 @@ def test_owners_own_calendar_entry_blocks_the_slot_and_gives_alternatives(backen
         assert s.scalars(select(Booking)).all() == []
 
 
-def test_free_busy_is_re_checked_right_before_insert(backend, cal, business_id):
+def test_calendar_is_re_synced_and_re_checked_right_before_insert(backend, cal, business_id):
     """availability said yes, then the owner blocked the slot: create must not insert."""
     assert backend.availability(business_id, _req(), NOW).ok
     cal.external_busy = [(_local("2026-11-05", "14:00"), _local("2026-11-05", "15:00"))]
     cal.calls.clear()
     assert not backend.create(business_id, _req(), NOW).ok
-    assert cal.calls == ["busy"]
+    assert cal.calls == ["sync"] and backend.mirror.syncs == 2  # forced sync before the re-check
 
 
 def test_rules_still_apply(backend, business_id):
@@ -148,13 +178,53 @@ def test_second_booking_in_the_slot_is_refused_even_if_calendar_is_empty(backend
     assert not res.ok and "fully booked" in res.message
 
 
-def test_capacity_above_one_counts_rows_not_merged_busy_blocks(business_id, cal):
-    backend = GoogleCalendarBackend(cal, CAL)
+def test_capacity_above_one_counts_each_calendar_event(backend, cal, business_id):
     with tenant_session(business_id) as s:
         s.get(BookingRule, business_id).capacity = 2
-    assert backend.create(business_id, _req(), NOW).ok
-    assert backend.create(business_id, _req(name="Ben"), NOW).ok
-    assert "fully booked" in backend.create(business_id, _req(name="Cy"), NOW).message
+    cal.external_busy = [(_local("2026-11-05", "14:00"), _local("2026-11-05", "15:00"))]  # hand-typed in Google
+    assert backend.create(business_id, _req(), NOW).ok  # 1 external + 1 ours = 2 -> full next
+    assert "fully booked" in backend.create(business_id, _req(name="Ben"), NOW).message
+    assert len(cal.events) == 1
+
+
+def test_db_mirror_syncs_then_counts_opaque_open_events_of_any_business(business_id, cal, monkeypatch):
+    from app.actions.booking import calendar_sync
+    from app.actions.booking.mirror import DbMirror
+    from app.db.models import CalendarEvent
+
+    synced = []
+    monkeypatch.setattr(calendar_sync, "sync_now", lambda calendar_id, client=None: synced.append(calendar_id))
+    cal_id = f"{uuid.uuid4()}@group.calendar.google.com"
+    other = uuid.uuid4()
+    with tenant_session(other) as s:
+        s.add(Business(id=other, name="Barber", timezone=NY))
+    try:
+        with tenant_session(business_id) as s:
+            for i, (at, status, transp, owner) in enumerate([
+                ("14:00", "confirmed", "opaque", other),       # another business's: busy
+                ("14:00", "confirmed", "opaque", None),        # hand-typed: busy
+                ("14:00", "cancelled", "opaque", None),        # ignored
+                ("14:00", "confirmed", "transparent", None),   # "free" events are ignored
+            ]):
+                s.add(CalendarEvent(calendar_id=cal_id, google_event_id=f"e{i}", business_id=owner, summary="x",
+                                    starts_at=_local("2026-11-05", at), ends_at=_local("2026-11-05", "15:00"),
+                                    status=status, transparency=transp))
+        mirror = DbMirror()
+        backend = GoogleCalendarBackend(cal, cal_id, mirror)
+        with tenant_session(business_id) as s:
+            s.get(BookingRule, business_id).capacity = 3
+        ev = mirror.busy_events(cal_id, _local("2026-11-05", "00:00"), _local("2026-11-06", "00:00"))
+        assert sorted(e.event_id for e in ev) == ["e0", "e1"]
+        assert backend.availability(business_id, _req(), NOW).ok and synced == [cal_id]  # 2 of 3
+        with tenant_session(business_id) as s:
+            s.get(BookingRule, business_id).capacity = 2
+        av = backend.availability(business_id, _req(), NOW)
+        assert not av.ok and "fully booked" in av.reason and synced == [cal_id, cal_id]
+    finally:
+        with tenant_session(business_id) as s:
+            s.execute(delete(CalendarEvent).where(CalendarEvent.calendar_id == cal_id))
+        with tenant_session(other) as s:
+            s.execute(delete(Business).where(Business.id == other))
 
 
 def test_concurrent_creates_for_one_slot_book_exactly_one(backend, cal, business_id):
@@ -165,12 +235,58 @@ def test_concurrent_creates_for_one_slot_book_exactly_one(backend, cal, business
     assert sum(r.ok for r in results) == 1 and len(cal.events) == 1
 
 
+def test_availability_syncs_first(backend, cal, business_id):
+    assert backend.availability(business_id, _req(), NOW).ok and backend.mirror.syncs == 1
+    cal.fail = {"sync"}
+    av = backend.availability(business_id, _req(), NOW)
+    assert not av.ok and "calendar" in av.reason
+
+
+def test_retry_after_a_lost_insert_answer_makes_one_event(backend, cal, business_id):
+    cal.timeout_after_insert = 1  # Google got the event, the answer timed out; the retry hits "409" (EventExists)
+    res = backend.create(business_id, _req(), NOW)
+    assert res.ok and len(cal.events) == 1 and cal.calls.count("insert") == 2
+    assert _row(business_id).external_ref == event_id_for(res.booking_id)
+
+
+def test_insert_that_fails_twice_books_nothing(backend, cal, business_id):
+    cal.fail = {"insert"}
+    res = backend.create(business_id, _req(), NOW)
+    assert not res.ok and "calendar" in res.message and cal.calls.count("insert") == 2 and cal.events == {}
+    with tenant_session(business_id) as s:
+        assert s.scalars(select(Booking)).all() == []
+
+
+def test_two_businesses_on_one_calendar_book_a_slot_exactly_once(cal):
+    ids = [uuid.uuid4(), uuid.uuid4()]
+    for bid, name in zip(ids, ("Sauna", "Barber")):
+        with tenant_session(bid) as s:
+            s.add(Business(id=bid, name=name, timezone=NY))
+    try:
+        mirror = FakeMirror(cal)
+        mirror.delay = 0.05
+        backend = GoogleCalendarBackend(cal, CAL, mirror)
+        results = []
+        threads = [threading.Thread(target=lambda b=ids[i % 2], i=i: results.append(backend.create(b, _req(name=f"C{i}"), NOW)))
+                   for i in range(6)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        assert sum(r.ok for r in results) == 1 and len(cal.events) == 1
+        # the other business sees the first one's event as busy
+        for bid in ids:
+            assert not backend.availability(bid, _req(), NOW).ok
+    finally:
+        for bid in ids:
+            with tenant_session(bid) as s:
+                s.execute(delete(Business).where(Business.id == bid))
+
+
 def test_google_failure_books_nothing(backend, cal, business_id):
-    for op in ("busy", "insert"):
+    for op in ("sync", "insert"):
         cal.fail = {op}
         res = backend.create(business_id, _req(), NOW)
         assert not res.ok and "calendar" in res.message
-    cal.fail = {"busy"}
+    cal.fail = {"sync"}
     av = backend.availability(business_id, _req(), NOW)
     assert not av.ok and "calendar" in av.reason
     with tenant_session(business_id) as s:
@@ -185,14 +301,14 @@ def test_event_is_deleted_again_if_the_row_cannot_be_written(backend, cal, busin
 
 
 def test_missing_calendar_id_is_reported_not_booked(cal, business_id):
-    res = GoogleCalendarBackend(cal, "").create(business_id, _req(), NOW)
+    res = GoogleCalendarBackend(cal, "", FakeMirror(cal)).create(business_id, _req(), NOW)
     assert not res.ok and cal.calls == []
 
 
 def test_per_business_calendar_id_overrides_the_default(cal, business_id):
     with tenant_session(business_id) as s:
         s.get(Business, business_id).settings = {"google_calendar_id": CAL}
-    assert GoogleCalendarBackend(cal, "").create(business_id, _req(), NOW).ok
+    assert GoogleCalendarBackend(cal, "", FakeMirror(cal)).create(business_id, _req(), NOW).ok
 
 
 def test_cancel_deletes_the_event_and_frees_the_slot(backend, cal, business_id):

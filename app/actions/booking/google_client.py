@@ -47,7 +47,8 @@ class CalendarClient(Protocol):
         ...
 
     def insert_event(self, calendar_id: str, body: dict) -> str:
-        """Create an event; returns its id."""
+        """Create an event; returns its id. Raises EventExists (409) if a body with its own `id`
+        already exists, i.e. an earlier attempt got through."""
         ...
 
     def delete_event(self, calendar_id: str, event_id: str) -> None:
