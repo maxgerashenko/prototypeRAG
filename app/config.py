@@ -16,11 +16,25 @@ class Settings(BaseSettings):
     # fact extraction (plan/07 §5.3, OPEN-20) is an offline job, so it may use a stronger
     # model than the chat one; empty = LLM_MODEL
     facts_llm_model: str = ""
+    # cap per fact call: a section's answer is a few dozen facts (~2k tokens), but a thinking
+    # model's reasoning counts too -- qwen3.6-35b-a3b needed more than 4000 (2026-11-01).
+    # The default is for a non-thinking model (gemma-4-12b; a higher cap lets a loop run into the
+    # 900 s timeout); the qwen and haiku choices use FACTS_THINKING_MAX_TOKENS instead
+    facts_max_tokens: int = 4000
+    facts_thinking_max_tokens: int = 16000
     # pages sent to the facts model at once; match LM Studio's parallel slots for that
     # model (`lms ps`, `lms load --parallel N`) -- more requests than slots just queue.
     # 4 for gemma-4-12b on the 64 GB Mac: at 8, long location pages ran past the 300 s
     # fact-call timeout (bathhouse re-crawl, 2026-11-01)
     facts_parallel: int = 4
+    # D21-C: the fact step asks which model to use (haiku / qwen / gemma) when run from a
+    # terminal. FACTS_MODEL_CHOICE=haiku|qwen|gemma skips the question (cron, CI); empty =
+    # ask on a terminal, else the old behaviour (FACTS_LLM_MODEL or LLM_MODEL, schema mode).
+    facts_model_choice: str = ""
+    facts_haiku_model: str = "claude-haiku-5-5"
+    facts_qwen_model: str = "qwen/qwen3.6-35b-a3b"
+    anthropic_api_key: str = ""  # only for the haiku choice; never logged
+    anthropic_base_url: str = "https://api.anthropic.com/v1/"
     embed_base_url: str = "http://localhost:1234/v1"
     embed_api_key: str = "lm-studio"
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"

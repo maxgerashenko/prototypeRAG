@@ -16,6 +16,7 @@ winner per fact; then one `kind='fact'` chunk per active fact for retrieval) -> 
 """
 
 import argparse
+import sys
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -35,7 +36,7 @@ from app.ingest.fetch import (
     RobotsUnavailable, fetch_child_sitemaps, fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client,
 )
 from app.ingest.fact_chunks import sync_fact_chunks
-from app.ingest.facts import extract_page_facts, pages_to_extract
+from app.ingest.facts import FactsBackend, extract_page_facts, facts_backend, pages_to_extract
 from app.ingest.identity import domain_of, site_root
 from app.ingest.merge import MergeStats, apply_page_facts, conflicts_report, settle_facts
 from app.ingest.organize import (
@@ -155,8 +156,31 @@ def _expand_by_links(
     return all_urls[:max_pages], fetched
 
 
+FACTS_CHOICES = {
+    "haiku": "Claude Haiku 5.5, cloud: ~5 s per page, a few cents per crawl, needs ANTHROPIC_API_KEY",
+    "qwen": "local qwen3.6-35b, thinking: ~50 s per page, free, ~27 GB in LM Studio",
+    "gemma": "local gemma-4-12b: fast but weaker, free, may loop in long JSON",
+}
+
+
+def choose_facts_backend(choice: str | None, pages: int) -> FactsBackend | None:
+    """D21-C: which model reads `pages` pages. An explicit choice (flag or FACTS_MODEL_CHOICE)
+    wins; otherwise ask on a terminal; with no terminal (cron, tests) return None = the old
+    behaviour (FACTS_LLM_MODEL or LLM_MODEL with a schema)."""
+    choice = choice or get_settings().facts_model_choice or None
+    if choice is None and sys.stdin.isatty():
+        print(f"\nFact extraction: {pages} page(s) to read. Which model?")
+        for name, text in FACTS_CHOICES.items():
+            print(f"  {name:6} {text}")
+        while (answer := input("model [haiku/qwen/gemma]: ").strip().lower()) not in FACTS_CHOICES:
+            print("type haiku, qwen or gemma")
+        choice = answer
+    return facts_backend(choice) if choice else None
+
+
 def extract_facts(
-    business_id: uuid.UUID, force: bool = False, model: str | None = None, dry_run: bool = False, verbose: bool = False
+    business_id: uuid.UUID, force: bool = False, model: str | None = None, dry_run: bool = False, verbose: bool = False,
+    choice: str | None = None,
 ) -> dict:
     """Facts step (plan 07 §5): extract from every page whose text changed since its last
     extraction (all with `force`), store them, then settle which fact wins per key.
@@ -177,6 +201,9 @@ def extract_facts(
         for p in todo:
             session.expunge(p)  # the LLM calls below run outside any transaction
 
+    backend = choose_facts_backend(choice, len(todo)) if todo and model is None else None
+    if backend:
+        print(f"facts: {backend.name} ({backend.model})", flush=True)
     stats = MergeStats()
     rejected = failed = 0
     # The LLM calls run FACTS_PARALLEL (env) at a time (LM Studio serves several requests per
@@ -184,7 +211,7 @@ def extract_facts(
     # each page finishes, so a stopped run keeps every page already done.
     pool = ThreadPoolExecutor(max_workers=max(1, get_settings().facts_parallel))
     futures = {
-        pool.submit(extract_page_facts, page, name, locations, location_names.get(page.location_id), model=model): page
+        pool.submit(extract_page_facts, page, name, locations, location_names.get(page.location_id), model=model, backend=backend): page
         for page in todo
     }
     try:
@@ -264,6 +291,7 @@ def crawl_business(
     delay_seconds: float = 0.5,
     extract_profile: bool = True,
     pdf_cap: int = DEFAULT_PDF_CAP,
+    facts_choice: str | None = None,
 ) -> dict:
     """One full crawl: discover -> fetch (pages, then up to `pdf_cap` linked PDFs) ->
     clean -> store every page -> organize
@@ -475,7 +503,7 @@ def crawl_business(
         facts_summary = None
         if extract_profile:
             try:
-                facts_summary = extract_facts(business_id)
+                facts_summary = extract_facts(business_id, choice=facts_choice)
             except Exception as exc:
                 print(f"facts failed: {exc}")
 
@@ -524,10 +552,13 @@ def main() -> None:
     parser.add_argument("--only", choices=["summary", "facts"], help="re-run one step on the stored pages, no crawl")
     parser.add_argument("--force", action="store_true", help="with --only: redo even if nothing changed")
     parser.add_argument("--dry-run", action="store_true", help="with --only facts: print the facts, write nothing")
+    parser.add_argument("--facts-model", choices=list(FACTS_CHOICES), help="fact model; without it a terminal run asks (D21-C)")
     parser.add_argument("--model", help="with --only facts: model ID instead of FACTS_LLM_MODEL (OPEN-20 audit)")
     parser.add_argument("--report", choices=["conflicts"], help="print a report on the stored facts, no crawl")
     args = parser.parse_args()
 
+    if args.model and args.facts_model:
+        parser.error("--model and --facts-model both pick the fact model; use one")
     business_id = resolve_business(args.url, args.business_id)
     if args.report == "conflicts":
         with tenant_session(business_id) as session:
@@ -539,13 +570,14 @@ def main() -> None:
         return
     if args.only == "facts":
         for key, value in extract_facts(
-            business_id, force=args.force, model=args.model, dry_run=args.dry_run, verbose=True
+            business_id, force=args.force, model=args.model, dry_run=args.dry_run, verbose=True,
+            choice=args.facts_model,
         ).items():
             print(f"{key}: {value}")
         return
 
     summary = crawl_business(
-        business_id, args.url, max_pages=args.max_pages, extract_profile=not args.no_profile
+        business_id, args.url, max_pages=args.max_pages, extract_profile=not args.no_profile, facts_choice=args.facts_model
     )
     for key, value in summary.items():
         print(f"{key}: {value}")

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete, select
 
+from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, Chunk, Fact, FactSource, Location, Page
 from app.ingest import facts as facts_mod
@@ -17,7 +18,7 @@ from app.ingest.clean import clean_page
 from app.ingest.facts import (
     EXTRACTOR_VERSION, normalize_text, pages_to_extract, parse_hours, split_sections, validate_fact,
 )
-from app.ingest.merge import conflicts_report, make_fact_key, normalize_value
+from app.ingest.merge import conflicts_report, make_fact_key, normalize_value, rekey_facts, settle_facts
 
 FIXTURES = Path(__file__).parent / "fixtures"
 HOURS_QUOTE = "Hours 7 days a week 8am to 11:30pm"
@@ -103,6 +104,24 @@ def test_split_sections_cuts_at_headings_and_hard_when_needed():
 def test_normalize_value_and_fact_key():
     assert normalize_value("From  $39.") == normalize_value("from 39")
     assert make_fact_key("price", None, " Day  Pass", "Price") == "price|-|day pass|price"
+
+
+NAMES = ["Bathhouse", "Williamsburg", "Flatiron", "Atlantic Ave", "Philadelphia"]
+
+
+@pytest.mark.parametrize("subject, expected", [
+    ("Bathhouse Williamsburg", ""), ("Williamsburg", ""), ("PHILADELPHIA Day Pass", "day pass"),
+    ("17th Floor, Williamsburg", "17th floor"), ("Bathhouse's Banya", "banya"), ("Atlantic Ave Hot Pool", "hot pool"),
+    ("Prenatal Massage", "prenatal massage"), ("Bathhouses of the world", "bathhouses of the world"),
+])
+def test_fact_key_subject_ignores_business_and_location_names(subject, expected):
+    assert make_fact_key("price", None, subject, "price", NAMES) == f"price|-|{expected}|price"
+
+
+def test_fact_key_matches_a_name_ending_in_punctuation():
+    assert make_fact_key("service", None, "Atlantic Ave. Hot Pool", "temperature", ["Atlantic Ave."]) == (
+        "service|-|hot pool|temperature"
+    )
 
 
 def _page(url="https://x.com/p", page_type="service", stamp=None, **kw):
@@ -321,5 +340,199 @@ def test_fact_calls_are_bounded(monkeypatch):
                 content_hash="d1", page_type="service")
     facts_mod.extract_page_facts(page, "Bathhouse", {})
     assert seen and all(
-        kw["max_tokens"] == facts_mod.FACT_MAX_TOKENS and kw["timeout"] == facts_mod.FACT_TIMEOUT_SECONDS for kw in seen
+        kw["max_tokens"] == get_settings().facts_max_tokens and kw["timeout"] == facts_mod.FACT_TIMEOUT_SECONDS for kw in seen
     )
+
+
+def _stored_fact(s, bid, subject, value, key, status="active", location_id=None, page_id=None):
+    f = Fact(business_id=bid, type="contact", subject=subject, attribute="phone", value=value,
+             statement=f"{subject} phone is {value}.", fact_key=key, status=status, location_id=location_id)
+    s.add(f)
+    s.flush()
+    if page_id:
+        s.add(FactSource(business_id=bid, fact_id=f.id, page_id=page_id, quote=value, page_hash="h"))
+    return f
+
+
+def test_rekey_merges_old_duplicates_keeps_sources_and_is_idempotent(business_id):
+    # facts stored before the subject normalisation: same location + value, different subject wording
+    with tenant_session(business_id) as s:
+        wb = Location(business_id=business_id, name="Williamsburg", is_default=True)
+        s.add(wb)
+        s.flush()
+        # the odd value comes from a lower-priority page, so settle's winner is decided by rule, not by row order
+        pages = [Page(business_id=business_id, url=f"https://x.com/{n}", markdown="m", content_hash="h",
+                      page_type=t) for n, t in (("a", "location"), ("b", "location"), ("c", "faq"))]
+        s.add_all(pages)
+        s.flush()
+        loc = str(wb.id)
+        _stored_fact(s, business_id, "Bathhouse Williamsburg", "(929) 489 - 2284",
+                     f"contact|{loc}|bathhouse williamsburg|phone", location_id=wb.id, page_id=pages[0].id)
+        _stored_fact(s, business_id, "Williamsburg", "(929) 489 - 2284.",
+                     f"contact|{loc}|williamsburg|phone", location_id=wb.id, page_id=pages[1].id)
+        # same new key, different value: kept as its own row, settle decides
+        _stored_fact(s, business_id, "Williamsburg", "(929) 000-0000",
+                     f"contact|{loc}|williamsburg|phone", status="conflict", location_id=wb.id, page_id=pages[2].id)
+    with tenant_session(business_id) as s:
+        removed = rekey_facts(s, business_id)
+        settle_facts(s, business_id)
+    assert removed == 1
+    with tenant_session(business_id) as s:
+        facts = list(s.scalars(select(Fact).where(Fact.business_id == business_id)))
+        assert {f.fact_key for f in facts} == {f"contact|{loc}||phone"}
+        (active,) = [f for f in facts if f.status == "active"]
+        assert len(s.scalars(select(FactSource).where(FactSource.fact_id == active.id)).all()) == 2
+        assert len(facts) == 2
+        before = {(f.id, f.fact_key, f.status) for f in facts}
+    with tenant_session(business_id) as s:
+        assert rekey_facts(s, business_id) == 0
+    with tenant_session(business_id) as s:
+        assert {(f.id, f.fact_key, f.status) for f in s.scalars(select(Fact).where(Fact.business_id == business_id))} == before
+
+
+def test_rekey_keeps_different_subjects_with_the_same_value_apart(business_id):
+    with tenant_session(business_id) as s:
+        for subject in ("Prenatal Massage", "Full-Body Massage", "Couples Massage"):
+            s.add(Fact(business_id=business_id, type="service", subject=subject, attribute="price", value="From $154",
+                       statement=f"{subject} from $154.", fact_key=f"service|-|{subject.lower()}|price", status="active"))
+    with tenant_session(business_id) as s:
+        assert rekey_facts(s, business_id) == 0
+        assert len(s.scalars(select(Fact).where(Fact.business_id == business_id)).all()) == 3
+
+
+def test_rekey_keeps_business_wide_facts_about_different_locations_apart(business_id):
+    # review finding: only the fact's own location name may go, else these two share a key
+    with tenant_session(business_id) as s:
+        s.add_all([Location(business_id=business_id, name="Williamsburg", is_default=True),
+                   Location(business_id=business_id, name="Flatiron")])
+        s.flush()
+        _stored_fact(s, business_id, "Williamsburg phone", "(929) 489 - 2284", "contact|-|williamsburg phone|phone")
+        _stored_fact(s, business_id, "Flatiron phone", "(646) 891 - 1315", "contact|-|flatiron phone|phone")
+    with tenant_session(business_id) as s:
+        rekey_facts(s, business_id)
+        settle_facts(s, business_id)
+    with tenant_session(business_id) as s:
+        facts = list(s.scalars(select(Fact).where(Fact.business_id == business_id)))
+    assert len({f.fact_key for f in facts}) == 2
+
+
+def test_rekey_unchanged_active_meets_changed_key_owner_wins_confidence_stays_unknown(business_id):
+    with tenant_session(business_id) as s:
+        wb = Location(business_id=business_id, name="Williamsburg", is_default=True)
+        s.add(wb)
+        s.flush()
+        page = Page(business_id=business_id, url="https://x.com/wb", markdown="m", content_hash="h", page_type="location")
+        s.add(page)
+        s.flush()
+        loc, new_key = str(wb.id), f"contact|{wb.id}||phone"
+        # already on the new key, active, crawl value
+        _stored_fact(s, business_id, "", "(929) 489 - 2284", new_key, location_id=wb.id, page_id=page.id)
+        # old key, active, same value, owner-confirmed -> must win the merge; no confidence known
+        owner = _stored_fact(s, business_id, "Bathhouse Williamsburg", "(929) 489 - 2284",
+                             f"contact|{loc}|bathhouse williamsburg|phone", location_id=wb.id, page_id=page.id)
+        owner.origin, owner.owner_confirmed_at, owner.confidence = "owner", datetime.now(UTC), None
+        owner_id = owner.id
+        s.flush()
+        s.execute(Fact.__table__.update().where(Fact.business_id == business_id).values(confidence=None))
+    with tenant_session(business_id) as s:
+        assert rekey_facts(s, business_id) == 1
+        settle_facts(s, business_id)
+    with tenant_session(business_id) as s:
+        (fact,) = s.scalars(select(Fact).where(Fact.business_id == business_id)).all()
+        assert (fact.id, fact.fact_key, fact.status, fact.confidence) == (owner_id, new_key, "active", None)
+        # both rows were backed by the same page: one source, not two
+        assert len(s.scalars(select(FactSource).where(FactSource.fact_id == fact.id)).all()) == 1
+
+
+def test_fact_schema_limits_location_to_valid_values(monkeypatch):
+    # gemma looped inside a free-text location field; the enum makes that impossible to write
+    seen = []
+    monkeypatch.setattr(facts_mod, "chat_json", lambda messages, schema, *a, **kw: seen.append(schema) or {"facts": []})
+    page = Page(business_id=uuid.uuid4(), url="https://x.com/day-pass", markdown="# Day Pass", content_hash="d1",
+                page_type="service")
+    facts_mod.extract_page_facts(page, "Bathhouse", {"Williamsburg": uuid.uuid4(), "Flatiron": uuid.uuid4()})
+    location = seen[0]["properties"]["facts"]["items"]["properties"]["location"]
+    assert location == {"type": "string", "enum": ["this", "all", "Flatiron", "Williamsburg"]}
+    assert facts_mod.fact_schema()["properties"]["facts"]["items"]["properties"]["location"]["enum"] == ["this", "all"]
+    # unique values only: a location called "All" or an empty name adds nothing
+    odd = facts_mod.fact_schema(["All", "", "  ", "Flatiron", "Flatiron"])
+    assert odd["properties"]["facts"]["items"]["properties"]["location"]["enum"] == ["this", "all", "Flatiron"]
+
+
+# --- D21-C: which model reads the pages ---------------------------------------------------
+
+
+def test_flag_picks_the_backend_and_no_choice_without_a_terminal_keeps_the_old_path(monkeypatch):
+    monkeypatch.setattr(get_settings(), "facts_model_choice", "")
+    monkeypatch.setattr(run.sys.stdin, "isatty", lambda: False)
+    assert run.choose_facts_backend(None, 3) is None  # cron / tests: FACTS_LLM_MODEL, schema mode
+    qwen = run.choose_facts_backend("qwen", 3)
+    assert qwen.prompted and not qwen.cloud and qwen.model == get_settings().facts_qwen_model
+    assert run.choose_facts_backend("gemma", 3).prompted is False
+    with pytest.raises(ValueError):
+        run.choose_facts_backend("gpt", 3)
+
+
+def test_terminal_run_asks_until_the_answer_is_valid(monkeypatch):
+    monkeypatch.setattr(run.sys.stdin, "isatty", lambda: True)
+    answers = iter(["maybe", " Haiku "])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    assert run.choose_facts_backend(None, 5).name == "haiku"
+
+
+def test_chosen_backend_reaches_the_call(monkeypatch):
+    seen = []
+    monkeypatch.setattr(facts_mod, "chat_json", lambda *a, **kw: seen.append(kw) or {"facts": []})
+    monkeypatch.setattr(facts_mod, "get_anthropic_client", lambda: "anthropic-client")
+    page = Page(business_id=uuid.uuid4(), url="https://x.com/d", markdown="# D\n\nStarts at $39.", content_hash="d", page_type="service")
+    facts_mod.extract_page_facts(page, "Bathhouse", {}, backend=facts_mod.facts_backend("haiku"))
+    assert seen[0]["client"] == "anthropic-client" and seen[0]["prompted"] and seen[0]["model"] == get_settings().facts_haiku_model
+
+
+def test_prompted_json_puts_the_schema_in_the_prompt_and_cuts_the_object_out(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import llm
+
+    calls = []
+
+    def create(**kw):
+        calls.append(kw)
+        msg = SimpleNamespace(content='Sure!\n```json\n{"facts": []}\n```')
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    out = llm.chat_json([{"role": "system", "content": "S"}, {"role": "user", "content": "U"}], {"type": "object"},
+                        model="claude-haiku-5-5", client=client, prompted=True)
+    assert out == {"facts": []}
+    kw = calls[0]
+    assert "response_format" not in kw and "temperature" not in kw  # Anthropic rejects temperature
+    assert kw["messages"][0]["content"].startswith("S") and '"type": "object"' in kw["messages"][0]["content"]
+    llm.chat_json([{"role": "system", "content": "S"}], {}, model="qwen/x", client=client, prompted=True)
+    assert calls[1]["temperature"] == 0
+
+
+def test_missing_anthropic_key_fails_before_any_page(monkeypatch):
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "")
+    facts_mod.get_anthropic_client.cache_clear()
+    with pytest.raises(LookupError, match="ANTHROPIC_API_KEY"):
+        facts_mod.facts_backend("haiku")
+
+
+def test_backend_token_caps(monkeypatch):
+    assert facts_mod.facts_backend("gemma").max_tokens == get_settings().facts_max_tokens == 4000
+    assert facts_mod.facts_backend("qwen").max_tokens == get_settings().facts_thinking_max_tokens
+
+
+@pytest.mark.parametrize("answer", [
+    '<think>{"facts": [1]}</think>{"facts": []}',
+    'Here: {"facts": []}\nNote: {see above}',
+    '{"facts": []} trailing {',
+    '{oops} {"facts": []}',
+])
+def test_first_json_object_edge_cases(answer):
+    from app.llm import _first_json_object
+
+    assert _first_json_object(answer) == {"facts": []}
+    with pytest.raises(ValueError):
+        _first_json_object('{"facts": [')

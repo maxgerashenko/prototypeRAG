@@ -8,17 +8,19 @@ type must be in the enum, placeholder values are dropped, and time-sensitive typ
 blog posts are rejected. Nothing here touches the database except `pages_to_extract`;
 `merge.py` stores what comes out.
 
-Which model: `FACTS_LLM_MODEL` (falls back to `LLM_MODEL`) -- OPEN-20.
+Which model: asked per run or `FACTS_MODEL_CHOICE` / `--facts-model` (haiku, qwen, gemma; D21-C);
+without a choice and without a terminal `FACTS_LLM_MODEL` (falls back to `LLM_MODEL`) -- OPEN-20.
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from app.config import get_settings
 from app.db.models import Page
 from app.ingest.profile import _is_placeholder
-from app.llm import chat_json
+from app.llm import chat_json, get_anthropic_client
 
 EXTRACTOR_VERSION = "1"  # bump to re-extract every page regardless of content_hash
 
@@ -33,33 +35,44 @@ TIME_SENSITIVE_TYPES = {"hours", "price", "booking", "event", "location_status"}
 # the business offers; the chrome pseudo-page is the opposite and is always read.
 SKIP_PAGE_TYPES = {"legal", "careers"}
 
-FACT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "facts": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "type": {"type": "string", "enum": list(FACT_TYPES)},
-                    "subject": {"type": "string"},
-                    "attribute": {"type": "string"},
-                    "value": {"type": "string"},
-                    "location": {"type": "string"},
-                    "statement": {"type": "string"},
-                    "quote": {"type": "string"},
-                    "confidence": {"type": "number"},
+def fact_schema(location_names: Sequence[str] = ()) -> dict:
+    """The structured-output schema for one page. `location` is an enum of the only valid
+    values ('this', 'all', the business's location names): LM Studio enforces the schema
+    while the model writes, so a model can't loop inside that field -- gemma-4-12b once
+    filled it with "-0-degree-type-1-0-degree-type-2-..." until the token cap. Enum values
+    are unique (strict schema builders reject repeats): a name that is empty or reads as
+    'this'/'all' isn't added -- validate_fact maps those words the same way anyway."""
+    places = ["this", "all"]
+    for name in location_names:
+        if name and name.strip() and name.strip().lower() not in ("this", "all") and name not in places:
+            places.append(name)
+    return {
+        "type": "object",
+        "properties": {
+            "facts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": list(FACT_TYPES)},
+                        "subject": {"type": "string"},
+                        "attribute": {"type": "string"},
+                        "value": {"type": "string"},
+                        "location": {"type": "string", "enum": places},
+                        "statement": {"type": "string"},
+                        "quote": {"type": "string"},
+                        "confidence": {"type": "number"},
+                    },
+                    "required": [
+                        "type", "subject", "attribute", "value", "location", "statement", "quote", "confidence",
+                    ],
+                    "additionalProperties": False,
                 },
-                "required": [
-                    "type", "subject", "attribute", "value", "location", "statement", "quote", "confidence",
-                ],
-                "additionalProperties": False,
-            },
-        }
-    },
-    "required": ["facts"],
-    "additionalProperties": False,
-}
+            }
+        },
+        "required": ["facts"],
+        "additionalProperties": False,
+    }
 
 _SYSTEM_PROMPT = (
     "Extract facts about a business from ONE page of its website. A fact is a short, "
@@ -72,20 +85,20 @@ _SYSTEM_PROMPT = (
     "location, or the exact name of one of the listed locations.\n"
     "- statement: one sentence that stands alone and names the business (and the location "
     "when the fact is specific to one).\n"
-    "- quote: the words from the page that state it, copied EXACTLY, character for character.\n"
+    "- quote: the words from the page that state it, copied EXACTLY, character for character. "
+    "It must contain the value itself: for a price list quote the item name AND its price "
+    "together, not the name alone.\n"
     "- confidence: 0 to 1.\n"
     "Only facts the page states. Never guess, never convert or compute numbers. No opinions, "
     "testimonials, marketing adjectives, history or advice. Return an empty list if there are none."
 )
 
 SECTION_CHARS = 12000  # ~3k tokens; longer pages are split at headings (plan §5.3)
-# A section's answer is a few dozen facts (bathhouse /flatiron: 2170 tokens, 105 s alone
-# on gemma-4-12b, ~20 tok/s). The token cap stops a runaway answer -- a cut-off answer is
-# invalid JSON -> the page fails and is retried next run. The timeout is only a last
-# resort: it must fit FACT_MAX_TOKENS with FACTS_PARALLEL requests sharing the GPU (300 s
-# timed out real location pages at 2-8 parallel; before any limit, one stuck page cost
-# up to 3 x 600 s).
-FACT_MAX_TOKENS = 4000
+# The token cap (FACTS_MAX_TOKENS, app/config.py) stops a runaway answer -- a cut-off
+# answer is invalid JSON -> the page fails and is retried next run. The timeout is only a
+# last resort: it must fit the cap with FACTS_PARALLEL requests sharing the GPU (300 s
+# timed out real location pages at 2-8 parallel on gemma-4-12b; before any limit, one
+# stuck page cost up to 3 x 600 s).
 FACT_TIMEOUT_SECONDS = 900
 
 _WS_RE = re.compile(r"\s+")
@@ -273,11 +286,13 @@ def _user_message(page: Page, business_name: str | None, location_names: list[st
 
 def extract_page_facts(
     page: Page, business_name: str | None, locations: dict[str, object], page_location_name: str | None = None,
-    model: str | None = None,
+    model: str | None = None, backend: "FactsBackend | None" = None,
 ) -> PageResult:
     """Run the model over the page (in sections if long) and keep the facts that pass
     `validate_fact`. `locations` maps location name -> location id."""
-    model = model or get_settings().facts_llm_model or None
+    model = model or (backend.model if backend else None) or get_settings().facts_llm_model or None
+    # only a chosen backend adds call arguments, so the plain path is the one it always was
+    extra = {"client": backend.client(), "prompted": backend.prompted} if backend else {}
     location_names = sorted(locations)
     by_lower = {name.strip().lower(): loc_id for name, loc_id in locations.items()}
     page_norm = normalize_text(page.markdown)
@@ -289,11 +304,12 @@ def extract_page_facts(
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": _user_message(page, business_name, location_names, page_location_name, section)},
             ],
-            FACT_SCHEMA,
+            fact_schema(location_names),
             "page_facts",
             model=model,
-            max_tokens=FACT_MAX_TOKENS,
+            max_tokens=backend.max_tokens if backend else get_settings().facts_max_tokens,
             timeout=FACT_TIMEOUT_SECONDS,
+            **extra,
         )
         for item in raw.get("facts") or []:
             fact, reason = validate_fact(item, page_norm, page.page_type, by_lower, page.location_id)
@@ -306,3 +322,31 @@ def extract_page_facts(
                 seen.add(identity)
                 result.facts.append(fact)
     return result
+
+
+@dataclass(frozen=True)
+class FactsBackend:
+    """One answer to "which model extracts the facts?" (D21-C)."""
+
+    name: str
+    model: str
+    prompted: bool  # schema in the prompt (thinking / cloud models) instead of response_format
+    max_tokens: int = 4000
+    cloud: bool = False
+
+    def client(self):
+        return get_anthropic_client() if self.cloud else None  # None = the local LM Studio client
+
+
+def facts_backend(choice: str) -> FactsBackend:
+    s = get_settings()
+    backends = {
+        "haiku": FactsBackend("haiku", s.facts_haiku_model, True, s.facts_thinking_max_tokens, cloud=True),
+        "qwen": FactsBackend("qwen", s.facts_qwen_model, True, s.facts_thinking_max_tokens),
+        "gemma": FactsBackend("gemma", s.llm_model, False, s.facts_max_tokens),
+    }
+    if choice not in backends:
+        raise ValueError(f"unknown facts model choice {choice!r}; use one of {', '.join(backends)}")
+    backend = backends[choice]
+    backend.client()  # a missing ANTHROPIC_API_KEY fails here, before any page is tried
+    return backend

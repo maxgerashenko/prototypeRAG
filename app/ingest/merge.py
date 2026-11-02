@@ -10,18 +10,23 @@ pages were processed in, and running it twice changes nothing:
 - a fact with several sources keeps all of them; losers with a source are `conflict`
   (kept, listed by `--report conflicts`), facts left without any source are `stale`
   (excluded from retrieval) -- except owner-confirmed ones, which stay `active`.
+- the subject is compared without the business name and the fact's own location name (`make_fact_key` /
+  `rekey_facts`, so "Bathhouse Williamsburg" and "Williamsburg" are one subject), and
+  different subjects with the same value stay separate facts.
 """
 
 import re
 import uuid
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import Fact, FactSource, Location, Page
+from app.db.models import Business, Fact, FactSource, Location, Page
 from app.ingest.facts import ExtractedFact, extraction_stamp
+from app.ingest.profile import is_placeholder_name
 
 # lower = wins (plan §5.4): location · contact · pricing · service · site_chrome >
 # faq · policy > about > landing > blog. `event`/`other` sit with landing: no plan rank.
@@ -43,8 +48,48 @@ def _norm_key_part(text: str | None) -> str:
     return re.sub(r"\s+", " ", (text or "").lower()).strip()
 
 
-def make_fact_key(type_: str, location_id: uuid.UUID | None, subject: str | None, attribute: str | None) -> str:
-    return "|".join((type_, str(location_id) if location_id else "-", _norm_key_part(subject), _norm_key_part(attribute)))
+@dataclass(frozen=True)
+class KeyNames:
+    """Holds business and location names for fact-key normalization."""
+    business: tuple[str, ...]
+    locations: dict[uuid.UUID, str]
+
+    def for_location(self, location_id: uuid.UUID | None) -> tuple[str, ...]:
+        if location_id and location_id in self.locations:
+            return (*self.business, self.locations[location_id])
+        return self.business
+
+
+def key_names(session: Session, business_id: uuid.UUID) -> KeyNames:
+    """Fetches business and location names for fact-key normalization."""
+    biz = session.scalar(select(Business).where(Business.id == business_id))
+    business: tuple[str, ...] = ()
+    if biz and biz.name and not is_placeholder_name(biz.name):
+        business = (biz.name,)
+    locations: dict[uuid.UUID, str] = {}
+    for loc in session.scalars(select(Location).where(Location.business_id == business_id)):
+        if loc.name:
+            locations[loc.id] = loc.name
+    return KeyNames(business=business, locations=locations)
+
+
+def _norm_subject(subject: str | None, names: Sequence[str] = ()) -> str:
+    """Removes specified names from subject text, handling punctuation and possessives safely."""
+    if not subject:
+        return ""
+    text = subject
+    for name in sorted(names, key=len, reverse=True):
+        if not name:
+            continue
+        pattern = r"(?<!\w)" + re.escape(name) + r"(?:'s|’s)?(?!\w)"
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    text = re.sub(r"[^\w\s]", " ", text)
+    return re.sub(r"\s+", " ", text.lower()).strip()
+
+
+def make_fact_key(type_: str, location_id: uuid.UUID | None, subject: str | None, attribute: str | None, names: Sequence[str] = ()) -> str:
+    """Builds a normalized fact key from type, location, subject, attribute, and exclusion names."""
+    return "|".join((type_, str(location_id) if location_id else "-", _norm_subject(subject, names), _norm_key_part(attribute)))
 
 
 @dataclass
@@ -67,14 +112,16 @@ def apply_page_facts(
     session.execute(delete(FactSource).where(FactSource.business_id == business_id, FactSource.page_id == page.id))
     session.flush()
 
-    keys = {make_fact_key(f.type, f.location_id, f.subject, f.attribute) for f in extracted}
+    names = key_names(session, business_id)
+    keys = {make_fact_key(f.type, f.location_id, f.subject, f.attribute, names.for_location(f.location_id)) for f in extracted}
     existing: dict[str, list[Fact]] = {}
     if keys:
         for fact in session.scalars(select(Fact).where(Fact.business_id == business_id, Fact.fact_key.in_(keys))):
             existing.setdefault(fact.fact_key, []).append(fact)
 
     for f in extracted:
-        key = make_fact_key(f.type, f.location_id, f.subject, f.attribute)
+        loc_names = names.for_location(f.location_id)
+        key = make_fact_key(f.type, f.location_id, f.subject, f.attribute, loc_names)
         match = next((r for r in existing.get(key, []) if normalize_value(r.value) == normalize_value(f.value)), None)
         if match is None:
             # 'conflict' until settle_facts picks the winner of this key (only one 'active'
@@ -116,6 +163,7 @@ def _source_rank(page: Page) -> tuple[int, float]:
 
 def settle_facts(session: Session, business_id: uuid.UUID, stats: MergeStats | None = None) -> None:
     """Decide the status of every non-rejected fact of the business (module docstring)."""
+    rekey_facts(session, business_id)
     facts = list(session.scalars(select(Fact).where(Fact.business_id == business_id, Fact.status != "rejected")))
     if not facts:
         return
@@ -162,6 +210,94 @@ def settle_facts(session: Session, business_id: uuid.UUID, stats: MergeStats | N
     if stats:
         for f in facts:
             stats.by_status[f.status] = stats.by_status.get(f.status, 0) + 1
+
+
+def rekey_facts(session: Session, business_id: uuid.UUID, names: KeyNames | None = None) -> int:
+    """Merge duplicate facts by normalizing subjects and keys; returns rows removed.
+    Keeps the owner-confirmed fact if any, else the earliest first_seen_at.
+    Idempotent. Called by settle_facts."""
+    if names is None:
+        names = key_names(session, business_id)
+
+    facts = list(session.scalars(select(Fact).where(Fact.business_id == business_id, Fact.status != "rejected")))
+    if not facts:
+        return 0
+
+    # Compute each new key once
+    new_keys: dict[uuid.UUID, str] = {}
+    for f in facts:
+        loc_names = names.for_location(f.location_id)
+        new_keys[f.id] = make_fact_key(f.type, f.location_id, f.subject, f.attribute, loc_names)
+
+    groups: dict[tuple[str, str], list[Fact]] = {}
+    for f in facts:
+        norm_val = normalize_value(f.value)
+        groups.setdefault((new_keys[f.id], norm_val), []).append(f)
+
+    # Idempotency: no key changes and no groups > 1
+    has_changes = False
+    for group in groups.values():
+        if len(group) > 1:
+            has_changes = True
+            break
+        if group[0].fact_key != new_keys[group[0].id]:
+            has_changes = True
+            break
+    if not has_changes:
+        return 0
+
+    # Demote active facts in changing groups to 'conflict' before key update
+    demote_ids = set()
+    for group in groups.values():
+        if len(group) > 1:
+            for f in group:
+                if f.status == "active":
+                    demote_ids.add(f.id)
+        else:
+            f = group[0]
+            if f.fact_key != new_keys[f.id] and f.status == "active":
+                demote_ids.add(f.id)
+
+    if demote_ids:
+        session.execute(update(Fact).where(Fact.id.in_(demote_ids), Fact.business_id == business_id).values(status="conflict"))
+        session.flush()
+
+    deleted_count = 0
+    for group in groups.values():
+        if len(group) <= 1:
+            f = group[0]
+            if f.fact_key != new_keys[f.id]:
+                f.fact_key = new_keys[f.id]
+        else:
+            owner = [f for f in group if f.owner_confirmed_at is not None or f.origin == "owner"]
+            if owner:
+                winner = max(owner, key=lambda f: f.owner_confirmed_at or datetime.min.replace(tzinfo=UTC))
+            else:
+                winner = min(group, key=lambda f: f.first_seen_at or datetime.max.replace(tzinfo=UTC))
+
+            losers = [f for f in group if f is not winner]
+            winner_page_ids = {src.page_id for src in session.scalars(select(FactSource).where(FactSource.fact_id == winner.id, FactSource.business_id == business_id))}
+
+            for loser in losers:
+                loser_sources = session.scalars(select(FactSource).where(FactSource.fact_id == loser.id, FactSource.business_id == business_id)).all()
+                for src in loser_sources:
+                    if src.page_id in winner_page_ids:
+                        session.delete(src)
+                    else:
+                        src.fact_id = winner.id
+                        winner_page_ids.add(src.page_id)
+                # sources first: the fact's DELETE cascades to whatever still points at it
+                session.flush()
+                session.delete(loser)
+                deleted_count += 1
+
+            winner.last_seen_at = max((f.last_seen_at for f in group if f.last_seen_at is not None), default=winner.last_seen_at)
+            winner.confidence = max((f.confidence for f in group if f.confidence is not None), default=None)
+            if winner.fact_key != new_keys[winner.id]:
+                winner.fact_key = new_keys[winner.id]
+
+    session.flush()
+    return deleted_count
 
 
 def conflicts_report(session: Session, business_id: uuid.UUID) -> list[str]:
