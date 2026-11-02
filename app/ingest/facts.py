@@ -32,8 +32,9 @@ FACT_TYPES = (
 TIME_SENSITIVE_TYPES = {"hours", "price", "booking", "event", "location_status"}
 
 # Page types that never feed the facts library: legal and careers text isn't about what
-# the business offers; the chrome pseudo-page is the opposite and is always read.
-SKIP_PAGE_TYPES = {"legal", "careers"}
+# the business offers; blog/journal posts are opinion and history that contradict the
+# real pages (D23: 8 false conflicts on the pilot); the chrome pseudo-page is the opposite and is always read.
+SKIP_PAGE_TYPES = {"legal", "careers", "blog"}
 
 def fact_schema(location_names: Sequence[str] = ()) -> dict:
     """The structured-output schema for one page. `location` is an enum of the only valid
