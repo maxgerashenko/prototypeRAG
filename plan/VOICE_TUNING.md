@@ -59,6 +59,7 @@ Time to the first sentence is dominated by the model, the prompt size and whethe
 | `VOICE_REASONING_EFFORT` | `none` | env | Thinking off: ~0.3 s to first word vs ~8 s on (DEC-29). Turn it on only for offline jobs. Gemini Pro can't turn thinking off |
 | `CHAT_REASONING_EFFORT` | `none` | env | Same for `/chat` (V24) |
 | `VOICE_LLM_WARMUP` | `true` | env | T2: primes LM Studio's prompt cache while the greeting plays; saves the first turn's prompt processing. Extra request per call (cost on a paid API) |
+| `VOICE_GREETING_DELAY_S` | `1.0` | env | Seconds of silence after the call connects before the opening greeting starts, so the caller isn't startled (0 = immediately) |
 | Cold model start | — | external | First call after a restart took 34 s on `/chat` (#81); keep the model loaded (no TTL unload), check `lms ps`, avoid memory pressure from a second big model |
 | LM Studio load settings | context 262144, parallel 4 | external | A huge context and more parallel slots cost memory; a smaller context frees RAM and can speed up. Quantization, GPU offload, flash attention and KV-cache type are set in LM Studio, not here |
 | `MAX_TOOL_ROUNDS` | 3 | code: session.py | LLM → tool → LLM loops per turn; each round costs a full LLM call |

@@ -58,6 +58,7 @@ Default location: Williamsburg. Other locations: Flatiron, Atlantic Ave, Philade
 
 | Try | Expected |
 |---|---|
+| Call and wait for it to connect | About 1 s of silence, then the greeting starts (`VOICE_GREETING_DELAY_S`, 0 = immediately) |
 | Interrupt while it's talking | It stops and listens |
 | Ask a follow-up ("and how much is that?") | Uses the earlier turn for context |
 | Stay silent for a while | Re-prompt after ~6 s, not built yet (V17) |

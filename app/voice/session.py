@@ -261,7 +261,7 @@ class CallSession:
             greeting = f"Welcome back to {name}. I'm an AI assistant. Let's pick up where we left off: {self._topic}."
         else:
             greeting = self._opening  # DEC-53: AI disclosure + the owner's text
-        self._reply_task = self._spawn(self._speak_fixed(greeting, cache=self._topic is None))
+        self._reply_task = self._spawn(self._speak_fixed(greeting, cache=self._topic is None, lead_in=get_settings().voice_greeting_delay_s))
         if get_settings().voice_llm_warmup:
             self._warmup_task = asyncio.create_task(self._warm_up_llm())
         if self.turn_detection == "vad":
@@ -543,9 +543,13 @@ class CallSession:
         spoken.append(sentence)
         play_ends.append(self._playing_until)
 
-    async def _speak_fixed(self, text: str, cache: bool = True, history: bool = True) -> None:
+    async def _speak_fixed(
+        self, text: str, cache: bool = True, history: bool = True, lead_in: float = 0.0
+    ) -> None:
         """A line not written by the LLM: the greeting, or a silence re-prompt/goodbye
-        (`history=False`: saved to the transcript, kept out of the LLM history)."""
+        (`history=False`: saved to the transcript, kept out of the LLM history;
+        `lead_in`: seconds of silence before the audio starts, counted from the call of this method)."""
+        started = time.monotonic()
         await self._send_event({"type": "reply", "text": text})
         settings = get_settings()
         key = (text, self.sample_rate, settings.tts_voice, settings.voice_language)
@@ -558,6 +562,8 @@ class CallSession:
                 await asyncio.to_thread(self._store_cached_audio, key, audio)
         if cache:
             _greeting_audio[key] = audio
+        # the audio load/synthesis above counts toward the pause
+        await asyncio.sleep(max(0.0, lead_in - (time.monotonic() - started)))
         await self._play(audio)
         if history:
             self._history.append({"role": "assistant", "content": text})
