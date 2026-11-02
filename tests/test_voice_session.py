@@ -639,7 +639,7 @@ def test_barge_in_during_stt_finish_keeps_callers_words(business, monkeypatch):
     run_async(run())
     combined = "What if I want to come? Today at 9 pm."
     assert [e["text"] for e in events if e["type"] == "transcript"] == [combined]
-    asked = [m["content"] for m in llm.requests[0]["messages"] if m["role"] == "user"]
+    asked = [m["content"] for m in llm.requests[0]["messages"] if m["role"] == "user" and m["content"] != session_mod.CALL_CONNECTED_TEXT]
     assert asked == [combined]
     with tenant_session(business) as db:
         rows = db.scalars(select(Message).where(Message.business_id == business, Message.role == "user"))
@@ -729,7 +729,10 @@ def test_llm_warm_up_sends_turn_prefix_once(business, monkeypatch):
     run_async(run())
     assert len(llm.warmups) == 1 and llm.requests == []
     warm = llm.warmups[0]
-    assert warm["messages"] == [{"role": "system", "content": s._system_prompt}]
+    assert warm["messages"] == [
+        {"role": "system", "content": s._system_prompt},
+        {"role": "user", "content": session_mod.CALL_CONNECTED_TEXT},
+    ]
     assert warm["tools"] == session_mod.TOOLS and not warm.get("stream")
 
 

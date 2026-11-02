@@ -77,6 +77,7 @@ SILENCE_MAX_REPROMPTS = 1  # re-prompts before the goodbye
 SILENCE_POLL_S = 0.25
 MARK_GRACE_S = 1.0  # V11: how long past its estimate an un-echoed playback mark still counts
 MARK_POLL_S = 0.05  # re-check the playback end this often, an echo can end it early
+CALL_CONNECTED_TEXT = "(The call has just connected.)"  # placeholder first user turn, see _llm_history
 HANG_UP_GRACE_S = 0.5  # after the last audio's estimated end, so the transport plays it out
 REPROMPT_TEXT = "Are you still there?"
 SILENCE_GOODBYE_TEXT = "I haven't heard anything, so I'll end the call now. Thanks for calling, goodbye."
@@ -465,12 +466,20 @@ class CallSession:
         finally:
             self._stop_working_sound()
 
+    def _llm_history(self) -> list[dict]:
+        """The history for the LLM. Every call starts with the greeting (an assistant turn), and
+        qwen's chat template refuses a prompt whose first turn after the system prompt is not a
+        user one ("No user query found in messages"), so a placeholder user turn goes first."""
+        if self._history and self._history[0]["role"] == "user":
+            return self._history
+        return [{"role": "user", "content": CALL_CONNECTED_TEXT}, *self._history]
+
     async def _reply_rounds(
         self, text: str, spoken: list[str], play_ends: list[float], speech_end: float, timings: dict
     ) -> None:
         messages = [
             {"role": "system", "content": self._system_prompt},
-            *self._history,
+            *self._llm_history(),
             {"role": "user", "content": text},
         ]
         client = get_async_chat_client()
@@ -606,7 +615,7 @@ class CallSession:
         settings = get_settings()
         try:
             await get_async_chat_client().chat.completions.create(
-                model=settings.llm_model, messages=[{"role": "system", "content": self._system_prompt}, *self._history],
+                model=settings.llm_model, messages=[{"role": "system", "content": self._system_prompt}, *self._llm_history()],
                 tools=self._tools, max_tokens=1, reasoning_effort=settings.voice_reasoning_effort,
             )
         except Exception:
