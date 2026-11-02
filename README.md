@@ -19,7 +19,7 @@ Detailed plan per part:
 
 Layer docs (how the code is built today, one file per layer): [docs/README.md](docs/README.md)
 
-Feature plans: [Pull-to-refresh in the voice app](plan/feature-pull-to-refresh.md) (#124) · [Business settings screen](plan/feature-business-settings.md) (#144–#147) · [Group sessions in Bookings](plan/feature-bookings-sessions.md)
+Feature plans: [Pull-to-refresh in the voice app](plan/feature-pull-to-refresh.md) (#124) · [Business settings screen](plan/feature-business-settings.md) (#144–#147) · [Group sessions in Bookings](plan/feature-bookings-sessions.md) · [Guest identity for bookings](plan/feature-guest-identity.md)
 
 Comparisons: [Crawler vs Scrapy, PDF vs MarkItDown](plan/comparison-scrapy-markitdown.md) (#116)
 
