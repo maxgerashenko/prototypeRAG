@@ -48,7 +48,7 @@ itself) are listed in §9.
 | `app/voice/audio.py` (codec part only) | μ-law 8 kHz ↔ PCM16 helpers used by `ws.py`; its `working_sound` part belongs to [voice.md](voice.md) |
 | `app/voice/twilio_numbers.py` (route part only) | `GET /twilio/numbers`; the Twilio REST client part belongs to [integrations.md](integrations.md) |
 
-Note the split: five API files live in `app/voice/` (four whole, plus the codec part of `audio.py`), not `app/api/`. They are API by role
+Note the split: four whole API files, plus the route part of `twilio_numbers.py` and the codec part of `audio.py`, live in `app/voice/`, not `app/api/`. They are API by role
 (transport and webhooks), voice by topic.
 
 ## 2. Route table
