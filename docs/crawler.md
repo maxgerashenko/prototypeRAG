@@ -237,7 +237,7 @@ Layer names follow the 7-layer map: crawler, data (organize, chunks, facts, prof
 
 | Layer | What |
 |---|---|
-| [data.md](data.md) | `app/db` (`tenant_session`, `SessionLocal`, models `Business`, `Page`, `BusinessProfile`, `Location`), and from `run.py` after the fetch loop: `organize.organize_business`, `chunk_prefix`, `cut_testimonials`, `filter_junk_chunks`, `prefix_chunk_drafts`, `chunk.chunk_markdown`, `store.replace_chunks`, `profile.*`, `timezone.assign_timezones`, `facts.*`, `merge.*`, `fact_chunks.sync_fact_chunks`, `summary.summarize_business` |
+| [data.md](data.md) | `app/db` (`tenant_session`, `SessionLocal`, models `Business`, `Page`, `BusinessProfile`, `Location`), and `organize.chrome_pseudo_url` (the fetch loop and the delete step keep the site-chrome pseudo-page), and from `run.py` after the fetch loop: `organize.organize_business`, `chunk_prefix`, `cut_testimonials`, `filter_junk_chunks`, `prefix_chunk_drafts`, `chunk.chunk_markdown`, `store.replace_chunks`, `profile.*`, `timezone.assign_timezones`, `facts.*`, `merge.*`, `fact_chunks.sync_fact_chunks`, `summary.summarize_business` |
 | [voice.md](voice.md) | `app.voice.greeting_cache.pregenerate`, called at the end of a crawl (see Structure gap) |
 | [integrations.md](integrations.md) | None directly from the crawl modules. The post-crawl steps reach the LLM (`app/llm.py`) and Google TTS through the data and voice layers |
 | Outside | The business's website over HTTP (`httpx`), `protego`, `beautifulsoup4`, `markdownify`, `pypdf`, `markitdown[pdf]`; Postgres via `DATABASE_URL` |
