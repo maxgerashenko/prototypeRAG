@@ -45,9 +45,10 @@ itself) are listed in §9.
 | `app/voice/ws.py` | WebSocket `/voice/ws`, Twilio Media Streams adapter |
 | `app/voice/browser_ws.py` | WebSocket `/voice/browser`, browser adapter + V19 orphan sweep |
 | `app/voice/call_feed.py` | `GET /voice/feed` SSE and the in-memory `LiveCalls` hub (DEC-46) |
+| `app/voice/audio.py` (codec part only) | μ-law 8 kHz ↔ PCM16 helpers used by `ws.py`; its `working_sound` part belongs to [voice.md](voice.md) |
 | `app/voice/twilio_numbers.py` (route part only) | `GET /twilio/numbers`; the Twilio REST client part belongs to [integrations.md](integrations.md) |
 
-Note the split: four API files live in `app/voice/`, not `app/api/`. They are API by role
+Note the split: five API files live in `app/voice/` (four whole, plus the codec part of `audio.py`), not `app/api/`. They are API by role
 (transport and webhooks), voice by topic.
 
 ## 2. Route table
@@ -305,7 +306,7 @@ dev Postgres; no CI runs them (cloud box has no LM Studio / Google / Twilio).
 | A6 | Business logic in route files: `put_number`/`assign_main_number` number moves, `_reindex_custom_reply` (embedding + chunk write), `list_bookings` time maths, `get_top_questions` embedding loop | The phone/chat layers can't reuse them; tests must go through HTTP | #246 · Candidates to move to [actions.md](actions.md) / [data.md](data.md) |
 | A7 | `PUT /number` checks the business in one session and writes in another, with a Twilio call between | A business deleted in between gets an UPDATE of 0 rows but a 200 | #237 · Low risk in stage 1 |
 | A8 | `/twilio/status` runs the LLM summary inside the request (DEC-24, R19) | Twilio waits; its webhook timeout (~15 s) can mark the callback failed on a slow summary | #249 · DEC-24 (accepted) |
-| A9 | Four API files live in `app/voice/`; `twilio_numbers.py` mixes a route with the Twilio REST client and imports `display_name` from `app/api/businesses.py` | Integrations code depends on the API layer, against the "integrations never call back" rule | #247 · Layering cleanup |
+| A9 | Four API files live in `app/voice/`; `twilio_numbers.py` mixes a route with the Twilio REST client and imports `display_name` from `app/api/businesses.py` | Integrations code depends on the API layer, against the "integrations never call back" rule | #247 · Layering cleanup; same as [integrations.md](integrations.md) V-1 (the `GET /twilio/numbers` route is its V-2) |
 | A10 | No rate limiting, no CORS policy, no global error handler / request id | Errors are plain 500s without a correlation id in logs | #248 · Stage 2/3 |
 | A11 | `/health` only checks the DB | LM Studio/Gemini, Google Speech or Twilio being down still reports ok | #248 |
 
@@ -322,7 +323,7 @@ review, besides the gaps above: #223, #230, #231, #233, #235, #239, #241, #242, 
 | Data layer, [data.md](data.md) (stored knowledge and app data) | `app/db` (`tenant_session`, `SessionLocal`, `engine`, models, `message_order`), `app/rag/retrieve.py`, `app/rag/location.py` (`default_location_id`), `app/insights/questions.py`, `app/ingest/profile.py` (`is_placeholder_name`) |
 | Crawler layer, [crawler.md](crawler.md) | `app/ingest/clean.py` (`content_hash`) for the custom-reply chunk only; no other crawler calls |
 | Actions layer, [actions.md](actions.md) (what the app does: book, cancel, transfer a call, text, summarize) | `app/actions/booking/` (`sessions`, `rules`, `session_events`, `internal._load_rules`, `calendar_sync`), `app/actions/summary.py`, `app/actions/transfer.py` |
-| Integrations layer, [integrations.md](integrations.md) (thin clients that let the app work with outside services: Twilio, Google, LLM APIs) | `app/llm.py` (`embed`), `app/voice/google_auth.py` and `tts.py` (warm-up), `app/voice/audio.py` (μ-law ↔ PCM16), `app/voice/twilio_numbers.py` (`account_numbers`, `safe_error`), Twilio SDK (`RequestValidator`, TwiML, `AccessToken`), `booking/google_client.CalendarError` |
+| Integrations layer, [integrations.md](integrations.md) (thin clients that let the app work with outside services: Twilio, Google, LLM APIs) | `app/llm.py` (`embed`), `app/voice/google_auth.py` and `tts.py` (warm-up), `app/voice/twilio_numbers.py` (`account_numbers`, `safe_error`), Twilio SDK (`RequestValidator`, TwiML, `AccessToken`), `booking/google_client.CalendarError` |
 
 **Used by**
 
