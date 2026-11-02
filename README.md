@@ -78,7 +78,7 @@ Models, split by role so both fit in memory at once (DEC-32, ~39 GB combined on 
 
 | Role | Model id | Used by | Notes |
 |---|---|---|---|
-| Chat / voice | `google/gemma-4-12b` | `.env` `LLM_MODEL` | ~10 GB; thinking is on by default, so `.env` sets `CHAT_REASONING_EFFORT=none` and `VOICE_REASONING_EFFORT=none` |
+| Chat / voice | `qwen/qwen3.6-35b-a3b` (DEC-58; was `google/gemma-4-12b`) | `.env` `LLM_MODEL` | ~29 GB; thinking is on by default, so `.env` sets `CHAT_REASONING_EFFORT=none` and `VOICE_REASONING_EFFORT=none` |
 | Embeddings | `text-embedding-nomic-embed-text-v1.5` | `.env` `EMBED_MODEL` | 768 dims; keep it loaded next to the chat model |
 | Code drafting (Claude Code delegation only) | `qwen/qwen3.6-35b-a3b`, thinking on | `.claude/tools/delegate_code.py` | ~27-29 GB; not read from `.env`; load it only when delegating |
 

@@ -36,7 +36,7 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
 | Crawler | Python CLI natively | Separate crawler image → **Cloud Run Job** + Scheduler | same, per-business schedules |
 | Database | Postgres 16 + pgvector in **Docker** (the only container) | **Neon** free tier (AWS region in the same city — Neon has no GCP regions) | **Neon Launch** (usage-based, DEC-33), pooling, backups, HNSW if needed |
 | Tenant isolation | `business_id` + `tenant_session` helper | same | **RLS policies + `app_user` role + isolation tests** |
-| LLM | **LM Studio** native, split by role (DEC-32): `gemma-4-12b` for chat/voice, `qwen3.6-35b-a3b` for code delegation | **Gemini Flash** paid key (OpenAI-compatible), thinking off for voice | + cost controls |
+| LLM | **LM Studio** native, split by role (DEC-32): `qwen3.6-35b-a3b` (reasoning off) for chat/voice since DEC-58, thinking on for code delegation | **Gemini Flash** paid key (OpenAI-compatible), thinking off for voice | + cost controls |
 | Embeddings | `nomic-embed-text-v1.5` in LM Studio (or Gemini, OPEN-05) | Gemini embeddings, one re-index | same |
 | Voice | **Pipeline mode**: Google STT → local LLM → Google TTS | Pipeline mode on Cloud Run, then **Gemini Live spike** → decide (OPEN-08, DEC-30) | chosen mode, tuned for cost |
 | Telephony | Browser mic first, then Twilio **Voice SDK browser calls** (no number, DEC-34) + **ngrok** | Voice SDK → Cloud Run URL; real number once the pilot pays for it | provider per country/price (OPEN-09) |
@@ -205,7 +205,7 @@ Details: [06-scale.md](06-scale.md)
 DATABASE_URL=postgresql+psycopg://app:app@localhost:5432/app
 LLM_BASE_URL=http://localhost:1234/v1       # LM Studio server
 LLM_API_KEY=lm-studio                        # any value; LM Studio doesn't check it
-LLM_MODEL=google/gemma-4-12b                 # chat/voice (DEC-32); id as shown by `lms ps`
+LLM_MODEL=qwen/qwen3.6-35b-a3b               # chat/voice (DEC-58); id as shown by `lms ps`
 FACTS_LLM_MODEL=                             # fact extraction (OPEN-20); empty = LLM_MODEL
 CHAT_REASONING_EFFORT=none                   # thinking off for /chat (V24)
 EMBED_BASE_URL=http://localhost:1234/v1

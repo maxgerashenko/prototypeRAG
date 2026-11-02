@@ -32,8 +32,9 @@ Models (via LM Studio, 64 GB Mac — DEC-29):
   Chosen with the cloud target in mind (DEC-30) — the local model stands in for **Gemini
   Flash in pipeline mode**, so it must be fast, good at native tool calling and follow
   short spoken-style instructions:
-  - **Chat/voice: `google/gemma-4-12b`** (DEC-32) — small enough (9.76 GB) to stay
-    loaded alongside the code-drafting model below; 7/7 on the bathhouse RAG eval.
+  - **Chat/voice: `qwen/qwen3.6-35b-a3b`, reasoning off** (DEC-58; DEC-32 had `google/gemma-4-12b`,
+    9.76 GB) — same model as the code-drafting one below, so only one big model is
+    loaded; 17-18 of 19 on the bathhouse RAG eval, same as gemma, faster.
     Tool-calling untested so far (stage 1 doesn't exercise tool calls yet) — recheck
     before relying on it for the action tools in `04-actions.md`.
   - Superseded picks (DEC-30's original eval list, kept for history — see DEC-32):

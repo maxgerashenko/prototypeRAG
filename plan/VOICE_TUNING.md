@@ -54,7 +54,7 @@ Time to the first sentence is dominated by the model, the prompt size and whethe
 
 | Knob | Default | Where | Effect / trade-off |
 |---|---|---|---|
-| `LLM_MODEL` | `google/gemma-4-12b` | env | Model size/quality vs speed. Bigger = better answers, slower first word. Cloud: Gemini Flash (stage 2 comparison) |
+| `LLM_MODEL` | `qwen/qwen3.6-35b-a3b` (DEC-58) | env | Model size/quality vs speed. Bigger = better answers, slower first word. Cloud: Gemini Flash (stage 2 comparison) |
 | `LLM_BASE_URL` / `LLM_API_KEY` | LM Studio | env | Local vs Gemini endpoint — same code |
 | `VOICE_REASONING_EFFORT` | `none` | env | Thinking off: ~0.3 s to first word vs ~8 s on (DEC-29). Turn it on only for offline jobs. Gemini Pro can't turn thinking off |
 | `CHAT_REASONING_EFFORT` | `none` | env | Same for `/chat` (V24) |

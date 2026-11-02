@@ -111,7 +111,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-33 | Cost model | Only free or pay-per-use services: no monthly fees, no minimums, no trials that turn paid; $0 when idle | all | ✅ |
 | DEC-34 | Test calls without a phone number | Stages 1–2: Twilio Voice SDK browser calls (per minute, no number); rent a real number only when a pilot business pays for it | 1 · 2 | ✅ |
 | DEC-35 | Voice cold start (supersedes DEC-16) | `min-instances=0` in every stage; Cloud Run starts while the caller hears ringing; measure in stage 2 | 2 · 3 | 🔄 (measure) |
-| DEC-32 | Local models split by role | `google/gemma-4-12b` for chat/voice; `qwen/qwen3.6-35b-a3b` (thinking on) for code-drafting delegation — both fit in memory together | 1 | ✅ |
+| DEC-32 | Local models split by role (chat/voice pick **superseded by DEC-58**) | `google/gemma-4-12b` for chat/voice; `qwen/qwen3.6-35b-a3b` (thinking on) for code-drafting delegation — both fit in memory together | 1 | ✅ |
 | DEC-36 | Crawler fetcher order | httpx first (stage 1, pilot site is server-rendered); Crawl4AI + separate crawler image added when a JS-rendered site is hit | 1 · 2 | 🔄 (first JS site) |
 | DEC-37 | Business identity and locations | One business = one main website host without `www.` (paths never matter); crawler reuses the `business_id` per domain; locations come from site content (not the start URL path); every business has a default location; address/hours/timezone are location-scoped | 1 | ✅ |
 | DEC-38 | Facts library | Atomic, sourced, location-scoped facts (`facts` + `fact_sources`), extracted per page by the LLM with a verbatim quote checked in code; retrieved as `chunks` rows `kind='fact'` in the same hybrid search (DEC-12); raw chunks as fallback (OPEN-22); core location facts always in the prompt | 1 · 2 (Gemini re-extract) · 3 (owner review) | ✅ |
@@ -130,6 +130,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-55 | Hold-to-add gesture in the day view | Mouse: click an empty hour. Touch/pen: hold 1.5 s (`HOLD_MS`) with a fill-ghost after 150 ms; cancel on move > 10 px, scroll, `pointercancel`, second pointer. A short tap shows a hint. A 56 px **+** button is the fallback and the VoiceOver route. Never `preventDefault` on pointerdown/touchstart; iOS callout off. iPhone has no Vibration API, so the fill is the only feedback | 1 | **Superseded by DEC-56** |
 | DEC-56 | Add a session with a faded **+** in each free hour (user decision 2026-10-31, supersedes DEC-55) | The hold gesture and mouse click-to-add are removed (`holdToAdd.ts` deleted). Every free future hour shows a faded 44 px **+** centred in the row (`hour-add-<h>`); the round bottom-right **+** stays. Visible on touch without hover; no timing to tune, no iOS gesture risks | 1 | ✅ |
 | DEC-57 | Assigning a number also points it at this app in Twilio (user decision 2026-11-02, extends DEC-52) | `PUT /businesses/{id}/number` first calls `ensure_routed`: voice URL empty → set `<PUBLIC_BASE_URL>/twilio/voice` and `/twilio/status` (POST) through the Twilio API; already ours → only a missing status URL is filled; pointing elsewhere → 409, nothing overwritten; missing `PUBLIC_BASE_URL`/credentials or a Twilio error → 503 and the database is unchanged. Unassigning leaves Twilio as it is. Cause: a newly bought number had no voice URL, so calls got no answer | 1 | ✅ |
+| DEC-58 | Chat/voice model: qwen3.6-35b-a3b with reasoning off instead of gemma (user decision 2026-11-02, supersedes DEC-32's chat/voice pick) | `.env` `LLM_MODEL=qwen/qwen3.6-35b-a3b`, `CHAT_`/`VOICE_REASONING_EFFORT=none`. Two benchmark runs on 19 graded questions: same accuracy as gemma (18/19 and 17/19 vs 17/19), faster (mean 1.63 s and 0.87 s vs 1.83 s and 1.88 s). Code-drafting delegate stays qwen with thinking on | 1 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
@@ -903,6 +904,20 @@ User decision 2026-11-02, extends DEC-52. A new number (+1 332 322-2533) rang wi
 | D. Base URL derived from the request | No env var | From Settings on localhost it would give `localhost` | ❌ |
 
 Open: a "re-sync all numbers" action for a changed public URL (not needed with one trial number); the ngrok free domain going offline gave Twilio a 404 on one call (stage 2: Cloud Run URL).
+
+### DEC-58 — Chat/voice model: qwen3.6-35b-a3b, reasoning off (stage 1, supersedes DEC-32's chat/voice pick)
+
+User decision 2026-11-02. `scripts/bench_models.py` ran the 19 graded questions of `tests/eval/bathhouse.yaml` (same retrieved prompt for every model, LLM time only, one warm-up call each), twice:
+
+| Option | Correct (run 1 / run 2) | Mean s (run 1 / run 2) | Notes | Verdict |
+|---|---|---|---|---|
+| gemma-4-12b | 17 / 17 of 19 | 1.83 / 1.88 | Says "I don't have the phone number" for Philadelphia; 9.76 GB | ❌ replaced |
+| **qwen3.6-35b-a3b, `reasoning_effort=none`** | 18 / 17 of 19 | 1.63 / 0.87 | Fastest; ~29 GB; once gave the Williamsburg phone for Philadelphia, once made up a number | ✅ chat/voice |
+| claude-haiku-5-5 | 17 / 16 of 19 | 1.77 / 2.53 | Slowest answer 10 s; paid per call; the run-2 miss was the grader ("doesn't offer" not a refusal phrase) | ❌ |
+
+Decision: `LLM_MODEL=qwen/qwen3.6-35b-a3b` with `CHAT_REASONING_EFFORT=none` and `VOICE_REASONING_EFFORT=none`. The code-drafting delegate stays the same model with thinking on (`delegate_code.py`). Gemma stays available for the small-command delegation scripts. Both fit in memory together (~39 GB).
+
+Risks and open points: the evidence is two runs on 19 questions, so the difference in accuracy is noise; speed is the reason. Qwen can state a wrong or made-up phone number where gemma and Haiku say they don't know: worse than a refusal, to watch on calls. Both failing questions (Saturday hours, Philadelphia phone) fail for every model because retrieval does not hand the facts to the model. Found on the first call: qwen's chat template rejects a prompt whose first turn after the system prompt is not a user turn ("No user query found"), and a call starts with the greeting; fixed by a placeholder first user turn (`CallSession._llm_history`, commit cf0a245), which gemma accepts too. Not yet checked: a live voice call, tool calling (`search_business_info`, bookings) on qwen.
 
 ### DEC-51 — Keep our crawler, use MarkItDown for PDF text (stage 1)
 
