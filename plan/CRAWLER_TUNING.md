@@ -35,9 +35,9 @@ Affects completeness (a page never fetched can't be answered from) and crawl tim
 | `max_depth` | 3 | code: `crawl_business()` | Link-following depth when there is **no sitemap** (BFS fallback); sitemap crawls ignore it |
 | Skipped URLs | images/css/js/fonts; `/cart /checkout /login /account /search` | code: `_SKIP_EXTENSIONS`, `_SKIP_PATH_SUBSTRINGS` | Keeps transactional/UI pages out. Adding a site-specific skip needs a code change |
 | Same-domain rule | bare domain, `www.` ignored | code: `same_domain()` | Other domains are never followed; a business with a second domain (booking site) needs its own crawl |
-| `noindex` pages | skipped | code: `has_noindex()` | Respects the site owner's wish and drops junk landing pages |
+| `noindex` pages | skipped | code: `has_noindex()`, `x_robots_noindex()` | Respects the site owner's wish and drops junk landing pages. `<meta name=robots>` in any attribute order, `none` = noindex; `X-Robots-Tag` header for HTML and PDFs (a directive for another bot, e.g. `googlebot: noindex`, doesn't apply to us) |
 | Sitemap handling | `sitemap.xml` + child sitemaps of an index, one level | code: `MAX_CHILD_SITEMAPS = 20` | A sitemap is the best page list; without one, BFS is slower and may miss orphan pages |
-| robots.txt | obeyed | code: `RobotsChecker` | Disallowed URLs are never fetched (legal first, R-limits); `Crawl-delay` honoured, fractional values rounded up |
+| robots.txt | obeyed (RFC 9309) | code: `RobotsChecker` (Protego), `fetch_robots_txt` | Disallowed URLs are never fetched (legal first, R-limits); the group for our bot (`BOT_TOKEN` = `prototypeRAG-crawler`) wins over `*`; `*`/`$` wildcards honoured; `Crawl-delay` honoured, fractional values rounded up. A 4xx robots.txt = no rules; 5xx, 429, timeout or a redirect loop (after retries) **aborts the crawl and keeps the stored data** (2026-11-01, crawler review) |
 
 ## 2. Politeness and fetching — speed vs. being blocked
 
@@ -51,7 +51,7 @@ Affects completeness (a page never fetched can't be answered from) and crawl tim
 | `Accept` / `Accept-Language` headers | realistic browser values | code: `REQUEST_HEADERS` | Default `*/*` got a 403 on bhbarbershop.com (#121) |
 | Sequential fetching | one page at a time | code | Parallel fetching would be faster but breaks the delay promise; not built |
 | Rendering | `httpx` only, no JavaScript | code (DEC-36) | JS-built sites return empty pages → add Crawl4AI/headless rendering when hit (slower, heavier, needed for quality on such sites) |
-| Retries / backoff | none | code | A failed page is skipped; a transient 5xx loses it until the next crawl |
+| Retries / backoff | 2 retries | code: `RETRIES`, `RETRY_BASE_SECONDS`, `MAX_RETRY_AFTER_SECONDS` in fetch.py | 429, 5xx, timeouts and connection errors are retried: `Retry-After` seconds (capped at 60 s), else 2 s then 4 s. A failure while reading a body is not retried |
 
 ## 3. Cleaning — signal vs. noise
 
@@ -133,7 +133,7 @@ The only slow, model-dependent part of the crawl. All go through [app/llm.py](..
 
 | Factor | Effect |
 |---|---|
-| Idempotent re-crawl | Same domain → same `business_id`; unchanged `content_hash` pages are skipped; pages no longer linked are deleted |
+| Idempotent re-crawl | Same domain → same `business_id`; unchanged `content_hash` pages are skipped; pages no longer linked are deleted — **only when the crawl fetched at least `MIN_CRAWLED_FRACTION` (50 %) of the stored pages** (run.py). A failed or tiny crawl deletes nothing and reports `deletes_skipped`; the cost is that a site that really shrank by more than half keeps its stale pages until a crawl gets past the threshold |
 | Re-crawl frequency | Not scheduled (stage 1: manual). Hours/prices go stale; stage 2/3 adds a schedule (Cloud Run Job) |
 | Mac memory | The crawl itself is light; the LLM steps need the model loaded (`lms ps`) and a 27–29 GB drafting model alongside gemma can cause swapping |
 | Crawler in own Docker image | Stage 3 (DEC-28 says native in stage 1) |

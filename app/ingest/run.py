@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import get_settings
 from app.db import tenant_session
@@ -31,7 +31,9 @@ from app.db.session import SessionLocal
 from app.ingest.chunk import chunk_markdown
 from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
 from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, parse_robots_sitemaps, parse_sitemap_index
-from app.ingest.fetch import fetch_child_sitemaps, fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client
+from app.ingest.fetch import (
+    RobotsUnavailable, fetch_child_sitemaps, fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client,
+)
 from app.ingest.fact_chunks import sync_fact_chunks
 from app.ingest.facts import extract_page_facts, pages_to_extract
 from app.ingest.identity import domain_of, site_root
@@ -60,6 +62,9 @@ from app.voice.greeting_cache import pregenerate as pregenerate_greeting
 # PDFs linked from crawled pages, on top of max_pages (a sitemap crawl already fills
 # max_pages with pages, so counting PDFs against it would leave no room for them)
 DEFAULT_PDF_CAP = 10
+
+# deletes run only when this crawl fetched at least this share of the stored pages
+MIN_CRAWLED_FRACTION = 0.5
 
 _PROFILE_FIELDS = (
     "name", "address", "phone", "email",
@@ -269,7 +274,13 @@ def crawl_business(
         origin = urlparse(start_url)
         base_url = f"{origin.scheme}://{origin.netloc}"
         root = site_root(start_url) or f"{base_url}/"
-        robots_txt = fetch_robots_txt(base_url, client)
+        try:
+            robots_txt = fetch_robots_txt(base_url, client)
+        except RobotsUnavailable as exc:
+            # RFC 9309: an unreadable robots.txt means "don't crawl" -- stop before touching
+            # any stored page, so the business keeps what it had (legal and data safety)
+            print(f"crawl aborted, stored data kept: {exc}")
+            return {"aborted": str(exc)}
         robots_checker = RobotsChecker(robots_txt) if robots_txt else None
         robots_delay = robots_checker.crawl_delay() if robots_checker else None
         if robots_delay is not None and robots_delay > client._crawl_delay:
@@ -301,6 +312,12 @@ def crawl_business(
             # last guard for both paths -- e.g. a disallowed start_url stays in the BFS list
             urls_to_crawl = [u for u in urls_to_crawl if robots_checker.can_fetch(u)]
 
+        with tenant_session(business_id) as session:
+            pages_before = session.scalar(
+                select(func.count()).select_from(Page)
+                .where(Page.business_id == business_id, Page.url != chrome_pseudo_url(root))
+            ) or 0
+
         pages_crawled = 0
         pages_changed = 0
         all_markdown: list[str] = []
@@ -326,10 +343,12 @@ def crawl_business(
                     if not document.pdf_text:
                         print(f"skipping {url}: PDF has no text (scanned image?)")
                         continue
+                    if document.noindex:  # X-Robots-Tag works for PDFs too
+                        noindex_urls.add(url)
                     title = document.pdf_title
                     cleaned = CleanedPage(main_markdown=document.pdf_text, chrome_markdown="", language=None)
                 else:
-                    if has_noindex(html):
+                    if has_noindex(html) or (document is not None and document.noindex):
                         noindex_urls.add(url)
                     title = extract_title(html)
                     cleaned = clean_page(html)
@@ -390,10 +409,23 @@ def crawl_business(
         # The site-chrome pseudo-page's synthetic url is never in urls_to_crawl (it was
         # never a page to fetch), so it's added explicitly -- without this it was created
         # by organize_business above and then deleted right back out here on every run.
-        with tenant_session(business_id) as session:
-            deleted_pages = delete_pages_not_in(
-                session, business_id, keep_urls=[*urls_to_crawl, chrome_pseudo_url(root)]
+        # A crawl that fetched nothing, or far fewer pages than are stored (site down, bot wall,
+        # sitemap and start page failing), says nothing about which pages are gone: deleting
+        # then would wipe the business's knowledge (crawler review 2026-11-01). Keep everything.
+        # The cost: a site that really shrank by more than half (or a much lower --max-pages)
+        # keeps its stale pages until a crawl gets past the threshold -- reported, not silent.
+        deleted_pages = 0
+        deletes_skipped = None
+        if pages_crawled == 0 or pages_crawled < MIN_CRAWLED_FRACTION * pages_before:
+            deletes_skipped = (
+                f"fetched {pages_crawled} pages, {pages_before} stored (need at least {MIN_CRAWLED_FRACTION:.0%})"
             )
+            print(f"deletes skipped: {deletes_skipped}")
+        else:
+            with tenant_session(business_id) as session:
+                deleted_pages = delete_pages_not_in(
+                    session, business_id, keep_urls=[*urls_to_crawl, chrome_pseudo_url(root)]
+                )
 
         profile_extracted = False
         with tenant_session(business_id) as session:
@@ -470,6 +502,7 @@ def crawl_business(
             "pages_crawled": pages_crawled,
             "pages_changed": pages_changed,
             "deleted_pages": deleted_pages,
+            "deletes_skipped": deletes_skipped,
             "pages_organized": len(organize_result.organized_page_ids),
             "locations_found": organize_result.locations_found,
             "profile_extracted": profile_extracted,

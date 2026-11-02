@@ -9,9 +9,13 @@ import math
 import re
 import xml.etree.ElementTree as ET
 from urllib.parse import urldefrag, urljoin, urlparse
-from urllib.robotparser import RobotFileParser
 
 from bs4 import BeautifulSoup
+from protego import Protego
+
+# the product token of our User-Agent, matched against robots.txt User-agent: lines
+# (fetch.py builds USER_AGENT from it)
+BOT_TOKEN = "prototypeRAG-crawler"
 
 _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 # .pdf is not here: PDFs (menus, price lists) are crawled -- see is_pdf_url
@@ -119,17 +123,23 @@ def is_blog_path(url: str) -> bool:
     return first_segment in _BLOG_PATH_PREFIXES
 
 
+_META_RE = re.compile(r'<meta\b[^>]*>', re.IGNORECASE)
+# one <meta> tag at a time; attributes in any order, quoted or not
+_ROBOTS_RE = re.compile(r'(?<![\w-])name\s*=\s*["\']?robots(?=["\'\s/>])', re.IGNORECASE)
+# noindex, or `none` (= noindex, nofollow); a data-content attribute doesn't count
 _NOINDEX_RE = re.compile(
-    r'<meta[^>]+name=["\']robots["\'][^>]*content=["\'][^"\']*noindex[^"\']*["\']', re.IGNORECASE
+    r'(?<![\w-])content\s*=\s*(?:"[^"]*\b(?:noindex|none)\b|\'[^\']*\b(?:noindex|none)\b|(?:noindex|none)\b)', re.IGNORECASE
 )
 
 
 def has_noindex(html: str) -> bool:
     """True if `html`'s <head> carries <meta name="robots" content="...noindex...">
-    (plan 07 §4 K1: "honour noindex as not retrievable"). A real parse would also need
-    to catch an HTTP X-Robots-Tag header -- out of scope here, this only ever sees the
-    body."""
-    return bool(_NOINDEX_RE.search(html))
+    (plan 07 §4 K1: "honour noindex as not retrievable").
+    The `X-Robots-Tag` header is handled in fetch.py."""
+    for match in _META_RE.finditer(html):
+        if _ROBOTS_RE.search(match.group(0)) and _NOINDEX_RE.search(match.group(0)):
+            return True
+    return False
 
 
 def prioritize(urls: list[str], start_url: str, blog_cap: int = DEFAULT_BLOG_CAP) -> list[str]:
@@ -183,23 +193,24 @@ def parse_robots_sitemaps(robots_txt: str | None) -> list[str]:
 
 
 class RobotsChecker:
-    """Wraps stdlib robotparser over an already-fetched robots.txt body."""
+    """Wraps Protego over an already-fetched robots.txt body.
+    Protego follows RFC 9309 incl. `*`/`$` wildcards and picks the group for our bot name,
+    falling back to `*`."""
 
-    def __init__(self, robots_txt: str, user_agent: str = "*"):
+    def __init__(self, robots_txt: str, user_agent: str = BOT_TOKEN):
         self.user_agent = user_agent
-        self._parser = RobotFileParser()
-        self._parser.parse(_round_up_crawl_delays(robots_txt).splitlines())
+        self._checker = Protego.parse(_round_up_crawl_delays(robots_txt))
 
     def can_fetch(self, url: str) -> bool:
-        return self._parser.can_fetch(self.user_agent, url)
+        return self._checker.can_fetch(url, self.user_agent)
 
     def crawl_delay(self) -> float | None:
         """Seconds to wait between requests per robots.txt, or None if it sets none.
-        `Crawl-delay: N` wins; else `Request-rate: R/S` gives S/R seconds."""
-        delay = self._parser.crawl_delay(self.user_agent)
+        `Crawl-delay` wins; else `Request-rate: R/S` gives S/R seconds."""
+        delay = self._checker.crawl_delay(self.user_agent)
         if delay is not None:
             return float(delay)
-        rate = self._parser.request_rate(self.user_agent)
+        rate = self._checker.request_rate(self.user_agent)
         if rate is not None and rate.requests > 0:
             return rate.seconds / rate.requests
         return None
