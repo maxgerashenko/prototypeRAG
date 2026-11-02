@@ -184,15 +184,18 @@ def join_session(ctx: ActionContext, args: dict) -> str:
         ref, problem = resolve_session(ctx.business_id, ref)
         if ref is None:
             return problem
-    name = args.get("name") if isinstance(args.get("name"), str) else ""
-    if not name.strip():
+    text = lambda key: args[key].strip() if isinstance(args.get(key), str) else ""  # noqa: E731
+    first, last = text("first_name") or text("name"), text("last_name")
+    if not first:
         return "Error: a name for the booking is needed."
     try:
-        r = sessions_.join_session(ctx.business_id, ref, ctx.conversation_id, name, _phone(ctx, args))
+        r = sessions_.join_session(
+            ctx.business_id, ref, ctx.conversation_id, first, _phone(ctx, args), last_name=last
+        )
     except sessions_.SessionError as exc:
         return f"Error: not booked. {exc.message}."
     return (
-        f"Booked {name.strip()} into {r['name']} on {r['when']} ({r['booked']} of {r['max_attendees']} seats taken). "
+        f"Booked {r['guest']} into {r['name']} on {r['when']} ({r['booked']} of {r['max_attendees']} seats taken). "
         f"Reference {r['booking_ref']}. Read the reference to the caller; no confirmation text message is sent."
     )
 
@@ -209,14 +212,15 @@ register(Tool(
     name="join_session",
     description=(
         "Book the caller into a group session from list_sessions until it is full. "
-        "Read the session, time and name back and get a yes first."
+        "Read the session, time and the name (spelled out) back and get a yes first."
     ),
     parameters={
         "session": {"type": "string", "description": "Session code from list_sessions, e.g. 3F9A1C2B."},
-        "name": {"type": "string", "description": "Name the seat is under."},
+        "first_name": {"type": "string", "description": "Caller's first name."},
+        "last_name": {"type": "string", "description": "Caller's last name. Ask for it if they gave only a first name."},
         "phone": {"type": "string", "description": "Only if the caller's number is not known: full international number."},
     },
-    required=("session", "name"),
+    required=("session", "first_name"),
     side_effect=True,
     handler=join_session,
     optional=True,

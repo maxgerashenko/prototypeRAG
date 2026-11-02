@@ -13,10 +13,11 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import Text, cast, select, text
+from sqlalchemy import Text, cast, or_, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.actions import sms
+from app.actions.booking import guests
 from app.actions.booking import session_events as G
 from app.actions.booking.google_client import CalendarError
 from app.db import tenant_session
@@ -358,9 +359,10 @@ def session_ref(sid: uuid.UUID) -> str:
 
 def join_session(
     business_id: uuid.UUID, ref: str, conversation_id: uuid.UUID | None, name: str, phone: str | None = None,
-    now: datetime | None = None,
+    now: datetime | None = None, last_name: str = "",
 ) -> dict:
-    """Put a caller (the conversation) into a session until it is full. -> {ref, name, when, booked,
+    """Put a caller (the conversation) into a session until it is full. `name` is the first name
+    when `last_name` is given, else the full name. The seat belongs to a guest (session_guests). -> {ref, name, when, booked,
     max_attendees, booking_ref}. SessionError carries the reason (full, ended, private, unknown...)."""
     now = now or datetime.now(timezone.utc)
     ref = (ref or "").strip().lower()
@@ -390,16 +392,22 @@ def join_session(
             raise SessionError(403, "This session is private")
         if conversation_id is not None and session.scalar(select(Booking.id).where(
                 Booking.business_id == owner, Booking.session_id == sid, Booking.status == "confirmed",
-                Booking.notes == f"conversation {conversation_id}")):
+                or_(Booking.caller_conversation_id == conversation_id,
+                    Booking.notes == f"conversation {conversation_id}"))):
             raise SessionError(409, "This caller already has a seat in that session")
         booked = G._booked(session, owner, sid)
         if booked >= row.max_attendees:
             raise SessionError(409, "That session is full")
         # the conversation FK needs the same business; across businesses (demo) the id goes into the notes
         linked = conversation_id if owner == business_id else None
+        first, last = (name or "").strip(), (last_name or "").strip()
+        if not last:
+            first, last = guests.split_name(first)
+        guest = guests.find_or_create(session, owner, first or "Caller", last, phone)
         booking = Booking(
             business_id=owner, session_id=sid, type="session", starts_at=row.starts_at, ends_at=row.ends_at,
-            name=(name or "").strip() or "Caller", phone=phone, conversation_id=linked,
+            name=guest.display_name, phone=phone, conversation_id=linked, guest_id=guest.id,
+            caller_conversation_id=conversation_id,
             notes=f"conversation {conversation_id}" if conversation_id else None,
         )
         session.add(booking)
@@ -407,7 +415,7 @@ def join_session(
         zone = _zone(_business(session, owner).timezone)
         result = {
             "ref": session_ref(sid), "name": row.name, "booked": booked + 1, "max_attendees": row.max_attendees,
-            "when": f"{row.starts_at.astimezone(zone):%a %d %b, %H:%M}", "booking_ref": str(booking.id)[:8].upper(),
+            "when": f"{row.starts_at.astimezone(zone):%a %d %b, %H:%M}", "guest": guest.display_name, "booking_ref": str(booking.id)[:8].upper(),
         }
         linked_event = row.external_ref is not None
     if linked_event:  # after the commit; a failed patch keeps the seat, the next sync retries it

@@ -32,8 +32,8 @@ SESSION_PROMPT = (
     "Sessions: for any question about sessions, classes, schedule, specials, what is on today or "
     "what is available, call list_sessions (pass a date if the caller names a day) instead of "
     "saying you have no information. Read the names and times aloud, never the codes. If it lists "
-    "none, say there are no open sessions then. To sign someone up, ask for their name, read back "
-    "the session and time, and after a clear yes call join_session with confirmed=true. Never say "
+    "none, say there are no open sessions then. To sign someone up, ask for their first and last name (ask for the last name if they give only "
+    "a first name), read back the session, time and the name spelled out, and after a clear yes call join_session with confirmed=true. Never say "
     "someone is booked unless the tool said so."
 )
 

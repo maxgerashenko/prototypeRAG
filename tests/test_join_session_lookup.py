@@ -38,9 +38,10 @@ def test_no_or_several_matches_list_the_options(text):
 def test_a_code_is_passed_through(monkeypatch):
     seen = {}
 
-    def join(business_id, ref, conversation_id, name, phone):
+    def join(business_id, ref, conversation_id, name, phone, last_name=""):
         seen["ref"] = ref
-        return {"name": "Sauna Polish", "when": "x", "booked": 1, "max_attendees": 7, "booking_ref": "R1"}
+        return {"name": "Sauna Polish", "when": "x", "booked": 1, "max_attendees": 7, "booking_ref": "R1",
+                "guest": name}
 
     monkeypatch.setattr(tools.sessions_, "join_session", join)
     ctx = type("Ctx", (), {"business_id": uuid.uuid4(), "conversation_id": None})()
