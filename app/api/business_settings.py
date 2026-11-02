@@ -127,7 +127,8 @@ def get_top_questions(
 def put_number(business_id: uuid.UUID, body: NumberIn) -> dict:
     """Give the business one of the account's numbers (and only it). A dialled number must
     find exactly one business (app/voice/twilio_routes.py), so it is taken off every other
-    business in the same transaction."""
+    business in the same transaction. Twilio is set up first (voice + status URLs when the
+    voice URL is empty), so a failure there leaves the database unchanged."""
     number = body.number.strip()
     if not E164.fullmatch(number):
         raise HTTPException(status_code=422, detail="number must look like +15551234567")
@@ -141,6 +142,13 @@ def put_number(business_id: uuid.UUID, body: NumberIn) -> dict:
         raise HTTPException(status_code=503, detail=f"could not read the Twilio numbers ({twilio_numbers.safe_error(exc)})") from exc
     if number not in on_account:
         raise HTTPException(status_code=422, detail="number is not on the Twilio account")
+    try:
+        twilio_numbers.ensure_routed(number)
+    except twilio_numbers.RoutingConflict as exc:
+        raise HTTPException(status_code=409, detail=f"{exc}; clear its voice URL in the Twilio Console first") from exc
+    except Exception as exc:
+        log.warning("could not set up the Twilio number %s: %s", number, exc)
+        raise HTTPException(status_code=503, detail=f"could not set up the number in Twilio ({twilio_numbers.safe_error(exc)})") from exc
     with SessionLocal() as session:
         moved_from = list(session.scalars(
             select(Business.id).where(Business.id != business_id, number == any_(Business.phone_numbers))

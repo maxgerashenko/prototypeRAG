@@ -278,12 +278,14 @@ def test_account_numbers_maps_the_twilio_client(monkeypatch):
 
 
 def test_put_number_moves_it_and_routes_calls(client, biz, other_biz, monkeypatch):
+    routed = []
+    monkeypatch.setattr(twilio_numbers, "ensure_routed", lambda number: routed.append(number) or True)
     monkeypatch.setattr(twilio_numbers, "account_numbers", lambda: _account(NUMBER, OTHER_NUMBER, FREE_NUMBER))
     s = get_settings().model_copy(update={
         "twilio_auth_token": AUTH_TOKEN, "public_base_url": PUBLIC, "twilio_validate_signature": True})
     monkeypatch.setattr(twilio_routes, "get_settings", lambda: s)
     r = client.put(f"/businesses/{other_biz}/number", json={"number": NUMBER})
-    assert r.status_code == 200
+    assert r.status_code == 200 and routed == [NUMBER]
     assert r.json() == {"business_id": str(other_biz), "phone_numbers": [NUMBER], "moved_from": [str(biz)]}
     listed = {b["id"]: b["phone_numbers"] for b in client.get("/businesses").json()}
     assert listed[str(biz)] == [] and listed[str(other_biz)] == [NUMBER]  # replaced, not added
@@ -297,6 +299,7 @@ def test_put_number_moves_it_and_routes_calls(client, biz, other_biz, monkeypatc
 
 
 def test_put_number_errors(client, biz, monkeypatch):
+    monkeypatch.setattr(twilio_numbers, "ensure_routed", lambda number: True)
     monkeypatch.setattr(twilio_numbers, "account_numbers", lambda: _account(NUMBER))
     assert client.put(f"/businesses/{biz}/number", json={"number": "+15550000000"}).status_code == 422
     assert client.put(f"/businesses/{biz}/number", json={"number": "+1 555 000 1111"}).status_code == 422  # not E.164
@@ -307,6 +310,110 @@ def test_put_number_errors(client, biz, monkeypatch):
 
     monkeypatch.setattr(twilio_numbers, "account_numbers", no_creds)
     assert client.put(f"/businesses/{biz}/number", json={"number": NUMBER}).status_code == 503
+
+
+def _fake_twilio(monkeypatch, row):
+    from types import SimpleNamespace
+
+    s = get_settings().model_copy(update={
+        "twilio_account_sid": "AC" + "0" * 32, "twilio_auth_token": "tok", "public_base_url": PUBLIC + "/"})
+    monkeypatch.setattr(twilio_numbers, "get_settings", lambda: s)
+    import twilio.rest
+
+    class FakeClient:
+        def __init__(self, sid, token):
+            self.incoming_phone_numbers = SimpleNamespace(list=lambda phone_number, limit: [row] if row else [])
+
+    monkeypatch.setattr(twilio.rest, "Client", FakeClient)
+
+
+def _row(voice_url, status_callback=None):
+    from types import SimpleNamespace
+
+    row = SimpleNamespace(voice_url=voice_url, status_callback=status_callback, updates=[])
+    row.update = lambda **kw: row.updates.append(kw)
+    return row
+
+
+def test_ensure_routed_sets_both_urls_when_voice_url_is_empty(monkeypatch):
+    row = _row(None)
+    _fake_twilio(monkeypatch, row)
+    assert twilio_numbers.ensure_routed(NUMBER) is True
+    assert row.updates == [{"voice_url": PUBLIC + "/twilio/voice", "voice_method": "POST",
+                            "status_callback": PUBLIC + "/twilio/status", "status_callback_method": "POST"}]
+
+
+def test_ensure_routed_leaves_a_routed_number_alone(monkeypatch):
+    row = _row(PUBLIC + "/twilio/voice", PUBLIC + "/twilio/status")
+    _fake_twilio(monkeypatch, row)
+    assert twilio_numbers.ensure_routed(NUMBER) is False and row.updates == []
+
+
+def test_ensure_routed_fills_a_missing_status_url_only(monkeypatch):
+    row = _row(PUBLIC + "/twilio/voice")
+    _fake_twilio(monkeypatch, row)
+    assert twilio_numbers.ensure_routed(NUMBER) is True
+    assert row.updates == [{"status_callback": PUBLIC + "/twilio/status", "status_callback_method": "POST"}]
+
+
+def test_ensure_routed_accepts_our_url_with_slash_query_or_old_host(monkeypatch):
+    for url in (PUBLIC + "/twilio/voice/", PUBLIC + "/twilio/voice?x=1", "https://old.ngrok.app/twilio/voice"):
+        row = _row(url, PUBLIC + "/twilio/status")
+        _fake_twilio(monkeypatch, row)
+        assert twilio_numbers.ensure_routed(NUMBER) is False and row.updates == []
+
+
+def test_ensure_routed_keeps_a_foreign_status_url(monkeypatch):
+    row = _row(None, "https://other.example/status")
+    _fake_twilio(monkeypatch, row)
+    twilio_numbers.ensure_routed(NUMBER)
+    assert row.updates[0]["status_callback"] == "https://other.example/status"
+
+
+def test_ensure_routed_conflict_message_hides_credentials_and_query(monkeypatch):
+    _fake_twilio(monkeypatch, _row("https://user:secret@elsewhere.example/hook?token=abc"))
+    with pytest.raises(twilio_numbers.RoutingConflict) as e:
+        twilio_numbers.ensure_routed(NUMBER)
+    assert "elsewhere.example/hook" in str(e.value) and "secret" not in str(e.value) and "abc" not in str(e.value)
+
+
+def test_ensure_routed_number_not_on_account(monkeypatch):
+    _fake_twilio(monkeypatch, None)
+    with pytest.raises(RuntimeError, match="not on the Twilio account"):
+        twilio_numbers.ensure_routed(NUMBER)
+
+
+def test_ensure_routed_refuses_a_foreign_voice_url(monkeypatch):
+    row = _row("https://elsewhere.example/hook")
+    _fake_twilio(monkeypatch, row)
+    with pytest.raises(twilio_numbers.RoutingConflict):
+        twilio_numbers.ensure_routed(NUMBER)
+    assert row.updates == []
+
+
+def test_ensure_routed_needs_public_base_url(monkeypatch):
+    _fake_twilio(monkeypatch, _row(None))
+    s = twilio_numbers.get_settings().model_copy(update={"public_base_url": ""})
+    monkeypatch.setattr(twilio_numbers, "get_settings", lambda: s)
+    with pytest.raises(RuntimeError, match="PUBLIC_BASE_URL"):
+        twilio_numbers.ensure_routed(NUMBER)
+
+
+def test_put_number_twilio_failures_leave_the_database_alone(client, biz, monkeypatch):
+    monkeypatch.setattr(twilio_numbers, "account_numbers", lambda: _account(FREE_NUMBER))
+
+    def conflict(number):
+        raise twilio_numbers.RoutingConflict("x already sends calls to https://elsewhere.example/hook")
+
+    monkeypatch.setattr(twilio_numbers, "ensure_routed", conflict)
+    assert client.put(f"/businesses/{biz}/number", json={"number": FREE_NUMBER}).status_code == 409
+
+    def down(number):
+        raise RuntimeError("PUBLIC_BASE_URL is not set")
+
+    monkeypatch.setattr(twilio_numbers, "ensure_routed", down)
+    assert client.put(f"/businesses/{biz}/number", json={"number": FREE_NUMBER}).status_code == 503
+    assert {b["id"]: b["phone_numbers"] for b in client.get("/businesses").json()}[str(biz)] == [NUMBER]  # unchanged
 
 
 def test_safe_error_hides_the_request_uri():

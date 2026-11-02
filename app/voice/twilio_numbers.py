@@ -6,6 +6,7 @@ it. Only these can be assigned (PUT /businesses/{id}/number); buying one stays o
 
 import logging
 import uuid
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter
 from sqlalchemy import select
@@ -39,6 +40,43 @@ def account_numbers() -> list[dict]:
             "routed": voice_path.endswith("/twilio/voice"),
         })
     return result
+
+
+class RoutingConflict(Exception):
+    """The number's voice URL already points somewhere else; we don't overwrite it."""
+
+
+def ensure_routed(number: str) -> bool:
+    """Point the number's voice and status URLs at this app (`PUBLIC_BASE_URL`) when its voice
+    URL is empty. Already ours (path ends /twilio/voice, any host): only a missing status URL
+    is filled. A status URL set to something else is kept. Anything else raises
+    RoutingConflict. Returns True if Twilio was changed."""
+    settings = get_settings()
+    base = settings.public_base_url.rstrip("/")
+    if not base:
+        raise RuntimeError("PUBLIC_BASE_URL is not set")
+    if not settings.twilio_account_sid or not settings.twilio_auth_token:
+        raise RuntimeError("TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN are not set")
+    from twilio.rest import Client
+
+    client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+    found = client.incoming_phone_numbers.list(phone_number=number, limit=1)
+    if not found:
+        raise RuntimeError(f"{number} is not on the Twilio account")
+    current = found[0]
+    voice_url, want_voice, want_status = current.voice_url or "", f"{base}/twilio/voice", f"{base}/twilio/status"
+    if not voice_url:
+        current.update(voice_url=want_voice, voice_method="POST",
+                       status_callback=current.status_callback or want_status, status_callback_method="POST")
+    elif voice_url.split("?", 1)[0].rstrip("/").endswith("/twilio/voice"):  # ours, as the picker's `routed`
+        if current.status_callback:
+            return False
+        current.update(status_callback=want_status, status_callback_method="POST")
+    else:
+        parts = urlsplit(voice_url)  # host only: the URL may carry credentials or tokens
+        raise RoutingConflict(f"{number} already sends calls to {parts.hostname or 'another URL'}{parts.path}")
+    log.info("twilio number %s now routed to %s", number, want_voice)
+    return True
 
 
 def holders(numbers: list[str]) -> dict[str, tuple[uuid.UUID, str]]:
