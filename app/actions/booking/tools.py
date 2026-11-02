@@ -132,10 +132,58 @@ def list_sessions(ctx: ActionContext, args: dict) -> str:
     return "Group sessions (read the name and time to the caller, not the code):\n" + "\n".join(lines)
 
 
+_CODE = re.compile(r"[0-9a-fA-F-]{6,}")
+_CLOCK = re.compile(r"(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?m?\b", re.IGNORECASE)
+
+
+def _starts_at(when: str) -> str:
+    """'Mon 02 Nov, 10:00-11:00' -> '10:00'."""
+    return when.split(",")[-1].strip().split("-")[0]
+
+
+def _mentions_time(text: str, start: str) -> bool:
+    """Does `text` name the 'HH:MM' start, as '10:00', '10 am', '3 pm' or '15:00'?"""
+    hour, minute = (int(x) for x in start.split(":"))
+    for h, m, ap in _CLOCK.findall(text):
+        h, m = int(h), int(m or 0)
+        if m != minute or h > 24:
+            continue
+        if ap:
+            h = h % 12 + (12 if ap.lower() == "p" else 0)
+            if h == hour:
+                return True
+        elif h == hour or (h <= 12 and h % 12 + 12 == hour):
+            return True
+    return False
+
+
+def resolve_session(business_id, text: str) -> tuple[str | None, str]:
+    """The model sometimes passes the session's name and time instead of its code (the codes are
+    not in the call's history from one turn to the next). Look the session up in the open list:
+    -> (code, "") when exactly one matches, else (None, message listing the candidates)."""
+    rows = sessions_.list_open(business_id)
+    words = set(re.findall(r"[a-z0-9]+", text.lower()))
+    named = [r for r in rows if set(re.findall(r"[a-z0-9]+", r["name"].lower())) <= words]
+    timed = [r for r in named if _mentions_time(text, _starts_at(r["when"]))]
+    found = timed or named if len(named) > 1 else named
+    if len(found) == 1:
+        return found[0]["ref"], ""
+    options = found or rows
+    listing = "; ".join(f"{r['ref']} · {r['name']} · {r['when']}" for r in options[:5]) or "none are open"
+    return None, (
+        "Error: not booked. That did not match exactly one session. "
+        + ("Ask the caller which one: " if found else "Open sessions: ") + listing + "."
+    )
+
+
 def join_session(ctx: ActionContext, args: dict) -> str:
     ref = args.get("session")
     if not isinstance(ref, str) or not ref.strip():
         return "Error: the session code from list_sessions is needed."
+    if not _CODE.fullmatch(ref.strip()):
+        ref, problem = resolve_session(ctx.business_id, ref)
+        if ref is None:
+            return problem
     name = args.get("name") if isinstance(args.get("name"), str) else ""
     if not name.strip():
         return "Error: a name for the booking is needed."
