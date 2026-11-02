@@ -29,6 +29,15 @@ Decided with the user (2026-11-02):
 - [x] 5. 1:1 bookings (`create_booking`, internal and Google backends) get a guest and an attendee; `_follow_attendee` cancels a seen-then-removed 1:1 booking
 - [x] Live check on the demo calendar: Google accepted the `@guest.invalid` attendee with displayName and `accepted`; patch with etag and delete worked; no API errors
 
+## Done, not yet committed (second batch, 2026-11-02, built by parallel Sonnet agents, reviewed by sonnet5.5_REVIEW)
+
+- [x] 6. `app/actions/booking/backfill_guests.py` (`python -m app.actions.booking.backfill_guests [--apply] [--business ID]`, dry run by default, idempotent). Past cancelled bookings also get a guest. **Not yet run on the real DB**; keep the sync's attendee comparison off until it has been
+- [x] 7. `private` ↔ Google `visibility` both ways (migration 0019 `calendar_events.visibility`). A Google change applies only if newer than the session's last app update (fixes the race the reviewer found). `public`/`confidential` read as not private
+- [x] 8. `app/api/guests.py`: `GET /businesses/{id}/guests`, `GET /guests/{id}` (phone masked, follows `merged_into`)
+- [x] 10. `POST /guests/{id}/merge`: rows locked in id order; refused (409) when both guests hold a seat in the same session or the target is already merged
+
+Limits found in review: merge does not re-push Google attendees (old fake email stays on events until the next push; the sync may need to treat it as the survivor's); merge does not carry the phone over; `/guests/{id}` paths need a business id or a bypass lookup before RLS (stage 3); no auth on the new routes (stage 1); concurrent-merge lock is untested; session join by short ref can fail with "session not found" when two active sessions share the prefix (flaky `test_join_session_gives_the_seat_to_a_guest`).
+
 ## To do
 
 | # | Step | Executor | Check |

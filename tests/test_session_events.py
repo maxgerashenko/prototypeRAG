@@ -383,3 +383,63 @@ def test_a_guest_added_in_google_books_nothing(cal, biz, monkeypatch):
     G.reconcile_events(CAL, [_session_row(ref, ev, extra)], now=NOW)
     assert _statuses(biz, sid) == {}
     assert "eve_x" not in str(cal.events[ref].get("attendees"))  # and the stray fake attendee is removed
+
+
+# --- private flag <-> event visibility ---------------------------------------------------------------
+
+def test_private_flag_is_written_as_event_visibility(cal, biz):
+    sid, ref = _make(biz, private=True)
+    assert cal.events[ref]["visibility"] == "private"
+    S.update_session(biz, sid, private=False, now=NOW)
+    assert cal.events[ref]["visibility"] == "default"
+    S.update_session(biz, sid, private=True, now=NOW)
+    assert cal.events[ref]["visibility"] == "private"
+    item = S.create_session(biz, DAY, 19, "Open", 2, now=NOW)
+    with tenant_session(biz) as s:
+        assert cal.events[s.get(GroupSession, uuid.UUID(item["id"])).external_ref]["visibility"] == "default"
+
+
+def test_visibility_changed_in_google_flips_private(cal, biz):
+    sid, ref = _make(biz)
+
+    def private():
+        with tenant_session(biz) as s:
+            return s.get(GroupSession, sid).private
+
+    def row(**kw):
+        with tenant_session(biz) as s:
+            r = s.get(GroupSession, sid)
+            return G.EventRow(ref, cal.events[ref]["summary"], r.starts_at, r.ends_at, "confirmed", **kw)
+
+    assert G.reconcile_events(CAL, [row(visibility="private")], now=NOW)["renamed"] == 0
+    assert private() is True
+    assert G.reconcile_events(CAL, [row()], now=NOW) and private() is True  # not read: left alone
+    G.reconcile_events(CAL, [row(visibility="default")], now=NOW)
+    assert private() is False
+
+
+def test_stale_mirror_does_not_undo_a_fresh_app_change_but_newer_google_does(cal, biz):
+    sid, ref = _make(biz)
+    S.update_session(biz, sid, private=True, now=NOW)
+    with tenant_session(biz) as s:
+        r = s.get(GroupSession, sid)
+        app_updated, args = r.updated_at, (ref, cal.events[ref]["summary"], r.starts_at, r.ends_at, "confirmed")
+
+    def private():
+        with tenant_session(biz) as s:
+            return s.get(GroupSession, sid).private
+
+    stale = G.EventRow(*args, visibility="default", google_updated=app_updated - timedelta(minutes=5))
+    G.reconcile_events(CAL, [stale], now=NOW)
+    assert private() is True  # the app's change stays
+    newer = G.EventRow(*args, visibility="default", google_updated=app_updated + timedelta(minutes=5))
+    G.reconcile_events(CAL, [newer], now=NOW)
+    assert private() is False
+
+
+def test_sync_mirror_keeps_visibility():
+    r = calendar_sync.parse_event({"id": "x", "visibility": "private", "start": {"dateTime": "2030-01-01T10:00:00Z"},
+                                   "end": {"dateTime": "2030-01-01T11:00:00Z"}})
+    assert r["visibility"] == "private"
+    assert calendar_sync.parse_event({"id": "y", "start": {"dateTime": "2030-01-01T10:00:00Z"},
+                                      "end": {"dateTime": "2030-01-01T11:00:00Z"}})["visibility"] == "default"

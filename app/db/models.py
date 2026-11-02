@@ -530,6 +530,7 @@ class CalendarEvent(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="confirmed")
     transparency: Mapped[str] = mapped_column(Text, nullable=False, server_default="opaque")
     google_updated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    visibility: Mapped[str | None] = mapped_column(Text)  # Google's: default/public/private/confidential; None = not read
     # [{"email", "displayName", "responseStatus"}] as Google lists them; None = not read yet
     attendees: Mapped[list | None] = mapped_column(JSONB)
     synced_at: Mapped[datetime] = _now()

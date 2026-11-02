@@ -78,6 +78,7 @@ def parse_event(item: dict) -> dict | None:
         "summary": item.get("summary"),
         "status": item.get("status") if item.get("status") in ("confirmed", "tentative", "cancelled") else "confirmed",
         "transparency": "transparent" if item.get("transparency") == "transparent" else "opaque",
+        "visibility": item.get("visibility") or "default",
         "google_updated": datetime.fromisoformat(updated.replace("Z", "+00:00")) if updated else None,
         "attendees": [
             {"email": a["email"], "displayName": a.get("displayName", ""), "responseStatus": a.get("responseStatus", "")}
