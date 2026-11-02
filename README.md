@@ -17,6 +17,8 @@ Detailed plan per part:
 8. [Voice tuning](plan/VOICE_TUNING.md) — every setting and feature that affects the speed and quality of replies
 9. [Crawler, database & retrieval tuning](plan/CRAWLER_TUNING.md) — every setting and feature that affects crawl speed, how data is stored and retrieved, and answer quality
 
+Layer docs (how the code is built today, one file per layer): [docs/README.md](docs/README.md)
+
 Feature plans: [Pull-to-refresh in the voice app](plan/feature-pull-to-refresh.md) (#124) · [Business settings screen](plan/feature-business-settings.md) (#144–#147) · [Group sessions in Bookings](plan/feature-bookings-sessions.md)
 
 Comparisons: [Crawler vs Scrapy, PDF vs MarkItDown](plan/comparison-scrapy-markitdown.md) (#116)
