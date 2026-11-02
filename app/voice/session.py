@@ -483,12 +483,17 @@ class CallSession:
             {"role": "user", "content": text},
         ]
         client = get_async_chat_client()
-        for _ in range(MAX_TOOL_ROUNDS):
+        for round_no in range(MAX_TOOL_ROUNDS + 1):
             round_start = len(spoken)
             settings = get_settings()
+            # the last round has no tools: a turn that used all its tool rounds (e.g. a booking that
+            # went through on the third call) still gets spoken, instead of "couldn't find that"
+            # over a booking that exists
+            final = round_no == MAX_TOOL_ROUNDS
             stream = await client.chat.completions.create(
-                model=settings.llm_model, messages=messages, tools=self._tools, stream=True,
+                model=settings.llm_model, messages=messages, stream=True,
                 reasoning_effort=settings.voice_reasoning_effort,
+                **({} if final else {"tools": self._tools}),
             )
             buffer = ""
             calls: dict[int, dict] = {}
@@ -515,6 +520,8 @@ class CallSession:
                 await self._say(buffer.strip(), spoken, play_ends, speech_end, timings)
             if not calls:
                 return
+            if final:
+                break
 
             timings.setdefault("tool_start_ms", _ms(speech_end))
             messages.append({

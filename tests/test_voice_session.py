@@ -356,6 +356,45 @@ def test_tool_rounds_send_only_their_own_text(business, monkeypatch):
         "Let me check.", "One moment.", "We close at 5 pm."]
 
 
+class ThreeToolRoundsLLM(FakeLLM):
+    """Three tool rounds in a row, then the answer -- the shape of 'wrong code, list again, book'."""
+
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:
+            return await super()._create(**kwargs)
+        self.requests.append(kwargs)
+        n = len(self.requests)
+        if n <= 3:
+            pieces = [_chunk(tool_calls=[_tool_call_delta(0, id=f"call_{n}", name="search_business_info", arguments='{"query": "x"}')])]
+        else:
+            pieces = [_chunk("You are booked.")]
+
+        async def gen():
+            for p in pieces:
+                yield p
+
+        return gen()
+
+
+def test_answer_is_spoken_after_all_tool_rounds_are_used(business, monkeypatch):
+    llm = ThreeToolRoundsLLM()
+    s, _, events = _make_session(business, llm, monkeypatch)
+    monkeypatch.setattr(session_mod, "run_tool", lambda *a: "Booked.")
+
+    async def run():
+        await s.start()
+        await s._reply_task  # greeting
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task  # the turn
+        await s.close()
+
+    run_async(run())
+
+    assert len(llm.requests) == 4 and "tools" not in llm.requests[3] and "tools" in llm.requests[2]
+    replies = [e["text"] for e in events if e["type"] == "reply"][1:]
+    assert replies == ["You are booked."]  # not "Sorry, I couldn't find that"
+
+
 def test_barge_in_clears_playback_and_cancels_reply(business, monkeypatch):
     s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
 
