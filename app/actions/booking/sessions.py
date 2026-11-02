@@ -400,10 +400,7 @@ def join_session(
             raise SessionError(409, "That session is full")
         # the conversation FK needs the same business; across businesses (demo) the id goes into the notes
         linked = conversation_id if owner == business_id else None
-        first, last = (name or "").strip(), (last_name or "").strip()
-        if not last:
-            first, last = guests.split_name(first)
-        guest = guests.find_or_create(session, owner, first or "Caller", last, phone)
+        guest = guests.for_caller(session, owner, name, last_name, phone)
         booking = Booking(
             business_id=owner, session_id=sid, type="session", starts_at=row.starts_at, ends_at=row.ends_at,
             name=guest.display_name, phone=phone, conversation_id=linked, guest_id=guest.id,

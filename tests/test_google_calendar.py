@@ -81,6 +81,12 @@ class FakeMirror:
         return found
 
 
+@pytest.fixture(autouse=True)
+def no_attendees(monkeypatch):
+    """The dev .env may hold an OAuth token path; attendees are written only with one."""
+    monkeypatch.setattr("app.actions.booking.guests.attendees_enabled", lambda: False)
+
+
 @pytest.fixture
 def cal():
     return FakeCalendar()
@@ -129,6 +135,7 @@ def test_create_inserts_event_and_stores_its_id(backend, cal, business_id):
     assert event["start"] == {"dateTime": "2026-11-05T14:00:00-05:00", "timeZone": NY}
     assert event["end"]["dateTime"] == "2026-11-05T15:00:00-05:00"
     assert "Anna" in event["summary"] and "table for 2" in event["summary"]
+    assert "attendees" not in event  # no OAuth token: a service account can't add them
     for want in ("Name: Anna", "Phone: ...0100", "People: 2", "Notes: window seat", f"Reference: {res.reference}",
                  f"Conversation: http://localhost:8000/web/#conversation={cid}"):
         assert want in event["description"]
@@ -142,7 +149,7 @@ def test_create_inserts_event_and_stores_its_id(backend, cal, business_id):
 def test_service_makes_an_appointment_with_its_duration(backend, cal, business_id):
     assert backend.create(business_id, _req(service="Massage", party_size=None), NOW).ok
     (event,) = cal.events.values()
-    assert event["end"]["dateTime"] == "2026-11-05T15:30:00-05:00" and event["summary"] == "Anna - Massage"
+    assert event["end"]["dateTime"] == "2026-11-05T15:30:00-05:00" and event["summary"] == "Anna 0100 - Massage"
     assert _row(business_id).type == "appointment"
 
 
@@ -403,3 +410,41 @@ def test_booking_backend_setting_picks_the_backend(monkeypatch):
         finally:
             monkeypatch.delenv("BOOKING_BACKEND")
             get_settings.cache_clear()
+
+
+def test_booking_makes_a_guest_and_writes_it_as_attendee_with_a_token(backend, cal, business_id, monkeypatch):
+    from app.db.models import SessionGuest
+    monkeypatch.setattr("app.actions.booking.guests.attendees_enabled", lambda: True)
+    res = backend.create(business_id, _req(name="Anna", last_name="Lee"), NOW)
+    assert res.ok
+    (event,) = cal.events.values()
+    (att,) = event["attendees"]
+    assert att["email"] == "anna_lee@guest.invalid" and att["displayName"] == "Anna Lee"
+    assert att["responseStatus"] == "accepted"
+    with tenant_session(business_id) as s:
+        g = s.scalars(select(SessionGuest).where(SessionGuest.business_id == business_id)).one()
+        b = s.scalars(select(Booking).where(Booking.business_id == business_id)).one()
+        assert b.guest_id == g.id and b.name == "Anna Lee"
+
+
+def _follow(business_id, event_id, attendees, now):
+    from app.actions.booking.calendar_sync import SyncResult, _follow_attendee
+    res = SyncResult(full=False)
+    with tenant_session(business_id) as s:
+        _follow_attendee(s, event_id, attendees, now, res)
+    return res
+
+
+def test_removed_or_declined_guest_cancels_a_seen_booking_only(backend, cal, business_id, monkeypatch):
+    monkeypatch.setattr("app.actions.booking.guests.attendees_enabled", lambda: True)
+    assert backend.create(business_id, _req(name="Anna", last_name="Lee"), NOW).ok
+    (eid,) = cal.events
+    here = [{"email": "anna_lee@guest.invalid", "responseStatus": "accepted"}]
+    assert _follow(business_id, eid, [], NOW).bookings_cancelled == 0  # never seen: left alone
+    assert _row(business_id).status == "confirmed" and _row(business_id).attendee_seen_at is None
+    _follow(business_id, eid, here, NOW)
+    assert _row(business_id).attendee_seen_at is not None
+    assert _follow(business_id, eid, here, NOW).bookings_cancelled == 0
+    declined = [{"email": "anna_lee@guest.invalid", "responseStatus": "declined"}]
+    assert _follow(business_id, eid, declined, NOW).bookings_cancelled == 1
+    assert _row(business_id).status == "cancelled"

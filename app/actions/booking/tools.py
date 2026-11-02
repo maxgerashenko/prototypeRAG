@@ -71,7 +71,8 @@ def _request(ctx: ActionContext, args: dict, phone: str | None = None) -> Bookin
     return BookingRequest(
         day=args["date"], at=args["time"], party_size=party,
         service=args.get("service") if isinstance(args.get("service"), str) else None,
-        name=str(args.get("name") or ""), phone=phone,
+        name=str(args.get("first_name") or args.get("name") or ""),
+        last_name=str(args.get("last_name") or ""), phone=phone,
         notes=args.get("notes") if isinstance(args.get("notes"), str) else None,
         conversation_id=ctx.conversation_id,
     )
@@ -237,15 +238,16 @@ register(Tool(
     name="create_booking",
     description=(
         "Book a table or an appointment. Check availability first, read all details back "
-        "(date, time, people, service, name) and get a yes."
+        "(date, time, people, service, name spelled out) and get a yes."
     ),
     parameters={
         "date": _DATE, "time": _TIME, "party_size": _PARTY, "service": _SERVICE,
-        "name": {"type": "string", "description": "Name the booking is under."},
+        "first_name": {"type": "string", "description": "Caller's first name."},
+        "last_name": {"type": "string", "description": "Caller's last name. Ask for it if they gave only a first name."},
         "phone": {"type": "string", "description": "Only if the caller's number is not known: full international number."},
         "notes": {"type": "string", "description": "Anything else the caller asked for."},
     },
-    required=("date", "time", "name"),
+    required=("date", "time", "first_name"),
     side_effect=True,
     handler=create_booking,
     optional=True,

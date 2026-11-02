@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
 from app.actions.booking import calendar_sync
-from app.actions.booking.guests import DOMAIN
+from app.actions.booking.guests import DOMAIN, NO_GUEST_VISIBILITY, attendees_enabled
 from app.actions.booking.google_calendar import calendar_id_for
 from app.actions.booking.google_client import CalendarClient
 from app.actions.booking.google_client import CalendarError, EventExists, PreconditionFailed
@@ -106,12 +106,6 @@ def _booked(session, business_id: uuid.UUID, sid: uuid.UUID) -> int:
         Booking.business_id == business_id, Booking.session_id == sid, Booking.status == "confirmed")) or 0
 
 
-def attendees_enabled() -> bool:
-    """Guests are written as event attendees only with the OAuth user token: a service account
-    can't add attendees to a Gmail calendar (403 forbiddenForServiceAccounts)."""
-    return bool(get_settings().google_calendar_token_file)
-
-
 def _fake(attendee: dict) -> bool:
     return str(attendee.get("email", "")).lower().endswith(f"@{DOMAIN}")
 
@@ -125,7 +119,7 @@ def _guest_attendees(session, business_id: uuid.UUID, sid: uuid.UUID) -> list[di
         .where(Booking.business_id == business_id, Booking.session_id == sid, Booking.status == "confirmed")
         .order_by(SessionGuest.email)
     ).all()
-    return [{"email": e, "displayName": n, "responseStatus": "accepted"} for e, n in rows]
+    return [{"email": e, "displayName": n, "responseStatus": "accepted"} for e, n in rows]  # as guests.attendee()
 
 
 def _attendee_patch(event: dict, want: list[dict]) -> dict:
@@ -138,7 +132,7 @@ def _attendee_patch(event: dict, want: list[dict]) -> dict:
         return {}
     return {
         "attendees": [a for a in have if not _fake(a)] + want,
-        "guestsCanSeeOtherGuests": False, "guestsCanInviteOthers": False, "guestsCanModify": False,
+        **NO_GUEST_VISIBILITY,
     }
 
 

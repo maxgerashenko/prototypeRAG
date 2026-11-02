@@ -20,7 +20,7 @@ BOOKING_TOOLS = ("check_availability", "create_booking", "cancel_booking")
 BOOKING_PROMPT = (
     "Bookings: when the caller wants to book a table or an appointment, call check_availability "
     "first and offer only times it says are free. Then read all the details back (date, time, "
-    "people, service, name) and wait for a clear yes before calling create_booking with "
+    "people, service, first and last name spelled out; ask for the last name if they gave only a first name) and wait for a clear yes before calling create_booking with "
     "confirmed=true; if they say no or change their mind, don't book. Read the booking reference "
     "aloud afterwards. To cancel, ask for the reference and call cancel_booking, again only after "
     "a yes. Never say something is booked or cancelled unless the tool said so."

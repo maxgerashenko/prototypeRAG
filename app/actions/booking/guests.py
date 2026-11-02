@@ -12,6 +12,7 @@ import uuid
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db.models import SessionGuest
 
 DOMAIN = "guest.invalid"
@@ -117,3 +118,27 @@ def find_or_create(
     session.add(guest)
     session.flush()
     return guest
+
+
+def for_caller(session, business_id: uuid.UUID, name: str, last_name: str = "", phone: str | None = None) -> SessionGuest:
+    """The guest for a caller's name as the booking tools get it: `name` is the first name when
+    `last_name` is given, else the full name (the last word is then the last name)."""
+    first, last = " ".join((name or "").split()), " ".join((last_name or "").split())
+    if not last:
+        first, last = split_name(first)
+    return find_or_create(session, business_id, first or "Caller", last, phone)
+
+
+def attendees_enabled() -> bool:
+    """Guests are written as event attendees only with the OAuth user token: a service account
+    can't add attendees to a Gmail calendar (403 forbiddenForServiceAccounts)."""
+    return bool(get_settings().google_calendar_token_file)
+
+
+def attendee(guest: SessionGuest) -> dict:
+    """The guest as a Google event attendee. Marked accepted so Google shows no 'awaiting
+    response'; the real spelling goes in displayName."""
+    return {"email": guest.email, "displayName": guest.display_name, "responseStatus": "accepted"}
+
+
+NO_GUEST_VISIBILITY = {"guestsCanSeeOtherGuests": False, "guestsCanInviteOthers": False, "guestsCanModify": False}
