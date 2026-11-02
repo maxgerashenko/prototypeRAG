@@ -1,7 +1,7 @@
-# Layer 7 — `web` (front end)
+# Web layer
 
 Read from `main` at `75d3bfd` (2026-11-02). Describes what exists; nothing was changed.
-Layer map: `architecture/layers.md` in the project files. Sibling docs: [crawler.md](crawler.md),
+Layer map: [README.md](README.md). Sibling docs: [crawler.md](crawler.md),
 [data.md](data.md), [voice.md](voice.md), [actions.md](actions.md),
 [integrations.md](integrations.md), [api.md](api.md).
 
