@@ -188,6 +188,7 @@ class EventRow:
     transparency: str = "opaque"
     kind: str = "external"  # "booking" / "session" / "external"
     etag: str | None = None
+    attendees: list | None = None  # None = not read (attendees are not compared then)
 
 
 def _owner_business(session, calendar_id: str) -> uuid.UUID | None:
@@ -205,10 +206,41 @@ def _owner_business(session, calendar_id: str) -> uuid.UUID | None:
     return None
 
 
+def _compare_guests(session, row: GroupSession, attendees: list, now: datetime, retitle: list) -> int:
+    """Google is the truth for who sits in a session, but only for removals: a guest the app
+    wrote and the sync has seen (attendee_seen_at) who is gone or declined loses the seat (no text
+    message, as for a deleted session). Adding a guest in Google books nothing: seats are only
+    taken from the app or by voice, which check the limit. A guest not seen yet is pushed again
+    (a failed attendee write), and so is any difference in the guest-domain attendees.
+    Returns how many bookings were cancelled."""
+    by_email = {a["email"].lower(): a for a in attendees}
+    cancelled = 0
+    for b, email in session.execute(
+        select(Booking, SessionGuest.email)
+        .join(SessionGuest, (SessionGuest.business_id == Booking.business_id) & (SessionGuest.id == Booking.guest_id))
+        .where(Booking.business_id == row.business_id, Booking.session_id == row.id, Booking.status == "confirmed")
+    ).all():
+        a = by_email.get(email.lower())
+        if a is not None and a.get("responseStatus") != "declined":
+            if b.attendee_seen_at is None:
+                b.attendee_seen_at = now
+        elif b.attendee_seen_at is not None:
+            b.status, b.cancelled_at = "cancelled", now
+            cancelled += 1
+    session.flush()
+    want = {e for (e,) in session.execute(
+        select(SessionGuest.email).join(Booking, (Booking.business_id == SessionGuest.business_id) & (Booking.guest_id == SessionGuest.id))
+        .where(Booking.business_id == row.business_id, Booking.session_id == row.id, Booking.status == "confirmed"))}
+    have = {a["email"].lower() for a in attendees if _fake(a)}
+    if want != have and (row.business_id, row.id) not in retitle:
+        retitle.append((row.business_id, row.id))
+    return cancelled
+
+
 def reconcile_events(calendar_id: str, events: Iterable[EventRow], now: datetime | None = None) -> dict:
     """Apply the mirrored events to `sessions`. Returns counts {created, moved, renamed, cancelled}."""
     now = now or datetime.now(timezone.utc)
-    counts = {"created": 0, "moved": 0, "renamed": 0, "cancelled": 0}
+    counts = {"created": 0, "moved": 0, "renamed": 0, "cancelled": 0, "unbooked": 0}
     retitle: list[tuple[uuid.UUID, uuid.UUID]] = []
     # Demo rule (Max, 2026-11-01): every event belongs to every business, so sessions are looked up by
     # event id only. business_id is stored but not filtered on.
@@ -256,8 +288,11 @@ def reconcile_events(calendar_id: str, events: Iterable[EventRow], now: datetime
             if name != row.name:
                 row.name, row.updated_at = name, now
                 counts["renamed"] += 1
+            if e.attendees is not None and attendees_enabled():
+                counts["unbooked"] += _compare_guests(session, row, e.attendees, now, retitle)
             if e.summary != title(row.name, _booked(session, row.business_id, row.id), row.max_attendees):
-                retitle.append((row.business_id, row.id))
+                if (row.business_id, row.id) not in retitle:
+                    retitle.append((row.business_id, row.id))
     for business_id, sid in retitle:  # after the commit: writes to Google must not hold the transaction
         push_title(business_id, sid)
     return counts
@@ -284,7 +319,7 @@ def reconcile_sessions(calendar_id: str) -> dict | None:
             Booking.external_ref.in_([r.google_event_id for r in rows]))))
         events = [
             EventRow(r.google_event_id, r.summary or "", r.starts_at, r.ends_at, r.status, r.transparency,
-                     "booking" if r.google_event_id in booking_events else "external", r.etag)
+                     "booking" if r.google_event_id in booking_events else "external", r.etag, r.attendees)
             for r in rows
         ]
     return reconcile_events(calendar_id, events)

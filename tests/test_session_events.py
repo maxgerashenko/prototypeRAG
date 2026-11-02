@@ -213,7 +213,7 @@ def test_typed_event_becomes_a_joinable_session(cal, biz, monkeypatch):
     # the title we wrote comes back through the sync: nothing changes, nothing is re-patched
     n = cal.n
     assert G.reconcile_events(CAL, [_ev(summary=cal.events["g1"]["summary"], hours=2)], now=NOW) == {
-        "created": 0, "moved": 0, "renamed": 0, "cancelled": 0}
+        "created": 0, "moved": 0, "renamed": 0, "cancelled": 0, "unbooked": 0}
     assert cal.n == n
     r = S.join_session(biz, rows[0]["ref"], _conv(biz), "Ann", now=NOW)
     assert r["booked"] == 1
@@ -330,3 +330,56 @@ def test_no_attendees_without_the_oauth_token(cal, biz, monkeypatch):
     sid, ref = _make(biz)
     S.join_session(biz, S.session_ref(sid), _conv(biz), "Ann", now=NOW, last_name="Lee")
     assert "attendees" not in cal.events[ref]
+
+
+def _session_row(ref, ev, attendees):
+    return G.EventRow(ref, ev["summary"], NOW + timedelta(days=1), NOW + timedelta(days=1, hours=1), "confirmed",
+                      kind="session", attendees=attendees)
+
+
+def _statuses(biz, sid):
+    with tenant_session(biz) as s:
+        return {b.name: (b.status, b.attendee_seen_at is not None)
+                for b in s.scalars(select(Booking).where(Booking.session_id == sid))}
+
+
+def test_sync_marks_attendees_seen_and_cancels_a_guest_removed_or_declined_in_google(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=4)
+    code = S.session_ref(sid)
+    for first in ("Ann", "Bob", "Cy"):
+        S.join_session(biz, code, _conv(biz), first, now=NOW, last_name="Lee")
+    ev = cal.events[ref]
+    G.reconcile_events(CAL, [_session_row(ref, ev, ev["attendees"])], now=NOW)
+    assert all(seen for _, seen in _statuses(biz, sid).values())  # first pass: all three seen
+    attendees = [a for a in ev["attendees"] if a["email"] != "bob_lee@guest.invalid"]  # owner removes Bob
+    for a in attendees:
+        if a["email"] == "cy_lee@guest.invalid":
+            a["responseStatus"] = "declined"  # and Cy declines
+    counts = G.reconcile_events(CAL, [_session_row(ref, ev, attendees)], now=NOW)
+    assert counts["unbooked"] == 2
+    assert {n: st for n, (st, _) in _statuses(biz, sid).items()} == {
+        "Ann Lee": "confirmed", "Bob Lee": "cancelled", "Cy Lee": "cancelled"}
+    assert cal.events[ref]["summary"].endswith("1/4 attendees")  # title follows, no text message sent
+
+
+def test_a_guest_not_seen_yet_is_pushed_again_not_cancelled(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=3)
+    cal.fail.add("patch")
+    S.join_session(biz, S.session_ref(sid), _conv(biz), "Ann", now=NOW, last_name="Lee")
+    assert "attendees" not in cal.events[ref]
+    cal.fail.clear()
+    counts = G.reconcile_events(CAL, [_session_row(ref, cal.events[ref], [])], now=NOW)
+    assert counts["unbooked"] == 0 and _statuses(biz, sid)["Ann Lee"][0] == "confirmed"
+    assert [a["email"] for a in cal.events[ref]["attendees"]] == ["ann_lee@guest.invalid"]
+
+
+def test_a_guest_added_in_google_books_nothing(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=3)
+    ev = cal.events[ref]
+    extra = [{"email": "eve_x@guest.invalid", "displayName": "Eve X", "responseStatus": "accepted"}]
+    G.reconcile_events(CAL, [_session_row(ref, ev, extra)], now=NOW)
+    assert _statuses(biz, sid) == {}
+    assert "eve_x" not in str(cal.events[ref].get("attendees"))  # and the stray fake attendee is removed

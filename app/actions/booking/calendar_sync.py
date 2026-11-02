@@ -78,6 +78,10 @@ def parse_event(item: dict) -> dict | None:
         "status": item.get("status") if item.get("status") in ("confirmed", "tentative", "cancelled") else "confirmed",
         "transparency": "transparent" if item.get("transparency") == "transparent" else "opaque",
         "google_updated": datetime.fromisoformat(updated.replace("Z", "+00:00")) if updated else None,
+        "attendees": [
+            {"email": a["email"], "displayName": a.get("displayName", ""), "responseStatus": a.get("responseStatus", "")}
+            for a in item.get("attendees") or [] if a.get("email")
+        ],
     }
     if start is None or end is None:
         return row if row["status"] == "cancelled" else None
