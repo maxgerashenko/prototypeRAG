@@ -32,7 +32,7 @@ HTTP routes.
 | Google Text-to-Speech | `app/voice/tts.py` | `app/voice/` |
 | Google credentials check (ADC) | `app/voice/google_auth.py` | `app/voice/` |
 | Twilio REST (account numbers) | `app/voice/twilio_numbers.py` (`account_numbers`, `safe_error`) | `app/voice/` |
-| Twilio webhooks, tokens, TwiML | parts of `app/voice/twilio_routes.py` (no separate client, see §4) | `app/voice/` |
+| Twilio webhooks, tokens, TwiML | none yet, see V-3 (`app/voice/twilio_routes.py` is the api layer) | — |
 | Google Calendar REST | `app/actions/booking/google_client.py` | `app/actions/booking/` |
 | Google Places (New) | `app/ingest/places.py` | `app/ingest/` |
 | SMS (mock) | `app/actions/sms.py` | `app/actions/` |
@@ -151,7 +151,9 @@ so). It covers STT/TTS only; the calendar client has its own auth (§2.6).
 
 ### 2.5 Twilio (`app/voice/twilio_numbers.py`, `app/voice/twilio_routes.py`, web Voice SDK)
 
-**What it offers.**
+**What it offers.** Only `twilio_numbers.py` is an integration file today; the rows from
+`twilio_routes.py`, `ws.py` and `web/` are listed so the Twilio wire format is in one place,
+but that code belongs to [api.md](api.md) and [web.md](web.md) until V-3 is done.
 
 | Piece | Where | Does |
 |---|---|---|
