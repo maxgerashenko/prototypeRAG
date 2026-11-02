@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import delete, select
 
+from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, Chunk, Fact, FactSource, Location, Page
 from app.ingest import facts as facts_mod
@@ -339,7 +340,7 @@ def test_fact_calls_are_bounded(monkeypatch):
                 content_hash="d1", page_type="service")
     facts_mod.extract_page_facts(page, "Bathhouse", {})
     assert seen and all(
-        kw["max_tokens"] == facts_mod.FACT_MAX_TOKENS and kw["timeout"] == facts_mod.FACT_TIMEOUT_SECONDS for kw in seen
+        kw["max_tokens"] == get_settings().facts_max_tokens and kw["timeout"] == facts_mod.FACT_TIMEOUT_SECONDS for kw in seen
     )
 
 
@@ -441,3 +442,97 @@ def test_rekey_unchanged_active_meets_changed_key_owner_wins_confidence_stays_un
         assert (fact.id, fact.fact_key, fact.status, fact.confidence) == (owner_id, new_key, "active", None)
         # both rows were backed by the same page: one source, not two
         assert len(s.scalars(select(FactSource).where(FactSource.fact_id == fact.id)).all()) == 1
+
+
+def test_fact_schema_limits_location_to_valid_values(monkeypatch):
+    # gemma looped inside a free-text location field; the enum makes that impossible to write
+    seen = []
+    monkeypatch.setattr(facts_mod, "chat_json", lambda messages, schema, *a, **kw: seen.append(schema) or {"facts": []})
+    page = Page(business_id=uuid.uuid4(), url="https://x.com/day-pass", markdown="# Day Pass", content_hash="d1",
+                page_type="service")
+    facts_mod.extract_page_facts(page, "Bathhouse", {"Williamsburg": uuid.uuid4(), "Flatiron": uuid.uuid4()})
+    location = seen[0]["properties"]["facts"]["items"]["properties"]["location"]
+    assert location == {"type": "string", "enum": ["this", "all", "Flatiron", "Williamsburg"]}
+    assert facts_mod.fact_schema()["properties"]["facts"]["items"]["properties"]["location"]["enum"] == ["this", "all"]
+    # unique values only: a location called "All" or an empty name adds nothing
+    odd = facts_mod.fact_schema(["All", "", "  ", "Flatiron", "Flatiron"])
+    assert odd["properties"]["facts"]["items"]["properties"]["location"]["enum"] == ["this", "all", "Flatiron"]
+
+
+# --- D21-C: which model reads the pages ---------------------------------------------------
+
+
+def test_flag_picks_the_backend_and_no_choice_without_a_terminal_keeps_the_old_path(monkeypatch):
+    monkeypatch.setattr(get_settings(), "facts_model_choice", "")
+    monkeypatch.setattr(run.sys.stdin, "isatty", lambda: False)
+    assert run.choose_facts_backend(None, 3) is None  # cron / tests: FACTS_LLM_MODEL, schema mode
+    qwen = run.choose_facts_backend("qwen", 3)
+    assert qwen.prompted and not qwen.cloud and qwen.model == get_settings().facts_qwen_model
+    assert run.choose_facts_backend("gemma", 3).prompted is False
+    with pytest.raises(ValueError):
+        run.choose_facts_backend("gpt", 3)
+
+
+def test_terminal_run_asks_until_the_answer_is_valid(monkeypatch):
+    monkeypatch.setattr(run.sys.stdin, "isatty", lambda: True)
+    answers = iter(["maybe", " Haiku "])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    assert run.choose_facts_backend(None, 5).name == "haiku"
+
+
+def test_chosen_backend_reaches_the_call(monkeypatch):
+    seen = []
+    monkeypatch.setattr(facts_mod, "chat_json", lambda *a, **kw: seen.append(kw) or {"facts": []})
+    monkeypatch.setattr(facts_mod, "get_anthropic_client", lambda: "anthropic-client")
+    page = Page(business_id=uuid.uuid4(), url="https://x.com/d", markdown="# D\n\nStarts at $39.", content_hash="d", page_type="service")
+    facts_mod.extract_page_facts(page, "Bathhouse", {}, backend=facts_mod.facts_backend("haiku"))
+    assert seen[0]["client"] == "anthropic-client" and seen[0]["prompted"] and seen[0]["model"] == get_settings().facts_haiku_model
+
+
+def test_prompted_json_puts_the_schema_in_the_prompt_and_cuts_the_object_out(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import llm
+
+    calls = []
+
+    def create(**kw):
+        calls.append(kw)
+        msg = SimpleNamespace(content='Sure!\n```json\n{"facts": []}\n```')
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    out = llm.chat_json([{"role": "system", "content": "S"}, {"role": "user", "content": "U"}], {"type": "object"},
+                        model="claude-haiku-5-5", client=client, prompted=True)
+    assert out == {"facts": []}
+    kw = calls[0]
+    assert "response_format" not in kw and "temperature" not in kw  # Anthropic rejects temperature
+    assert kw["messages"][0]["content"].startswith("S") and '"type": "object"' in kw["messages"][0]["content"]
+    llm.chat_json([{"role": "system", "content": "S"}], {}, model="qwen/x", client=client, prompted=True)
+    assert calls[1]["temperature"] == 0
+
+
+def test_missing_anthropic_key_fails_before_any_page(monkeypatch):
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "")
+    facts_mod.get_anthropic_client.cache_clear()
+    with pytest.raises(LookupError, match="ANTHROPIC_API_KEY"):
+        facts_mod.facts_backend("haiku")
+
+
+def test_backend_token_caps(monkeypatch):
+    assert facts_mod.facts_backend("gemma").max_tokens == get_settings().facts_max_tokens == 4000
+    assert facts_mod.facts_backend("qwen").max_tokens == get_settings().facts_thinking_max_tokens
+
+
+@pytest.mark.parametrize("answer", [
+    '<think>{"facts": [1]}</think>{"facts": []}',
+    'Here: {"facts": []}\nNote: {see above}',
+    '{"facts": []} trailing {',
+    '{oops} {"facts": []}',
+])
+def test_first_json_object_edge_cases(answer):
+    from app.llm import _first_json_object
+
+    assert _first_json_object(answer) == {"facts": []}
+    with pytest.raises(ValueError):
+        _first_json_object('{"facts": [')

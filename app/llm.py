@@ -6,6 +6,7 @@ LangChain/LlamaIndex, no provider classes).
 import asyncio
 import json
 import logging
+import re
 import time
 from functools import lru_cache, wraps
 
@@ -20,6 +21,15 @@ log = logging.getLogger(__name__)
 def get_chat_client() -> OpenAI:
     settings = get_settings()
     return instrument(OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key))
+
+
+@lru_cache(maxsize=1)
+def get_anthropic_client() -> OpenAI:
+    """Claude through Anthropic's OpenAI-compatible endpoint (D21-C; same `openai` client, DEC-20)."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise LookupError("ANTHROPIC_API_KEY is not set (.env) -- needed for the haiku choice")
+    return instrument(OpenAI(base_url=settings.anthropic_base_url, api_key=settings.anthropic_api_key))
 
 
 @lru_cache(maxsize=1)
@@ -63,16 +73,23 @@ def chat(messages: list[dict], **kwargs) -> str:
 def chat_json(
     messages: list[dict], schema: dict, schema_name: str = "result", model: str | None = None,
     max_tokens: int | None = None, timeout: float | None = None,
+    client: OpenAI | None = None, prompted: bool = False,
 ) -> dict:
     """Structured extraction (e.g. business profile, Part 1) via `response_format`.
     `model` overrides `LLM_MODEL` for one call (e.g. `FACTS_LLM_MODEL`, OPEN-20).
     `max_tokens` / `timeout` bound a runaway answer (a model looping inside the JSON);
-    with a `timeout` the call is not retried -- the caller decides what a failure means."""
-    client = get_chat_client()
+    with a `timeout` the call is not retried -- the caller decides what a failure means.
+    `client` replaces the local chat client (e.g. Anthropic's). `prompted`: the schema goes
+    into the system message instead of `response_format` and the JSON object is cut out of
+    the answer -- a thinking model (qwen3.6) can't think under a grammar and answers an
+    empty list (P17), and Anthropic's endpoint has no json_schema mode here."""
+    client = client or get_chat_client()
     if timeout is not None:
         # with_options copies the client, so the copy needs the call logging again
         client = instrument(client.with_options(timeout=timeout, max_retries=0))
     extra = {"max_tokens": max_tokens} if max_tokens is not None else {}
+    if prompted:
+        return _prompted_json(client, messages, schema, model or get_settings().llm_model, extra)
     response = client.chat.completions.create(
         model=model or get_settings().llm_model,
         messages=messages,
@@ -88,6 +105,31 @@ def chat_json(
     # response_format=json_schema -- fall back to it rather than fail the whole call.
     content = message.content or getattr(message, "reasoning_content", None) or ""
     return json.loads(content)
+
+
+def _prompted_json(client: OpenAI, messages: list[dict], schema: dict, model: str, extra: dict) -> dict:
+    system = "\nReply with one JSON object only, matching this JSON schema:\n" + json.dumps(schema)
+    messages = [{**m, "content": m["content"] + system} if i == 0 and m["role"] == "system" else m
+                for i, m in enumerate(messages)]
+    if not model.startswith("claude"):  # Anthropic rejects `temperature` for its newer models
+        extra = {**extra, "temperature": 0}
+    content = client.chat.completions.create(model=model, messages=messages, **extra).choices[0].message.content or ""
+    return _first_json_object(content)
+
+
+def _first_json_object(content: str) -> dict:
+    """The first JSON object in a model answer: skips a <think> block, a ```json fence and any
+    chatter before or after (a greedy {...} match breaks on a trailing note with braces)."""
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.S)
+    decoder = json.JSONDecoder()
+    for found in re.finditer(r"\{", content):
+        try:
+            value, _ = decoder.raw_decode(content, found.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    raise ValueError(f"no JSON object in the answer: {content[:200]!r}")
 
 
 # --- call logging (plan/02-local-rag.md: log every LLM call) -------------------------
