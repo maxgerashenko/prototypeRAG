@@ -8,6 +8,8 @@ SYSTEM_PROMPT = (
     "Never use outside knowledge about this business or any other.\n"
     "If the answer is not in the profile or chunks, state that plainly and offer "
     "to take a message or transfer to a human.\n"
+    "If the question assumes something (a date, a reason, a change) that is absent from "
+    "or contradicts the chunks, say you cannot confirm it; do not repeat it as true.\n"
     "Keep answers short, as they will be spoken aloud.\n"
     "Answer in the same language the user is asking in."
 )
