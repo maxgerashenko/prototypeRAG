@@ -3,19 +3,21 @@ server-rendered; Crawl4AI/headless rendering is added when a JS-heavy site is hi
 """
 
 import io
+import math
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from functools import lru_cache
 from urllib.parse import unquote, urlparse
 
 import httpx
 from pypdf import PdfReader
 
-from app.ingest.discover import same_domain
+from app.ingest.discover import BOT_TOKEN, same_domain
 
-USER_AGENT = "prototypeRAG-crawler/0.1 (+https://github.com/placeholder; learning project, see robots.txt)"
+USER_AGENT = f"{BOT_TOKEN}/0.1 (+https://github.com/placeholder; learning project, see robots.txt)"
 # httpx's default `Accept: */*` gets a 403 from some bot rules (bhbarbershop.com, #121); send
 # realistic content negotiation headers but keep our honest User-Agent.
 REQUEST_HEADERS = {
@@ -26,12 +28,81 @@ REQUEST_HEADERS = {
 # a menu or price list is well under this; bigger PDFs are brochures/scans not worth the download
 MAX_PDF_BYTES = 20_000_000
 
+# Transient failures (5xx, 429, timeouts) get RETRIES more tries: Retry-After when it is a
+# plain number of seconds (capped), else 2 s then 4 s. `_sleep` is replaced in tests.
+RETRIES = 2
+RETRY_BASE_SECONDS = 2.0
+MAX_RETRY_AFTER_SECONDS = 60.0
+_sleep = time.sleep
+
+
+class RobotsUnavailable(Exception):
+    """robots.txt could not be read (5xx, 429, timeout, connection error) -- the crawl must
+    stop and keep the stored data (RFC 9309: unreachable means complete disallow)."""
+
+
+def _retryable(status_code: int) -> bool:
+    return status_code == 429 or status_code >= 500
+
+
+def _calculate_wait(resp: httpx.Response | None, attempt: int) -> float:
+    """Retry-After in seconds (capped) when the server sends a usable number; an HTTP-date,
+    junk, a negative or non-finite value falls back to exponential backoff."""
+    if resp is not None:
+        try:
+            value = float(resp.headers.get("retry-after", ""))
+        except ValueError:
+            value = None
+        if value is not None and math.isfinite(value) and value >= 0:
+            return min(value, MAX_RETRY_AFTER_SECONDS)
+    return RETRY_BASE_SECONDS * (2 ** attempt)
+
+
+@contextmanager
+def _get(url: str, client: httpx.Client, timeout: float) -> Iterator[httpx.Response]:
+    """Streamed GET with retries. Yields the first response that isn't worth retrying (or
+    the last one), body not read yet, and closes it afterwards; re-raises a timeout or
+    connection error after the last try. A failure while the caller reads the body is
+    not retried (the response was already handed out)."""
+    for attempt in range(RETRIES + 1):
+        yielded = False
+        try:
+            with client.stream("GET", url, headers=REQUEST_HEADERS, timeout=timeout) as response:
+                if _retryable(response.status_code) and attempt < RETRIES:
+                    wait = _calculate_wait(response, attempt)
+                else:
+                    yielded = True
+                    yield response
+                    return
+        except (httpx.TimeoutException, httpx.TransportError):
+            if yielded or attempt == RETRIES:
+                raise
+            wait = _calculate_wait(None, attempt)
+        _sleep(wait)
+
+
+def x_robots_noindex(values: list[str]) -> bool:
+    """True when an `X-Robots-Tag` header says noindex (or `none`) for every bot or for ours;
+    a directive for another bot ("googlebot: noindex") doesn't apply to us."""
+    for value in values:
+        agent = None
+        for part in (p.strip().lower() for p in value.split(",")):
+            name, sep, rest = part.partition(":")
+            if sep and name.strip() and " " not in name.strip() and name.strip() not in ("unavailable_after",):
+                agent, part = name.strip(), rest.strip()
+            if agent not in (None, "*", BOT_TOKEN.lower()):
+                continue
+            if part in ("noindex", "none"):
+                return True
+    return False
+
 
 def fetch_text(url: str, client: httpx.Client, timeout: float = 15.0) -> str:
-    """GET `url` and return its body text. Raises on a non-2xx response."""
-    response = client.get(url, headers=REQUEST_HEADERS, timeout=timeout)
-    response.raise_for_status()
-    return response.text
+    """GET `url` and return its body text. Raises on a non-2xx response (after retries)."""
+    with _get(url, client, timeout) as response:
+        response.read()
+        response.raise_for_status()
+        return response.text
 
 
 @dataclass
@@ -41,6 +112,7 @@ class FetchedDocument:
     html: str | None = None
     pdf_text: str | None = None
     pdf_title: str | None = None
+    noindex: bool = False
 
 
 def _is_pdf_response(response: httpx.Response) -> bool:
@@ -57,11 +129,12 @@ def fetch_document(url: str, client: httpx.Client, timeout: float = 15.0) -> Fet
     """GET `url` as HTML or PDF, decided by the response's Content-Type. Raises on a
     non-2xx response or a PDF over MAX_PDF_BYTES (checked from Content-Length before the
     body is read, and again on the body)."""
-    with client.stream("GET", url, headers=REQUEST_HEADERS, timeout=timeout) as response:
+    with _get(url, client, timeout) as response:
         response.raise_for_status()
+        noindex = x_robots_noindex(response.headers.get_list("x-robots-tag"))
         if not _is_pdf_response(response):
             response.read()
-            return FetchedDocument(html=response.text)
+            return FetchedDocument(html=response.text, noindex=noindex)
         if int(response.headers.get("content-length") or 0) > MAX_PDF_BYTES:
             raise ValueError(f"PDF larger than {MAX_PDF_BYTES} bytes")
         body = bytearray()
@@ -70,17 +143,25 @@ def fetch_document(url: str, client: httpx.Client, timeout: float = 15.0) -> Fet
             if len(body) > MAX_PDF_BYTES:
                 raise ValueError(f"PDF larger than {MAX_PDF_BYTES} bytes")
     pdf_bytes = bytes(body)
-    return FetchedDocument(pdf_text=extract_pdf_text(pdf_bytes), pdf_title=pdf_title(pdf_bytes, url))
+    return FetchedDocument(pdf_text=extract_pdf_text(pdf_bytes), pdf_title=pdf_title(pdf_bytes, url), noindex=noindex)
 
 
 def fetch_robots_txt(base_url: str, client: httpx.Client) -> str | None:
-    """GET `<scheme>://<netloc>/robots.txt`. None on any failure or non-200 — never raises."""
+    """GET `<scheme>://<netloc>/robots.txt` (RFC 9309): its text on 2xx; None on a 4xx other
+    than 429 (no robots.txt = no rules). Raises RobotsUnavailable on 429, 5xx, a timeout or
+    a connection error after the retries -- the crawl must not go on without the rules."""
     parsed = urlparse(base_url)
+    url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
     try:
-        response = client.get(f"{parsed.scheme}://{parsed.netloc}/robots.txt", headers=REQUEST_HEADERS)
-    except httpx.HTTPError:
-        return None
-    return response.text if response.status_code == 200 else None
+        with _get(url, client, 15.0) as response:
+            if 200 <= response.status_code < 300:
+                response.read()
+                return response.text
+            if 400 <= response.status_code < 500 and response.status_code != 429:
+                return None
+            raise RobotsUnavailable(f"robots.txt {response.status_code}")
+    except httpx.RequestError as exc:  # timeouts, connection errors, redirect loops
+        raise RobotsUnavailable(f"robots.txt {type(exc).__name__}") from exc
 
 
 def fetch_sitemap(

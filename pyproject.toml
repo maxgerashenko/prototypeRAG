@@ -25,6 +25,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "markitdown[pdf]>=0.1.9",
     "google-auth-oauthlib>=1.2",
+    "protego>=0.3",
 ]
 
 [dependency-groups]
