@@ -7,7 +7,7 @@ Twilio, the LLM endpoint) are not actions: they belong to the integrations layer
 ([integrations.md](integrations.md)), which actions call and which never calls back.
 
 In this codebase that covers: bookings, group sessions, the Google Calendar
-mirror, take a message, transfer to a person, (mock) SMS and the post-call summary.
+mirror, take a message, transfer to a person, texting callers about cancelled sessions and the post-call summary.
 Written from the code on `main` (2026-11-02). Plan and decisions: [plan/04-actions.md](../plan/04-actions.md),
 [plan/feature-bookings-sessions.md](../plan/feature-bookings-sessions.md), DEC-24, DEC-30, DEC-48,
 DEC-54, DEC-56 in [plan/DECISIONS.md](../plan/DECISIONS.md).
@@ -22,7 +22,9 @@ DEC-54, DEC-56 in [plan/DECISIONS.md](../plan/DECISIONS.md).
   `create_booking`, `cancel_booking`, `list_sessions`, `join_session`.
 - **Booking domain**: rules, two backends (Postgres-only and Google Calendar), group
   sessions, and the calendar mirror that keeps Postgres in step with Google.
-- **Post-call summary** (`summary.py`) and the **mock SMS sender** (`sms.py`).
+- **Post-call summary** (`summary.py`). The mock SMS sender (`sms.py`) lives here but is
+  logically an integration ([integrations.md](integrations.md)); only its callers
+  (`booking/sessions.py`) are actions.
 
 **Not in this layer:**
 
@@ -51,7 +53,7 @@ another business's data.
 | `messages.py` | `take_message` tool → `messages_for_owner` row |
 | `transfer.py` | `transfer_to_human` tool; `transfer_number()` and `transfer_requested()` for the Twilio routes |
 | `summary.py` | `summarize_conversation()`: one-line summary, intent, outcome, follow-up on `conversations` |
-| `sms.py` | Mock `send_sms()`: logs and keeps the last 200 messages in an in-memory `OUTBOX`; sends nothing (#138) |
+| `sms.py` | Mock `send_sms()`: logs and keeps the last 200 messages in an in-memory `OUTBOX`; sends nothing (#138). Logically an integration ([integrations.md](integrations.md)) that lives under `actions/`, like `google_client.py` |
 | `booking/rules.py` | Pure booking rules (no DB, no clock): `Rules`, `local_start`, `violation`, `candidate_starts` |
 | `booking/internal.py` | `BookingBackend` protocol, request/result dataclasses, `InternalBackend` (Postgres only) |
 | `booking/google_calendar.py` | `GoogleCalendarBackend` (DEC-48): same rules, busy time from the mirror, writes events |
@@ -310,15 +312,15 @@ The layer rule: other layers call integrations, integrations never call back.
 
 | Layer | What |
 |---|---|
-| [data.md](data.md) | `app/db` (`tenant_session`, `SessionLocal`, models) for every table above; `businesses`, `business_profiles` (business name for results), `conversations` / `messages` (caller ID, transcript for the summary) |
-| [integrations.md](integrations.md) | `app/llm.chat_json` (summary); the Google Calendar REST client (`booking/google_client.py`, which sits under `actions/` but is an integration); SMS (mock now, Twilio later, #138) |
+| [data.md](data.md) | `app/db` (`tenant_session`, `SessionLocal`, models) for every table above; `businesses`, `business_profile` (business name for results), `conversations` / `messages` (caller ID, transcript for the summary) |
+| [integrations.md](integrations.md) | `app/llm.chat_json` (summary); the Google Calendar REST client (`booking/google_client.py`, which sits under `actions/` but is an integration); the SMS sender (`actions/sms.py`, mock now, Twilio later, #138; sits under `actions/` but is an integration) |
 | `app/config.py` | Settings listed in section 6 (shared, not a layer) |
 
 **Used by**
 
 | Layer | What |
 |---|---|
-| [voice.md](voice.md) | `app/voice/tools.py` imports `messages`, `transfer`, `booking/tools` to register tools and uses `execute`, `TOOLS`, `tools_for`, `enabled_tool_names`, `register`; `app/voice/session.py` uses `TRANSFER_STARTED`; `app/rag/answer.py` uses `tools_for` / `run_tool` |
+| [voice.md](voice.md) | `app/voice/tools.py` imports `messages`, `transfer`, `booking/tools` to register tools and uses `execute`, `TOOLS`, `tools_for`, `enabled_tool_names`, `register`; `app/voice/session.py` uses `TRANSFER_STARTED`; `app/rag/answer.py` uses the registry through `app/voice/tools.py` (`tools_for`, `enabled_tool_names`, and `run_tool`, which is defined there) |
 | [api.md](api.md) | `app/api/bookings.py` (`rules`, `session_events`, `internal._load_rules`, `sessions_in_range`, `CalendarError`); `app/api/sessions.py` (all of `booking/sessions`); `app/voice/twilio_routes.py` (`summarize_conversation`, `transfer_number`, `transfer_requested`; writes `messages_for_owner` for voicemail); `app/api/conversations.py` reads the summary columns; `app/main.py` starts `calendar_sync.run_sync_loop` |
 | [web.md](web.md) | Indirectly, through the API: Bookings view, session sheet and blocks, conversation summaries |
 | [crawler.md](crawler.md) | No link |
