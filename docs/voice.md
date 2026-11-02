@@ -211,31 +211,31 @@ silence/mark/hang-up timings in `session.py`, chunking limits `_MAX_CHUNK` = 120
 ## 9. Known gaps
 
 From reading the code; V numbers are the matching rows in
-[plan/03-voice-channel.md](../plan/03-voice-channel.md) where one exists.
+[plan/03-voice-channel.md](../plan/03-voice-channel.md) where one exists, #n the GitHub issue.
 
-- **Noise still stops the bot (V10).** The DEC-44 guard was not enough in a live call
+- **Noise still stops the bot (V10, #87).** The DEC-44 guard was not enough in a live call
   (2026-10-19). A barge-in cancels the reply for good; there is no resume.
-- **Send interleaving (V15).** Reply-task sends and `clear` from `feed()` share one socket
+- **Send interleaving (V15, #240).** Reply-task sends and `clear` from `feed()` share one socket
   with no send queue.
-- **Thread use (V18).** STT holds an executor thread for a whole turn; TTS, DB and tools use
+- **Thread use (V18, #253).** STT holds an executor thread for a whole turn; TTS, DB and tools use
   `asyncio.to_thread` too. Limits concurrent calls per instance (stage 2–3).
-- **STT model per transport (V4, V27).** One `STT_MODEL` for 8 kHz phone and 16 kHz browser audio.
-- **Reasoning value on Gemini (V20).** `none` is verified only on LM Studio.
-- **Local time is frozen at call start.** The voice system prompt's "current local time" is
+- **STT model per transport (V4, V27, #73).** One `STT_MODEL` for 8 kHz phone and 16 kHz browser audio.
+- **Reasoning value on Gemini (V20, #254).** `none` is verified only on LM Studio.
+- **Local time is frozen at call start (#222).** The voice system prompt's "current local time" is
   built once in `_load_business`; long calls drift. Chat has no current time line at all.
-- **Voice and chat prompts differ.** Two system prompts, two RAG strategies (tool-only vs
+- **Voice and chat prompts differ (#229).** Two system prompts, two RAG strategies (tool-only vs
   pre-retrieval + tool), different give-up lines. Changes to grounding rules must be made
   twice.
-- **Tool loop is duplicated.** The delta-collecting loop exists in `session.py` and twice in
+- **Tool loop is duplicated (#229).** The delta-collecting loop exists in `session.py` and twice in
   `answer.py`; chat tool calls get no `call_sid`/`caller`, so a transfer from chat cannot work.
-- **Farewell detection is English-only**, though the prompt answers in the caller's language.
-- **Fallback lines are English-only**: re-prompt, silence goodbye, give-up, greeting
+- **Farewell detection is English-only (#238)**, though the prompt answers in the caller's language.
+- **Fallback lines are English-only (#238)**: re-prompt, silence goodbye, give-up, greeting
   disclosure.
-- **Tool-round cap hides partial work.** If the model keeps calling tools for 3 rounds, the
+- **Tool-round cap hides partial work (#234).** If the model keeps calling tools for 3 rounds, the
   caller hears the give-up line even if an action already ran in an earlier round.
-- **History is not trimmed.** Both paths send the whole conversation every turn; long
+- **History is not trimmed (#236).** Both paths send the whole conversation every turn; long
   conversations grow the prompt without a limit.
-- **Gemini Live mode (DEC-30)** is not built; only the shared tool schemas are ready for it.
+- **Gemini Live mode (DEC-30, #66)** is not built; only the shared tool schemas are ready for it.
 
 ## Depends on / Used by
 
