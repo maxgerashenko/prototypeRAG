@@ -25,13 +25,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
 from app.actions.booking import calendar_sync
+from app.actions.booking.guests import DOMAIN
 from app.actions.booking.google_calendar import calendar_id_for
 from app.actions.booking.google_client import CalendarClient
 from app.actions.booking.google_client import CalendarError, EventExists, PreconditionFailed
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.session import SessionLocal
-from app.db.models import Booking, Business, CalendarEvent, GroupSession
+from app.db.models import Booking, Business, CalendarEvent, GroupSession, SessionGuest
 
 log = logging.getLogger(__name__)
 
@@ -105,8 +106,45 @@ def _booked(session, business_id: uuid.UUID, sid: uuid.UUID) -> int:
         Booking.business_id == business_id, Booking.session_id == sid, Booking.status == "confirmed")) or 0
 
 
+def attendees_enabled() -> bool:
+    """Guests are written as event attendees only with the OAuth user token: a service account
+    can't add attendees to a Gmail calendar (403 forbiddenForServiceAccounts)."""
+    return bool(get_settings().google_calendar_token_file)
+
+
+def _fake(attendee: dict) -> bool:
+    return str(attendee.get("email", "")).lower().endswith(f"@{DOMAIN}")
+
+
+def _guest_attendees(session, business_id: uuid.UUID, sid: uuid.UUID) -> list[dict]:
+    """One attendee per guest with a confirmed seat, sorted by email. Marked accepted so Google
+    does not show 'awaiting response'. The real spelling goes in displayName."""
+    rows = session.execute(
+        select(SessionGuest.email, SessionGuest.display_name).distinct()
+        .join(Booking, (Booking.business_id == SessionGuest.business_id) & (Booking.guest_id == SessionGuest.id))
+        .where(Booking.business_id == business_id, Booking.session_id == sid, Booking.status == "confirmed")
+        .order_by(SessionGuest.email)
+    ).all()
+    return [{"email": e, "displayName": n, "responseStatus": "accepted"} for e, n in rows]
+
+
+def _attendee_patch(event: dict, want: list[dict]) -> dict:
+    """Body that makes the event's guest-domain attendees equal `want`, or {} when they already
+    are. Attendees with a real address (added by the owner in Google) are kept as they are."""
+    have = event.get("attendees") or []
+    mine = sorted(({"email": a["email"], "displayName": a.get("displayName", "")} for a in have if _fake(a)),
+                  key=lambda a: a["email"])
+    if mine == [{"email": a["email"], "displayName": a["displayName"]} for a in want]:
+        return {}
+    return {
+        "attendees": [a for a in have if not _fake(a)] + want,
+        "guestsCanSeeOtherGuests": False, "guestsCanInviteOthers": False, "guestsCanModify": False,
+    }
+
+
 def push_title(business_id: uuid.UUID, sid: uuid.UUID) -> bool:
-    """Write 'name · n/max attendees' to the session's event. True when the event shows it now.
+    """Write 'name · n/max attendees' and, with the OAuth token, the booked guests as attendees
+    (sendUpdates=none, so nobody is emailed) to the session's event. True when it shows them now.
     Best effort: a failure is logged and the next sync pass retries (the seat stays taken)."""
     client = get_client()
     if client is None:
@@ -118,13 +156,16 @@ def push_title(business_id: uuid.UUID, sid: uuid.UUID) -> bool:
             if row is None or not row.external_ref or row.status != "active":
                 return False
             ref, want = row.external_ref, title(row.name, _booked(session, business_id, sid), row.max_attendees)
+            guests = _guest_attendees(session, business_id, sid) if attendees_enabled() else None
         try:
             event = client.get_event(calendar_id, ref)
             if event is None:  # deleted in Google: the next sync cancels the session
                 return False
-            if event.get("summary") == want:
-                return True
-            client.patch_event(calendar_id, ref, {"summary": want}, event.get("etag"))
+            body = {} if event.get("summary") == want else {"summary": want}
+            if guests is not None:
+                body.update(_attendee_patch(event, guests))
+            if body:
+                client.patch_event(calendar_id, ref, body, event.get("etag"))
             return True
         except PreconditionFailed:
             continue  # changed meanwhile: re-read the etag and the seat count

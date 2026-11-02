@@ -295,3 +295,38 @@ def test_sync_pass_turns_a_typed_event_into_a_session_and_deleting_cancels_it(ca
     assert S.list_open(biz) == []
     with tenant_session(biz) as s:
         assert s.scalar(select(Booking.status).where(Booking.name == "Ann")) == "cancelled"
+
+
+# --- guests as attendees ---------------------------------------------------------------------------
+
+def test_guests_are_written_as_attendees_and_removed_with_the_seat(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=3)
+    code = S.session_ref(sid)
+    S.join_session(biz, code, _conv(biz), "Zoë", "+19294892284", now=NOW, last_name="Łukasiewicz")
+    S.join_session(biz, code, _conv(biz), "Ann", now=NOW, last_name="Lee")
+    ev = cal.events[ref]
+    assert ev["attendees"] == [
+        {"email": "ann_lee@guest.invalid", "displayName": "Ann Lee", "responseStatus": "accepted"},
+        {"email": "zoe_lukasiewicz@guest.invalid", "displayName": "Zoë Łukasiewicz", "responseStatus": "accepted"},
+    ]
+    assert (ev["guestsCanSeeOtherGuests"], ev["guestsCanInviteOthers"], ev["guestsCanModify"]) == (False,) * 3
+    with tenant_session(biz) as s:
+        bid = s.scalar(select(Booking.id).where(Booking.session_id == sid, Booking.name == "Ann Lee"))
+    S.remove_attendee(biz, sid, bid, now=NOW)
+    assert [a["email"] for a in cal.events[ref]["attendees"]] == ["zoe_lukasiewicz@guest.invalid"]
+
+
+def test_an_owner_added_real_attendee_is_kept(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=3)
+    cal.events[ref]["attendees"] = [{"email": "owner@example.com"}]
+    S.join_session(biz, S.session_ref(sid), _conv(biz), "Ann", now=NOW, last_name="Lee")
+    assert [a["email"] for a in cal.events[ref]["attendees"]] == ["owner@example.com", "ann_lee@guest.invalid"]
+
+
+def test_no_attendees_without_the_oauth_token(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "")
+    sid, ref = _make(biz)
+    S.join_session(biz, S.session_ref(sid), _conv(biz), "Ann", now=NOW, last_name="Lee")
+    assert "attendees" not in cal.events[ref]
