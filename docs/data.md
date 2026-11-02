@@ -26,7 +26,7 @@ of chunks is returned for a question".
 
 **Boundary inside `app/ingest/run.py`.** The CLI runs the crawl half (crawler layer) and then
 calls this layer in order: `organize_business` → `_rechunk_page` per organized page →
-`delete_pages_not_in` → profile → `assign_timezones` → `extract_facts` → `summarize_business`
+`delete_pages_not_in` (crawler) → profile → `assign_timezones` → `extract_facts` → `summarize_business`
 (→ greeting audio, Voice layer). `_rechunk_page`, `extract_facts` and the profile block
 live in `run.py` but are Data-layer logic.
 
@@ -46,7 +46,7 @@ conversations, messages). Only the Data-layer tables are described in detail bel
 |---|---|---|---|
 | `app/ingest/organize.py` | Site-chrome dedupe into one pseudo-page, location detection from the footer/nav, page type by URL rules, retrievable flag, duplicate detection, blog dates, junk-chunk filter, testimonial cut, location prefix for chunks | No | Yes (`organize_business`) |
 | `app/ingest/chunk.py` | Header-aware chunking: split on ATX headings, pack paragraphs to ~650 tokens (chars/4), 12.5% overlap on word boundaries | No | No |
-| `app/ingest/store.py` | `upsert_page` (change detection by `content_hash`), `replace_chunks` (full replace of a page's `scraped` chunks), `delete_pages_not_in` | No | Yes |
+| `app/ingest/store.py` (`replace_chunks` only) | `replace_chunks`: full replace of a page's `scraped` chunks. `upsert_page` and `delete_pages_not_in` in the same file belong to the Crawler layer ([crawler.md](crawler.md)) | No | Yes |
 | `app/ingest/facts.py` | Per-page fact extraction with a strict JSON schema, code-side validation, hours parsing, backend choice (haiku / qwen / gemma) | Yes | Read only (`pages_to_extract` takes loaded pages) |
 | `app/ingest/merge.py` | Store facts and sources, normalize fact keys, merge duplicates, pick the active fact per key, conflicts report | No | Yes |
 | `app/ingest/fact_chunks.py` | One `chunks` row (`kind='fact'`) per active fact, kept in sync | No | Yes |
@@ -83,7 +83,7 @@ _rechunk_page (per organized page)
   cut_testimonials → pages.testimonials
   chunk_markdown → filter_junk_chunks → prefix "<Business> <Location> — "
   replace_chunks(kind='scraped', location_id)                                 → chunks
-delete_pages_not_in (only if ≥50% of stored pages were fetched)  — cascades to chunks, fact_sources
+delete_pages_not_in [crawler] (only if ≥50% of stored pages were fetched)  — cascades to chunks, fact_sources
 profile extraction (skipped if owner-confirmed)                              → business_profile, businesses.name
 assign_timezones                                                             → locations.timezone, businesses.timezone
 extract_facts
@@ -284,7 +284,6 @@ business's default location until an entry point can choose one (OPEN-21).
 | `tenant_session(business_id)` | db/session.py | One transaction; sets `app.business_id` with `set_config(..., true)`; commits or rolls back |
 | `organize_business(...)` → `OrganizeResult` | ingest/organize.py | Returns only the page ids that need re-chunking |
 | `chunk_markdown(md, target_tokens=650)` | ingest/chunk.py | Continuous `chunk_index` across the page |
-| `upsert_page(...)` → `(page, changed)` | ingest/store.py | `changed` only for `markdown`/`content_hash` |
 | `replace_chunks(session, bid, page_id, drafts, location_id)` | ingest/store.py | Full replace of `scraped` chunks; embeddings cleared |
 | `extract_page_facts(page, name, locations, ...)` → `PageResult` | ingest/facts.py | No DB writes; validated facts + rejected with reasons |
 | `apply_page_facts(session, bid, page, facts, stats)` | ingest/merge.py | Replaces this page's sources |
@@ -363,8 +362,9 @@ Seen in the code on `main`; none of these is a bug report against a decision.
 | Layer | What |
 |---|---|
 | [crawler.md](crawler.md) | Stored `pages` rows (`markdown`, `chrome_markdown`, `content_hash`, `language`), `noindex_urls`, `start_url`/site root; `content_hash` from `clean.py`; `domain_of`/`site_root` from `identity.py` |
-| [integrations.md](integrations.md) | `app/llm.py`: `chat_json`, `embed`, `get_anthropic_client`; `app/config.py` settings |
-| [voice.md](voice.md) | Only one call back: `run.py` calls `app.voice.greeting_cache.pregenerate` after the summary (crawl orchestration, not Data-layer logic) |
+| [integrations.md](integrations.md) | `app/llm.py`: `chat_json`, `embed`, `get_anthropic_client` |
+| `app/config.py` (shared, not a layer) | `get_settings()`: database, embedding and facts settings (section 12) |
+| [voice.md](voice.md) | Only one call back: `run.py` calls `app.voice.greeting_cache.pregenerate` after the summary (crawl orchestration, not Data-layer logic); `app/rag/eval.py` imports `answer_question` from `app/rag/answer.py` |
 
 **Used by**
 
@@ -374,7 +374,8 @@ Seen in the code on `main`; none of these is a bug report against a decision.
 | [api.md](api.md) | `retrieve` + `default_location_id` (`api/chat.py`), `insights.questions` (`api/business_settings.py`), `is_placeholder_name` (`api/businesses.py`), `custom_replies` writes `custom_reply` chunks and embeds them |
 | [actions.md](actions.md) | `app/db` models and `SessionLocal`/`tenant_session` for its own tables; `businesses.timezone` (set from the default location here) for booking times |
 | [web.md](web.md) | Indirectly, through the API: business list, default location, top questions |
-| [crawler.md](crawler.md) | `organize.chrome_pseudo_url` and `store.upsert_page`/`delete_pages_not_in` are called from the crawl half of `run.py` |
+| [crawler.md](crawler.md) | `organize.chrome_pseudo_url` is called from the crawl half of `run.py` (the crawler's own `store.upsert_page`/`delete_pages_not_in` write `pages`, defined in this layer's schema) |
+| [integrations.md](integrations.md) | Violation V-1: `app/voice/twilio_numbers.py` imports `app.db.models` (`Business`, `BusinessProfile`) and `SessionLocal` and reads businesses across tenants |
 
 ## 16. Tests
 
