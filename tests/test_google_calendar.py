@@ -382,6 +382,14 @@ def test_client_insert_and_delete():
     assert http.requests[1][:2] == ("DELETE", http.requests[1][1]) and http.requests[1][1].endswith("/events/abc")
 
 
+def test_client_event_writes_never_send_guest_emails():
+    c, http = _client(_Resp(200, {"id": "abc"}), _Resp(200, {"etag": "e2"}), _Resp(204))
+    c.insert_event(CAL, {"summary": "x"})
+    c.patch_event(CAL, "abc", {"summary": "y"}, "e1")
+    c.delete_event(CAL, "abc")
+    assert [kw["params"] for _, _, kw in http.requests] == [{"sendUpdates": "none"}] * 3
+
+
 def test_booking_backend_setting_picks_the_backend(monkeypatch):
     from app.actions.booking import tools
     from app.actions.booking.internal import InternalBackend

@@ -545,6 +545,34 @@ class CalendarSyncState(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
+class SessionGuest(Base):
+    """One person who books (group sessions and 1:1), per business. The name is the identity
+    (`name_key`); the phone only breaks ties. `email` is a fake `@guest.invalid` address written
+    as the Google event attendee and never changed once set, so the link to Google survives a
+    spelling fix. `merged_into` keeps the old row when the owner merges two guests."""
+
+    __tablename__ = "session_guests"
+    __table_args__ = (
+        CheckConstraint("source IN ('app', 'google')", name="source"),
+        UniqueConstraint("business_id", "id"),
+        UniqueConstraint("business_id", "email"),
+        ForeignKeyConstraint(
+            ["business_id", "merged_into"], ["session_guests.business_id", "session_guests.id"]
+        ),
+        Index("ix_session_guests_business_id_name_key", "business_id", "name_key"),
+    )
+
+    id: Mapped[uuid.UUID] = _id()
+    business_id: Mapped[uuid.UUID] = _business_id()
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)  # as spoken, Unicode kept
+    name_key: Mapped[str] = mapped_column(Text, nullable=False)  # ASCII, lower case, for matching
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    phone: Mapped[str | None] = mapped_column(Text)  # caller ID of the first call naming them
+    source: Mapped[str] = mapped_column(Text, nullable=False, server_default="app")
+    merged_into: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    created_at: Mapped[datetime] = _now()
+
+
 class Booking(Base):
     """A booking or appointment in the internal backend. Times are UTC; `ends_at` is
     starts_at + the service's duration at booking time."""
@@ -564,6 +592,11 @@ class Booking(Base):
             ["business_id", "session_id"],
             ["sessions.business_id", "sessions.id"],
         ),
+        ForeignKeyConstraint(
+            ["business_id", "guest_id"],
+            ["session_guests.business_id", "session_guests.id"],
+        ),
+        Index("ix_bookings_business_id_guest_id", "business_id", "guest_id"),
         Index("ix_bookings_business_id_starts_at", "business_id", "starts_at"),
         Index("ix_bookings_business_id_session_id", "business_id", "session_id"),
     )
@@ -572,6 +605,10 @@ class Booking(Base):
     business_id: Mapped[uuid.UUID] = _business_id()
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    guest_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # the conversation a booking was made in; no FK, so a cross-business join can keep it (#288)
+    caller_conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    attendee_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # sync first saw the attendee
     type: Mapped[str] = mapped_column(Text, nullable=False)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
