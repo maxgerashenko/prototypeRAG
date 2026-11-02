@@ -18,7 +18,9 @@ from app.ingest.clean import clean_page
 from app.ingest.facts import (
     EXTRACTOR_VERSION, normalize_text, pages_to_extract, parse_hours, split_sections, validate_fact,
 )
-from app.ingest.merge import conflicts_report, make_fact_key, normalize_value, rekey_facts, settle_facts
+from app.ingest.merge import (
+    _from_own_page, conflicts_report, make_fact_key, normalize_value, rekey_facts, same_value, settle_facts,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 HOURS_QUOTE = "Hours 7 days a week 8am to 11:30pm"
@@ -122,6 +124,39 @@ def test_fact_key_matches_a_name_ending_in_punctuation():
     assert make_fact_key("service", None, "Atlantic Ave. Hot Pool", "temperature", ["Atlantic Ave."]) == (
         "service|-|hot pool|temperature"
     )
+
+
+def test_blog_pages_are_not_extracted():
+    pages = [_page("https://x.com/journal/p", "blog"), _page("https://x.com/a")]
+    assert [p.url for p in pages_to_extract(pages)] == ["https://x.com/a"]
+
+
+@pytest.mark.parametrize("a,b", [
+    ("8am to 11:30pm", "Open daily 8am to 11:30pm"),
+    ("135°F", "up to 135°F"),
+    ("45°F & 50°F", "45°F, 50°F"),
+    ("Steam room", "the steam room"),
+])
+def test_same_value_wording_only(a, b):
+    assert same_value(a, b) and same_value(b, a)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("194°F", "185°F to 195°F"),
+    ("12pm, 1:30pm, 3pm", "4:30pm, 6pm, 7:30pm, 9pm"),
+    ("Steam Room", "hot pool"),
+    ("$39", "$390"),
+    ("10am-6pm", "10pm-6am"),
+    ("10am-6pm", "10am-6pm weekdays"),
+    ("closed", "not closed"),
+    ("2 saunas", "2 hot tubs"),
+    ("$39 adults, $45 kids", "$45 adults, $39 kids"),
+    ("up to 135°F", "minimum 135°F"),
+    ("from $39", "from $39 for kids"),
+    ("wifi6", "6 rooms"),
+])
+def test_same_value_different_facts_stay_apart(a, b):
+    assert not same_value(a, b)
 
 
 def _page(url="https://x.com/p", page_type="service", stamp=None, **kw):
@@ -312,6 +347,88 @@ def test_fact_whose_source_changed_goes_stale_and_losing_value_is_promoted(busin
     model.answers.pop("Starts at $39")
     run.extract_facts(business_id)
     assert set(_facts(business_id)) == {("price", "from $39", "stale"), ("price", "$45", "active")}
+
+
+def _own_page_setup(business_id, chrome_text, *, own2_value=None):
+    """A Williamsburg Banya temperature on the business-wide day-pass page ('194F') and one on
+    Williamsburg's own page ('185F to 195F'), optionally a second own-page one (`own2_value`).
+    Returns the page ids and the fake model's answers; the caller runs the extraction."""
+    ids = _setup(business_id, chrome_text)
+    with tenant_session(business_id) as s:
+        s.get(Page, ids["daypass"]).markdown = "# Day Pass\n\nThe Banya runs at 194F."
+        pages = {"own": ("williamsburg", "185F to 195F"), "own2": ("williamsburg/banya", own2_value)}
+        for key, (path, value) in pages.items():
+            if value:
+                page = Page(business_id=business_id, url=f"https://x.com/{path}", markdown=f"# Williamsburg\n\nThe Banya is {value}.",
+                            content_hash=f"h-{key}", page_type="location", location_id=ids["wb"])
+                s.add(page)
+                s.flush()
+                ids[key] = page.id
+    banya = dict(type="amenity", subject="Banya", attribute="temperature", statement="Banya temperature.", confidence=0.9)
+    answers = {"runs at 194F": [{**banya, "value": "194F", "quote": "runs at 194F", "location": "Williamsburg"}]}
+    answers["The Banya is 185F"] = [{**banya, "value": "185F to 195F", "quote": "Banya is 185F to 195F", "location": "this"}]
+    if own2_value:
+        answers[f"The Banya is {own2_value}"] = [{**banya, "value": own2_value, "quote": f"Banya is {own2_value}", "location": "this"}]
+    return ids, answers
+
+
+def _statuses(business_id):
+    return {(f.value): f.status for f in _facts(business_id).values()}
+
+
+def _extract_with(model, answers, business_id, wb_default=True):
+    model.answers.update(answers)
+    run.extract_facts(business_id)
+
+
+def test_location_page_fact_outranks_business_wide_page_and_loser_is_stale(business_id, chrome_text, model):
+    ids, answers = _own_page_setup(business_id, chrome_text)
+    _extract_with(model, answers, business_id)
+    assert _statuses(business_id) == {"194F": "stale", "185F to 195F": "active"}
+    # idempotent: settling again changes nothing
+    from app.ingest.merge import settle_facts
+    with tenant_session(business_id) as s:
+        settle_facts(s, business_id)
+    assert _statuses(business_id) == {"194F": "stale", "185F to 195F": "active"}
+
+
+def test_two_own_page_facts_still_conflict(business_id, chrome_text, model):
+    ids, answers = _own_page_setup(business_id, chrome_text, own2_value="190F")
+    _extract_with(model, answers, business_id)
+    st = _statuses(business_id)
+    assert st["194F"] == "stale" and sorted([st["185F to 195F"], st["190F"]]) == ["active", "conflict"]
+
+
+def test_two_non_own_page_facts_still_conflict(business_id, chrome_text, model):
+    ids, answers = _own_page_setup(business_id, chrome_text)
+    answers.pop("The Banya is 185F")
+    with tenant_session(business_id) as s:  # a second page that is not Williamsburg's own
+        s.get(Page, ids["blogpost"]).markdown = "# Post\n\nThe Banya runs at 200F."
+        s.get(Page, ids["blogpost"]).page_type = "service"
+    answers["runs at 200F"] = [{**answers["runs at 194F"][0], "value": "200F", "quote": "runs at 200F"}]
+    _extract_with(model, answers, business_id)
+    assert sorted(_statuses(business_id).values()) == ["active", "conflict"]
+
+
+def test_business_wide_fact_is_unchanged_by_the_own_page_rule(business_id, chrome_text, model):
+    ids, answers = _own_page_setup(business_id, chrome_text)
+    for v in answers.values():
+        v[0]["location"] = "all"
+    _extract_with(model, answers, business_id)
+    assert sorted(_statuses(business_id).values()) == ["active", "conflict"]
+
+
+def test_stale_fact_is_active_again_when_the_own_page_fact_disappears(business_id, chrome_text, model):
+    ids, answers = _own_page_setup(business_id, chrome_text)
+    _extract_with(model, answers, business_id)
+    assert _statuses(business_id) == {"194F": "stale", "185F to 195F": "active"}
+    with tenant_session(business_id) as s:  # the location page no longer states it
+        p = s.get(Page, ids["own"])
+        p.markdown, p.content_hash = "# Williamsburg\n\nCome visit.", "w9"
+    model.answers.pop("The Banya is 185F")
+    run.extract_facts(business_id)
+    st = _statuses(business_id)
+    assert st["194F"] == "active" and st["185F to 195F"] == "stale"
 
 
 def test_failed_page_is_retried_and_does_not_stop_the_others(business_id, chrome_text, model, monkeypatch):
@@ -536,3 +653,56 @@ def test_first_json_object_edge_cases(answer):
     assert _first_json_object(answer) == {"facts": []}
     with pytest.raises(ValueError):
         _first_json_object('{"facts": [')
+
+
+# --- D26-A / blog cleanup -----------------------------------------------------------------
+
+
+def test_only_location_or_contact_pages_count_as_own_page():
+    wb = uuid.uuid4()
+    fact = Fact(location_id=wb)
+    assert _from_own_page(fact, [Page(location_id=wb, page_type="location")])
+    assert _from_own_page(fact, [Page(location_id=wb, page_type="contact")])
+    assert not _from_own_page(fact, [Page(location_id=wb, page_type="blog")])
+    assert not _from_own_page(fact, [Page(location_id=wb, page_type="about")])
+    assert not _from_own_page(Fact(location_id=None), [Page(location_id=wb, page_type="location")])
+
+
+def test_facts_only_a_skipped_page_backs_go_stale(business_id, model):
+    ids = _setup(business_id, "Hours 7 days a week 8am to 11:30pm")
+    with tenant_session(business_id) as s:
+        blog = Page(business_id=business_id, url="https://x.com/journal/p", markdown="# P\n\nThe expansion includes two more saunas.",
+                    content_hash="hb", page_type="service")
+        s.add(blog)
+    model.answers["two more saunas"] = [raw_fact(type="amenity", subject="Expansion", attribute="saunas", value="two more",
+                                                 quote="two more saunas", location="all")]
+    run.extract_facts(business_id)
+    assert "two more" in _statuses(business_id) and _statuses(business_id)["two more"] == "active"
+    with tenant_session(business_id) as s:  # the classifier later calls it a blog post
+        s.scalar(select(Page).where(Page.business_id == business_id, Page.url == "https://x.com/journal/p")).page_type = "blog"
+    with tenant_session(business_id) as s:
+        settle_facts(s, business_id)
+    assert _statuses(business_id)["two more"] == "stale"
+
+
+def test_refusal_wording_the_model_uses_is_recognised():
+    from app.rag.eval import check_answer
+
+    answer = "I'm sorry, the provided information doesn't state why the sauna was expanded."
+    assert check_answer(answer, {"in_knowledge_base": False})[0]
+
+
+def test_lenient_match_keeps_value_and_statement_together(business_id, model):
+    ids = _setup(business_id, "Hours 7 days a week 8am to 11:30pm")
+    with tenant_session(business_id) as s:
+        s.get(Page, ids["daypass"]).markdown = "# Day Pass\n\nThe Banya runs at 135F."
+    base = dict(type="amenity", subject="Banya", attribute="temperature", confidence=0.9, location="all")
+    model.answers["runs at 135F"] = [{**base, "value": "135F", "quote": "runs at 135F", "statement": "Banya is 135F."}]
+    run.extract_facts(business_id)
+    with tenant_session(business_id) as s:
+        s.get(Page, ids["daypass"]).markdown = "# Day Pass\n\nThe Banya runs at up to 135F."
+    model.answers.clear()
+    model.answers["runs at up to 135F"] = [{**base, "value": "up to 135F", "quote": "runs at up to 135F", "statement": "Banya is up to 135F."}]
+    run.extract_facts(business_id)
+    banya = [f for f in _facts(business_id).values() if f.subject == "Banya"]
+    assert len(banya) == 1 and (banya[0].value, banya[0].statement) == ("135F", "Banya is 135F.")

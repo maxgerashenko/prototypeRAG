@@ -7,6 +7,9 @@ pages were processed in, and running it twice changes nothing:
 
 - an owner-confirmed fact always wins (DEC-11); crawl values that differ become `conflict`;
 - otherwise the best source wins: page-type priority (`PAGE_PRIORITY`), tie -> newest page;
+- a location fact stated on that location's own page (`Page.location_id == Fact.location_id`)
+  outranks facts that only come from other pages (e.g. a business-wide price page that lists
+  every location): those become `stale`, not `conflict`; two own-page facts still conflict;
 - a fact with several sources keeps all of them; losers with a source are `conflict`
   (kept, listed by `--report conflicts`), facts left without any source are `stale`
   (excluded from retrieval) -- except owner-confirmed ones, which stay `active`.
@@ -21,11 +24,11 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.db.models import Business, Fact, FactSource, Location, Page
-from app.ingest.facts import ExtractedFact, extraction_stamp
+from app.ingest.facts import SKIP_PAGE_TYPES, ExtractedFact, extraction_stamp
 from app.ingest.profile import is_placeholder_name
 
 # lower = wins (plan §5.4): location · contact · pricing · service · site_chrome >
@@ -42,6 +45,36 @@ _VALUE_NOISE_RE = re.compile(r"[\s$,.;:!]+")
 def normalize_value(value: str | None) -> str:
     """So '$39', 'from $39.' and 'From  $39' compare equal."""
     return _VALUE_NOISE_RE.sub(" ", (value or "").lower()).strip()
+
+
+# a number keeps its am/pm, so '10am-6pm' and '10pm-6am' differ
+_NUMBER_RE = re.compile(r"(?<![\w])\d+(?::\d+)?(?:\.\d+)?(?:\s?[ap]m\b)?")
+_WORD_RE = re.compile(r"[a-z]+")
+# words that only dress up a value; any other word ("weekdays", "kids", "not", "minimum")
+# changes its meaning
+_FILLER = {
+    "a", "an", "the", "and", "or", "to", "up", "from", "at", "on", "in", "of", "is", "are", "daily",
+    "open", "every", "day", "per", "f", "c", "between", "about", "approximately", "around",
+}
+
+
+def same_value(a: str | None, b: str | None) -> bool:
+    """Same fact, different wording: equal after `normalize_value`, or the same numbers in
+    the same order and the same words once filler is dropped ('8am to 11:30pm' = 'Open daily
+    8am to 11:30pm', '135F' = 'up to 135F', 'Steam room' = 'the steam room'). Anything that
+    changes the meaning stays apart: other numbers ('194F' vs '185F to 195F', '10am-6pm' vs
+    '10pm-6am'), a qualifier ('10am-6pm' vs '10am-6pm weekdays'), a negation ('closed' vs
+    'not closed')."""
+    na, nb = normalize_value(a), normalize_value(b)
+    if na == nb:
+        return True
+    la, lb = (a or "").lower(), (b or "").lower()
+    nums_a, nums_b = _NUMBER_RE.findall(la), _NUMBER_RE.findall(lb)
+    words_a = set(_WORD_RE.findall(_NUMBER_RE.sub(" ", la))) - _FILLER
+    words_b = set(_WORD_RE.findall(_NUMBER_RE.sub(" ", lb))) - _FILLER
+    if nums_a != nums_b or words_a != words_b:
+        return False
+    return bool(nums_a or words_a)
 
 
 def _norm_key_part(text: str | None) -> str:
@@ -122,7 +155,11 @@ def apply_page_facts(
     for f in extracted:
         loc_names = names.for_location(f.location_id)
         key = make_fact_key(f.type, f.location_id, f.subject, f.attribute, loc_names)
-        match = next((r for r in existing.get(key, []) if normalize_value(r.value) == normalize_value(f.value)), None)
+        candidates = existing.get(key, [])
+        # the exact value first, so the row picked doesn't depend on row order
+        match = next((r for r in candidates if normalize_value(r.value) == normalize_value(f.value)), None) or next(
+            (r for r in candidates if same_value(r.value, f.value)), None
+        )
         if match is None:
             # 'conflict' until settle_facts picks the winner of this key (only one 'active'
             # row per key is allowed by the partial unique index)
@@ -137,9 +174,12 @@ def apply_page_facts(
             if stats:
                 stats.created += 1
         elif match.owner_confirmed_at is None and match.origin == "crawl":
-            # same value, possibly new wording; the owner's own text is never touched
-            match.statement = f.statement
-            match.value_json = f.value_json
+            # same value, possibly new wording; the owner's own text is never touched.
+            # Wording that only the lenient same_value matched leaves value, statement and
+            # value_json together as first stored, so they can't disagree.
+            if normalize_value(match.value) == normalize_value(f.value):
+                match.statement = f.statement
+                match.value_json = f.value_json
             match.confidence = max(match.confidence or 0.0, f.confidence)
         match.last_seen_at = now
         session.add(FactSource(
@@ -161,6 +201,18 @@ def _source_rank(page: Page) -> tuple[int, float]:
     return PAGE_PRIORITY.get(page.page_type or "", _UNRANKED), -(when.timestamp() if when else 0.0)
 
 
+# D26-A: only a location's own page or contact page speaks for that location; a blog or
+# about page that merely carries a location_id must not outrank a pricing or service page
+OWN_PAGE_TYPES = {"location", "contact"}
+
+
+def _from_own_page(fact: Fact, pages: list[Page]) -> bool:
+    """True if one of the fact's sources is the page (or contact page) of the fact's own location."""
+    return fact.location_id is not None and any(
+        p.location_id == fact.location_id and p.page_type in OWN_PAGE_TYPES for p in pages
+    )
+
+
 def settle_facts(session: Session, business_id: uuid.UUID, stats: MergeStats | None = None) -> None:
     """Decide the status of every non-rejected fact of the business (module docstring)."""
     rekey_facts(session, business_id)
@@ -172,6 +224,9 @@ def settle_facts(session: Session, business_id: uuid.UUID, stats: MergeStats | N
         select(FactSource.fact_id, Page)
         .join(Page, (Page.business_id == FactSource.business_id) & (Page.id == FactSource.page_id))
         .where(FactSource.business_id == business_id)
+        # a page type the facts step no longer reads (blog) backs nothing: a fact only it
+        # states loses its source and goes stale, so old blog facts leave search
+        .where(or_(Page.page_type.is_(None), Page.page_type.notin_(SKIP_PAGE_TYPES)))
     )
     for fact_id, page in rows:
         pages_by_fact.setdefault(fact_id, []).append(page)
@@ -183,18 +238,24 @@ def settle_facts(session: Session, business_id: uuid.UUID, stats: MergeStats | N
     new_status: dict[uuid.UUID, str] = {}
     for group in by_key.values():
         owner = [f for f in group if f.owner_confirmed_at is not None or f.origin == "owner"]
+        outranked: set[uuid.UUID] = set()
         if owner:
             winner = max(owner, key=lambda f: f.owner_confirmed_at or datetime.min.replace(tzinfo=UTC))
         else:
             sourced = [f for f in group if pages_by_fact.get(f.id)]
+            # D23-B: a fact from its own location's page beats facts from other pages
+            own_page = [f for f in sourced if _from_own_page(f, pages_by_fact[f.id])]
+            outranked = {f.id for f in sourced} - {f.id for f in own_page} if own_page else set()
             winner = min(
-                sourced, key=lambda f: min(_source_rank(p) for p in pages_by_fact[f.id]), default=None
+                own_page or sourced, key=lambda f: min(_source_rank(p) for p in pages_by_fact[f.id]), default=None
             )
         for f in group:
             if f is winner:
                 new_status[f.id] = "active"
             elif f.owner_confirmed_at is not None or f.origin == "owner":
                 new_status[f.id] = f.status  # a second owner fact for the key: the owner sorts it out
+            elif f.id in outranked:
+                new_status[f.id] = "stale"
             else:
                 new_status[f.id] = "conflict" if pages_by_fact.get(f.id) else "stale"
 
