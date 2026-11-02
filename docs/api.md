@@ -295,19 +295,22 @@ dev Postgres; no CI runs them (cloud box has no LM Studio / Google / Twilio).
 
 ## 9. Known gaps
 
-| # | Gap | Effect | Where / tracked |
+| # | Gap | Effect | Issue · where tracked |
 |---|---|---|---|
-| A1 | No auth on owner/dev routes (§4 list) | Anyone reaching the URL can read transcripts, rewrite replies, move numbers, cancel sessions | OPEN-19 (before public Cloud Run), OPEN-12 (stage 3) |
-| A2 | Cross-tenant `SessionLocal` reads/writes: `/businesses`, number routes, `find_business`, `find_call`, `/twilio/status` lookup, orphan sweep | Will break or bypass RLS once policies are on | Needs an RLS-exempt path (DEC-43 consequences, stage 3) |
-| A3 | Sync DB work inside `async def` handlers: `twilio_voice` (`find_business`), `twilio_voicemail` (`tenant_session`), `twilio_status` (both lookups) run on the event loop; `transfer` uses `run_in_threadpool`, these don't | A slow or cold DB stalls every live call's audio loop on the same process | Not tracked |
-| A4 | `/voice/feed` state is in memory, per process | Several instances (Cloud Run scale-out) would each see only their own calls | DEC-46 (LISTEN/NOTIFY when needed) |
-| A5 | `/voice/browser` has no check at all | Any page can start calls that spend Google Speech + LLM | OPEN-19 |
-| A6 | Business logic in route files: `put_number`/`assign_main_number` number moves, `_reindex_custom_reply` (embedding + chunk write), `list_bookings` time maths, `get_top_questions` embedding loop | The phone/chat layers can't reuse them; tests must go through HTTP | Candidates to move to [actions.md](actions.md) / [data.md](data.md) |
-| A7 | `PUT /number` checks the business in one session and writes in another, with a Twilio call between | A business deleted in between gets an UPDATE of 0 rows but a 200 | Low risk in stage 1 |
-| A8 | `/twilio/status` runs the LLM summary inside the request (DEC-24, R19) | Twilio waits; its webhook timeout (~15 s) can mark the callback failed on a slow summary | DEC-24 (accepted) |
-| A9 | Four API files live in `app/voice/`; `twilio_numbers.py` mixes a route with the Twilio REST client and imports `display_name` from `app/api/businesses.py` | Integrations code depends on the API layer, against the "integrations never call back" rule | Layering cleanup |
-| A10 | No rate limiting, no CORS policy, no global error handler / request id | Errors are plain 500s without a correlation id in logs | Stage 2/3 |
-| A11 | `/health` only checks the DB | LM Studio/Gemini, Google Speech or Twilio being down still reports ok | — |
+| A1 | No auth on owner/dev routes (§4 list) | Anyone reaching the URL can read transcripts, rewrite replies, move numbers, cancel sessions | #228 · OPEN-19 (before public Cloud Run), OPEN-12 (stage 3) |
+| A2 | Cross-tenant `SessionLocal` reads/writes: `/businesses`, number routes, `find_business`, `find_call`, `/twilio/status` lookup, orphan sweep | Will break or bypass RLS once policies are on | #244 · Needs an RLS-exempt path (DEC-43 consequences, stage 3) |
+| A3 | Sync DB work inside `async def` handlers: `twilio_voice` (`find_business`), `twilio_voicemail` (`tenant_session`), `twilio_status` (both lookups) run on the event loop; `transfer` uses `run_in_threadpool`, these don't | A slow or cold DB stalls every live call's audio loop on the same process | #226 |
+| A4 | `/voice/feed` state is in memory, per process | Several instances (Cloud Run scale-out) would each see only their own calls | #245 · DEC-46 (LISTEN/NOTIFY when needed) |
+| A5 | `/voice/browser` has no check at all | Any page can start calls that spend Google Speech + LLM | #228 · OPEN-19 |
+| A6 | Business logic in route files: `put_number`/`assign_main_number` number moves, `_reindex_custom_reply` (embedding + chunk write), `list_bookings` time maths, `get_top_questions` embedding loop | The phone/chat layers can't reuse them; tests must go through HTTP | #246 · Candidates to move to [actions.md](actions.md) / [data.md](data.md) |
+| A7 | `PUT /number` checks the business in one session and writes in another, with a Twilio call between | A business deleted in between gets an UPDATE of 0 rows but a 200 | #237 · Low risk in stage 1 |
+| A8 | `/twilio/status` runs the LLM summary inside the request (DEC-24, R19) | Twilio waits; its webhook timeout (~15 s) can mark the callback failed on a slow summary | #249 · DEC-24 (accepted) |
+| A9 | Four API files live in `app/voice/`; `twilio_numbers.py` mixes a route with the Twilio REST client and imports `display_name` from `app/api/businesses.py` | Integrations code depends on the API layer, against the "integrations never call back" rule | #247 · Layering cleanup |
+| A10 | No rate limiting, no CORS policy, no global error handler / request id | Errors are plain 500s without a correlation id in logs | #248 · Stage 2/3 |
+| A11 | `/health` only checks the DB | LM Studio/Gemini, Google Speech or Twilio being down still reports ok | #248 |
+
+All API issues are in the GitHub milestone "S1 · Review API". The issues from the API
+review, besides the gaps above: #223, #230, #231, #233, #235, #239, #241, #242, #243, #250.
 
 ## 10. Depends on / Used by
 
