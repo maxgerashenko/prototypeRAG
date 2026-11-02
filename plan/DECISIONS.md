@@ -129,6 +129,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-54 | Group sessions: data model (user decisions 2026-10-31, branch `feature-bookings-sessions`) | `sessions` table (1 h, name, `max_attendees` 1–50, soft delete) + attendees as `bookings` rows (`type='session'`, `session_id`); partial unique `(business_id, starts_at) WHERE status='active'`; server validates DST gap, future/ended, 409 on overlap with a 1:1 booking or a session at the same hour. Sessions do **not** yet block the assistant's 1:1 bookings (left to #149). Deleting a session or removing a caller cancels the booking and texts the caller through a **mock** sender (`app/actions/sms.py`, never Twilio) | 1 | ✅ |
 | DEC-55 | Hold-to-add gesture in the day view | Mouse: click an empty hour. Touch/pen: hold 1.5 s (`HOLD_MS`) with a fill-ghost after 150 ms; cancel on move > 10 px, scroll, `pointercancel`, second pointer. A short tap shows a hint. A 56 px **+** button is the fallback and the VoiceOver route. Never `preventDefault` on pointerdown/touchstart; iOS callout off. iPhone has no Vibration API, so the fill is the only feedback | 1 | **Superseded by DEC-56** |
 | DEC-56 | Add a session with a faded **+** in each free hour (user decision 2026-10-31, supersedes DEC-55) | The hold gesture and mouse click-to-add are removed (`holdToAdd.ts` deleted). Every free future hour shows a faded 44 px **+** centred in the row (`hour-add-<h>`); the round bottom-right **+** stays. Visible on touch without hover; no timing to tune, no iOS gesture risks | 1 | ✅ |
+| DEC-57 | Assigning a number also points it at this app in Twilio (user decision 2026-11-02, extends DEC-52) | `PUT /businesses/{id}/number` first calls `ensure_routed`: voice URL empty → set `<PUBLIC_BASE_URL>/twilio/voice` and `/twilio/status` (POST) through the Twilio API; already ours → only a missing status URL is filled; pointing elsewhere → 409, nothing overwritten; missing `PUBLIC_BASE_URL`/credentials or a Twilio error → 503 and the database is unchanged. Unassigning leaves Twilio as it is. Cause: a newly bought number had no voice URL, so calls got no answer | 1 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
@@ -850,7 +851,7 @@ Issue #147. Before this, `/web/` moved one main number to whichever business was
 | B. Assign per business in Settings; opening a card no longer moves it | Matches the design, DEC-34/43; explicit, so real callers are never re-routed silently | With one trial number it is 3 taps to move it | ✅ |
 | C. Both | Keeps the dev shortcut | Two ways to change routing that fight each other | ❌ |
 
-Sub-decision: numbers used by another business are shown ("Used by X", action *Move*), not hidden as in the design, because with a single trial number hiding makes the picker empty. Assigning in our DB does not set the number's Voice URL at Twilio (the picker flags numbers not routed to this app). OPEN-21 (number to location) stays stage 3.
+Sub-decision: numbers used by another business are shown ("Used by X", action *Move*), not hidden as in the design, because with a single trial number hiding makes the picker empty. Assigning in our DB does not set the number's Voice URL at Twilio (the picker flags numbers not routed to this app) — changed by DEC-57. OPEN-21 (number to location) stays stage 3.
 
 ### DEC-53 — The greeting always starts with a fixed AI disclosure (stage 1)
 
@@ -889,6 +890,19 @@ User decision 2026-10-31; supersedes DEC-55.
 |---|---|---|---|
 | Faded **+** centred in every free future hour (+ the round **+** button) | Discoverable, one tap, nothing to time, works the same on touch and mouse | 44 px targets sit in the day column next to the swipe (guarded by `TAP_GUARD_MS`) | ✅ |
 | Touch hold 1.5 s + mouse click (DEC-55) | No extra buttons on the grid | Hidden gesture, iOS risks (pointercancel, callout), needs timing tuning | ❌ superseded |
+
+### DEC-57 — Assigning a number also sets its Twilio voice and status URLs (stage 1)
+
+User decision 2026-11-02, extends DEC-52. A new number (+1 332 322-2533) rang with no answer: assigning it in Settings only wrote `businesses.phone_numbers`, and Twilio had no voice URL for it (Twilio support confirmed). The old number answered "not in service" from our own `/twilio/voice` because no business held it any more.
+
+| Option | Pros | Cons | Verdict |
+|---|---|---|---|
+| A. Set the URLs by hand in the Twilio Console per number | No code | Easy to forget; silent failure for callers | ❌ |
+| B. `ensure_routed` on assign, base URL from `PUBLIC_BASE_URL`, only when the voice URL is empty | Number works right after assigning; never overwrites a setup the owner made; fails before the database changes | Changing `PUBLIC_BASE_URL` (new ngrok domain) does not update numbers already routed; a foreign URL must be cleared by hand | ✅ |
+| C. B, but always overwrite | Also fixes stale domains | Silently breaks a number used elsewhere | ❌ |
+| D. Base URL derived from the request | No env var | From Settings on localhost it would give `localhost` | ❌ |
+
+Open: a "re-sync all numbers" action for a changed public URL (not needed with one trial number); the ngrok free domain going offline gave Twilio a 404 on one call (stage 2: Cloud Run URL).
 
 ### DEC-51 — Keep our crawler, use MarkItDown for PDF text (stage 1)
 
