@@ -16,6 +16,8 @@ REFUSAL_PHRASES = [
     "couldn't find", "not available", "doesn't mention", "no information",
     "don't offer", "do not offer", "don't have", "do not have",
     "not something we offer", "not something we provide",
+    "doesn't state", "does not state", "isn't stated", "is not stated", "provided information doesn't", "provided information does not",
+    "not mentioned", "no mention", "can't confirm", "cannot confirm",
 ]
 
 
