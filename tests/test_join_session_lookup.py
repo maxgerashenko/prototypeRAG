@@ -29,10 +29,22 @@ def test_one_match_gives_its_code(text, ref):
     assert tools.resolve_session(uuid.uuid4(), text) == (ref, "")
 
 
-@pytest.mark.parametrize("text", ["Sauna Polish", "Sauna Polish at 9 am", "yoga", ""])
-def test_no_or_several_matches_list_the_options(text):
+@pytest.mark.parametrize("text", ["yoga", ""])
+def test_no_match_lists_the_options(text):
     ref, message = tools.resolve_session(uuid.uuid4(), text)
-    assert ref is None and message.startswith("Error: not booked.") and "·" in message or "none are open" in message
+    assert ref is None and message.startswith("Error: not booked.") and "·" in message
+
+
+@pytest.mark.parametrize("text, ref", [
+    ("Sauna Polish", "3C785323"),  # same name twice, no time: the soonest, asked as yes/no
+    ("Sound of Polish session from 10:00 a.m.", "3C785323"),  # speech-to-text garble
+    ("sound a polish session", "3C785323"),
+])
+def test_close_words_give_one_yes_no_proposal(text, ref):
+    code, message = tools.resolve_session(uuid.uuid4(), text)
+    assert code is None and message.startswith("Error: not booked.")
+    if ref:
+        assert f"session={ref}" in message and "shall I book it" in message and "BBBB2222" not in message
 
 
 def test_a_code_is_passed_through(monkeypatch):

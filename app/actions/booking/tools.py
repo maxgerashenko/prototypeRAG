@@ -13,6 +13,7 @@ whose `settings["enabled_tools"]` lists them (#151). `app/voice/tools.py` import
 """
 
 import re
+from difflib import SequenceMatcher
 
 from app.actions.booking import sessions as sessions_
 from app.actions.booking.internal import BookingBackend, BookingRequest, InternalBackend
@@ -158,6 +159,29 @@ def _mentions_time(text: str, start: str) -> bool:
     return False
 
 
+def _best_guess(rows: list[dict], text: str) -> dict | None:
+    """Speech-to-text garbles names ("sound of Polish session" for "Sauna Polish"). The open
+    session whose name words are, on average, closest to the caller's words (>= 0.7), the
+    soonest one if several share that name and a mentioned start time narrows it; None if
+    nothing is close."""
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    if not words:
+        return None
+
+    def score(name: str) -> float:
+        tokens = re.findall(r"[a-z0-9]+", name.lower())
+        return sum(max(SequenceMatcher(None, t, w).ratio() for w in words) for t in tokens) / len(tokens) if tokens else 0.0
+
+    scored = [(score(r["name"]), r) for r in rows]
+    top = max((s for s, _ in scored), default=0.0)
+    if top < 0.7:
+        return None
+    best = [r for s, r in scored if s >= top - 1e-9]
+    if len({r["name"] for r in best}) > 1:
+        return None
+    return next((r for r in best if _mentions_time(text, _starts_at(r["when"]))), best[0])
+
+
 def resolve_session(business_id, text: str) -> tuple[str | None, str]:
     """The model sometimes passes the session's name and time instead of its code (the codes are
     not in the call's history from one turn to the next). Look the session up in the open list:
@@ -169,6 +193,13 @@ def resolve_session(business_id, text: str) -> tuple[str | None, str]:
     found = timed or named if len(named) > 1 else named
     if len(found) == 1:
         return found[0]["ref"], ""
+    guess = _best_guess(rows, text)
+    if guess:
+        return None, (
+            "Error: not booked. The caller's words are close to one session but not exact. Do not list the "
+            f"others. Ask one yes/no question: \"{guess['name']} on {guess['when']}, shall I book it?\" "
+            f"If they say yes, call join_session again with session={guess['ref']} and confirmed=true."
+        )
     options = found or rows
     listing = "; ".join(f"{r['ref']} · {r['name']} · {r['when']}" for r in options[:5]) or "none are open"
     return None, (
