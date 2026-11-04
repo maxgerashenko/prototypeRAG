@@ -2,10 +2,15 @@
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import tenant_session
-from app.db.models import BusinessProfile, BusinessSummary
+from app.actions.booking.sessions import list_open
+from app.db.models import Business, BusinessProfile, BusinessSummary
 from app.llm import get_chat_client
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import build_prompt
@@ -22,6 +27,20 @@ class AnswerResult:
     chunks: list[RetrievedChunk]  # what was retrieved, for debug/display
     profile: BusinessProfile | None
     messages: list[dict]  # the exact prompt sent to the LLM, for debug/display
+
+
+def now_note(session, business_id: uuid.UUID, enabled) -> str:
+    """Today's date and time in the business's zone (the model has no clock) and, when sessions
+    can be booked, the open ones with their codes: tool results are not kept in the history, so
+    without this the model loses the codes between turns and invents them."""
+    zone = ZoneInfo(session.scalar(select(Business.timezone).where(Business.id == business_id)) or "UTC")
+    lines = [f"Now: {datetime.now(zone):%A %d %B %Y, %H:%M} ({zone.key})."]
+    if "join_session" in enabled:
+        rows = list_open(business_id)
+        if rows:
+            lines.append("Open sessions (codes are for join_session only, never read them aloud):")
+            lines += [f"{r['ref']} · {r['name']} · {r['when']}" + (" · FULL" if r["full"] else "") for r in rows]
+    return "\n".join(lines)
 
 
 def prepare_prompt(
@@ -41,6 +60,7 @@ def prepare_prompt(
         messages = build_prompt(
             profile, chunks, history or [], question, summary,
             locations=format_locations(session, business_id, location_id), enabled_tools=enabled,
+            now_note=now_note(session, business_id, enabled),
         )
     return profile, chunks, messages
 

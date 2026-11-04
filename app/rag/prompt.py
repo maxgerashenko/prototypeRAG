@@ -10,7 +10,11 @@ SYSTEM_PROMPT = (
     "to take a message or transfer to a human.\n"
     "If the question assumes something (a date, a reason, a change) that is absent from "
     "or contradicts the chunks, say you cannot confirm it; do not repeat it as true.\n"
-    "Keep answers short, as they will be spoken aloud.\n"
+    "Keep answers short, as they will be spoken aloud: one or two sentences, no lists or bullets. "
+    "Do not repeat what you already said or what the caller already told you (name, chosen session, "
+    "time) unless they ask; never ask for something they already gave. If the caller's words are "
+    "garbled but close to one option, name that option and ask a yes/no question instead of "
+    "listing everything.\n"
     "Answer in the same language the user is asking in."
 )
 
@@ -33,8 +37,10 @@ SESSION_PROMPT = (
     "what is available, call list_sessions (pass a date if the caller names a day) instead of "
     "saying you have no information. Read the names and times aloud, never the codes. If it lists "
     "none, say there are no open sessions then. To sign someone up, ask for their first and last name (ask for the last name if they give only "
-    "a first name), read back the session, time and the name spelled out, and after a clear yes call join_session with confirmed=true. Never say "
-    "someone is booked unless the tool said so."
+    "a first name), read back the session, time and the name spelled out and ask \"Shall I book it?\". Only after the caller's clear yes call "
+    "join_session, with confirmed=true and the session code exactly as list_sessions gave it (never a name you made up). Someone is booked only "
+    "when the tool result starts with \"Booked\". If it starts with \"Not done\" or \"Error\", nothing was booked: do not say it was, "
+    "and do not repeat the read-back as if it were done. Ask the caller to confirm, or say what went wrong."
 )
 
 
@@ -126,8 +132,9 @@ def build_prompt(
     summary: BusinessSummary | None = None,
     locations: str = "",
     enabled_tools: frozenset[str] | set[str] = frozenset(),
+    now_note: str = "",
 ) -> list[dict]:
     """System message (rules + profile + locations + summary + chunks) + history + the new question."""
-    sections = [SYSTEM_PROMPT, tools_prompt(enabled_tools), format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
+    sections = [SYSTEM_PROMPT, now_note, tools_prompt(enabled_tools), format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
     system_content = "\n\n".join(s for s in sections if s)
     return [{"role": "system", "content": system_content}, *history, {"role": "user", "content": question}]
