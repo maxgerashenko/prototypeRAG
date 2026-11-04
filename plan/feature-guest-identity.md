@@ -31,10 +31,10 @@ Decided with the user (2026-11-02):
 
 ## Done, not yet committed (second batch, 2026-11-02, built by parallel Sonnet agents, reviewed by sonnet5.5_REVIEW)
 
-- [x] 6. `app/actions/booking/backfill_guests.py` (`python -m app.actions.booking.backfill_guests [--apply] [--business ID]`, dry run by default, idempotent). Past cancelled bookings also get a guest. **Not yet run on the real DB**; keep the sync's attendee comparison off until it has been
-- [x] 7. `private` ↔ Google `visibility` both ways (migration 0019 `calendar_events.visibility`). A Google change applies only if newer than the session's last app update (fixes the race the reviewer found). `public`/`confidential` read as not private
-- [x] 8. `app/api/guests.py`: `GET /businesses/{id}/guests`, `GET /guests/{id}` (phone masked, follows `merged_into`)
-- [x] 10. `POST /guests/{id}/merge`: rows locked in id order; refused (409) when both guests hold a seat in the same session or the target is already merged
+- [x] 6. ([#314](https://github.com/maxgerashenko/prototypeRAG/issues/314)) `app/actions/booking/backfill_guests.py` (`python -m app.actions.booking.backfill_guests [--apply] [--business ID]`, dry run by default, idempotent). Past cancelled bookings also get a guest. **Not yet run on the real DB**; keep the sync's attendee comparison off until it has been
+- [x] 7. ([#317](https://github.com/maxgerashenko/prototypeRAG/issues/317)) `private` ↔ Google `visibility` both ways (migration 0019 `calendar_events.visibility`). A Google change applies only if newer than the session's last app update (fixes the race the reviewer found). `public`/`confidential` read as not private
+- [x] 8. ([#315](https://github.com/maxgerashenko/prototypeRAG/issues/315)) `app/api/guests.py`: `GET /businesses/{id}/guests`, `GET /guests/{id}` (phone masked, follows `merged_into`)
+- [x] 10. ([#316](https://github.com/maxgerashenko/prototypeRAG/issues/316)) `POST /guests/{id}/merge`: rows locked in id order; refused (409) when both guests hold a seat in the same session or the target is already merged
 
 Limits found in review: merge does not re-push Google attendees (old fake email stays on events until the next push; the sync may need to treat it as the survivor's); merge does not carry the phone over; `/guests/{id}` paths need a business id or a bypass lookup before RLS (stage 3); no auth on the new routes (stage 1); concurrent-merge lock is untested; session join by short ref can fail with "session not found" when two active sessions share the prefix (flaky `test_join_session_gives_the_seat_to_a_guest`).
 
@@ -45,9 +45,9 @@ Limits found in review: merge does not re-push Google attendees (old fake email 
 | 6 | **Backfill script** for existing bookings (create guests from old names/phones). Dry run first; user runs it on their Mac. Keep the sync's attendee comparison **off until the backfill is done**, or old events lose their seats | SONNET | dry-run output reviewed; second run changes nothing |
 | 7 | **Private flag ↔ event visibility:** `sessions.private` ↔ Google `visibility: private`, both directions | SONNET | pytest for push and sync |
 | 8 | **Guest history API:** `GET /businesses/{id}/guests`, `GET /guests/{id}` (bookings, sessions) | QWEN | pytest |
-| 9 | **Guest history screen** in the voice app. Start from `design/README.md` and the list-row/sheet pattern docs; ask the user where design and `Main.dc.html` differ | SONNET + USER | vitest, Playwright, user looks |
+| 9 | ~~Guest history screen~~ **Skipped for now, kept as a proposal** (see "Proposal: guests screen"). The API (steps 8, 10) stays | — | — |
 | 10 | **Guest merge API** (owner merges two guests via `merged_into`; seats and history follow) | SONNET | pytest |
-| 11 | `DEC-xx` in `DECISIONS.md` for decisions 1–7 and a GitHub issue per step 6–10 (label `LOCAL_USER_PHONE` on 6 and 9) | CLAUDE | issues exist |
+| 11 | **Done 2026-11-04:** DEC-59 in `DECISIONS.md`; issues #314–#317 (and #313 proposal). Was: `DEC-xx` in `DECISIONS.md` for decisions 1–7 and a GitHub issue per step 6, 7, 8, 10 (label `LOCAL_USER_PHONE` on 6) | CLAUDE | issues exist |
 | 12 | **User check in Google Calendar:** editing a guest event shows no "Send update emails?" prompt trouble; demo inbox has no stray mail | USER | user confirms |
 
 Reviewer for every step: `sonnet5.5_REVIEW`.
@@ -61,3 +61,14 @@ Reviewer for every step: `sonnet5.5_REVIEW`.
 ## Where the code is
 
 `app/actions/booking/guests.py` (identity), `sessions.py` / `internal.py` / `google_calendar.py` (booking), `session_events.py` (push attendees), `calendar_sync.py` (read attendees), `google_client.py` (`sendUpdates`), `app/db/models.py` `SessionGuest`.
+
+## Proposal: guests screen (not planned, decided 2026-11-04 to skip; issue [#313](https://github.com/maxgerashenko/prototypeRAG/issues/313), milestone S0 · Suggestions)
+
+Not built. If it is picked up later, start from `design/README.md` and ask the user where `design/Main.dc.html` and the pattern docs differ.
+
+- **Guests list** for the selected business (`GET /businesses/{id}/guests`): name, phone as `***2284`, booking count, last booking; rows in the `ListItem.md` pattern, area-token colours, `ControlSubtitle.md` subtitles, same pull-to-refresh as the other screens.
+- **Guest detail** (`GET /guests/{id}`): the guest, then bookings and sessions, newest first; follows merges.
+- **Merge** on the detail screen (`POST /guests/{id}/merge`): pick a target, confirm via `ItemRemoveConfirmation.md` or `BottomSheet.md`, show the 409 messages in plain words.
+- **Open points:** where it lives (tab or button on the business screen); how to pick the merge target (search or same/similar names); whether the owner sees the full phone; whether the detail marks or hides cancelled bookings (the list counts confirmed only).
+- **Done when:** vitest (list, detail, merge errors), Playwright (list → detail → merge), user looks. Executor SONNET + USER.
+
