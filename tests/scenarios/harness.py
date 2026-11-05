@@ -249,10 +249,17 @@ def check(world: World, conv: uuid.UUID | None, transcript: list[tuple[str, str]
             fails.append(f"INVARIANT d: bot reply #{bot_i + 1} has {len(text.split())} words (max 40): {text[:80]!r}...")
         clock = r"\d{1,2}(?::\d{2})?\s?(?:am|pm)?"
         starts = re.sub(rf"({clock})\s?(?:to|until|-|–)\s?{clock}", r"\1", text, flags=re.I)  # "18:00 to 19:00" = one session
-        times = set(re.findall(r"\b\d{1,2}:\d{2}\b|\b\d{1,2}\s?(?:am|pm)\b", starts, re.I))
+        times = set(re.findall(r"\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}:\d{2}\b", starts, re.I))
         if bot_i >= 1 and len(times) >= 2 and not asked:
             fails.append(f"INVARIANT d: bot reply #{bot_i + 1} lists several sessions again ({sorted(times)}) without being asked")
         bot_i += 1
+
+    # universal invariant (f): every time is said with AM or PM, never "18:00" (nor "10:00")
+    for t in bot:
+        bare = re.findall(r"\b\d{1,2}:\d{2}\b(?!\s?[ap]\.?m)", t, re.I)
+        if bare:
+            fails.append(f"INVARIANT f: time without AM/PM {bare[0]!r}: {t[:80]!r}")
+            break
 
     # universal invariant (e): a year the bot names is the real one (chat read-backs once said 2024/2025)
     year = world.today.year

@@ -183,7 +183,7 @@ class GoogleCalendarBackend:
                 name = session.scalar(select(BusinessProfile.name).where(BusinessProfile.business_id == business_id))
                 if not name or name == "(pending)":
                     name = session.scalar(select(Business.name).where(Business.id == business_id))
-                return BookingResult(True, "Booked.", booking_id, ref, name, start.strftime("%a %d %b, %H:%M"))
+                return BookingResult(True, "Booked.", booking_id, ref, name, f"{start:%a %d %b}, {R.clock(start)}")
         except CalendarError as exc:
             log.warning("google calendar create failed: %s", exc)
             if event_id:  # the insert failed twice, but a timed-out call may have gone through

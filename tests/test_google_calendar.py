@@ -129,7 +129,7 @@ def test_create_inserts_event_and_stores_its_id(backend, cal, business_id):
     with tenant_session(business_id) as s:
         s.add(Conversation(id=cid, business_id=business_id, channel="chat"))
     res = backend.create(business_id, _req(conversation_id=cid, notes="window seat"), NOW)
-    assert res.ok and res.when == "Thu 05 Nov, 14:00" and res.reference
+    assert res.ok and res.when == "Thu 05 Nov, 2:00 PM" and res.reference
     (eid, event), = cal.events.items()
     assert _row(business_id).external_ref == eid and _row(business_id).status == "confirmed"
     assert event["start"] == {"dateTime": "2026-11-05T14:00:00-05:00", "timeZone": NY}

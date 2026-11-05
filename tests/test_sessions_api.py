@@ -200,7 +200,7 @@ def test_delete_cancels_session_and_texts_attendees(client, biz):
     assert res.json() == {"cancelled_bookings": 2, "texted": 1, "no_phone": 1}
     assert [m["to"] for m in sms.OUTBOX] == ["+15550001"]
     body = sms.OUTBOX[0]["body"]
-    assert body == "Hi Ann, your spot in Yoga on Mon 10 Jun, 10:00 was cancelled by Zebra Spa."
+    assert body == "Hi Ann, your spot in Yoga on Mon 10 Jun, 10:00 AM was cancelled by Zebra Spa."
     assert _booking_status(biz, a) == _booking_status(biz, b) == "cancelled"
     with tenant_session(biz) as s:
         row = s.get(GroupSession, uuid.UUID(sid))

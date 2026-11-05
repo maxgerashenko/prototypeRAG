@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.actions import sms
 from app.actions.booking import guests
+from app.actions.booking import rules as R
 from app.actions.booking import session_events as G
 from app.actions.booking.google_client import CalendarError
 from app.db import tenant_session
@@ -244,7 +245,8 @@ def update_session(
 
 
 def _when(s: GroupSession, zone: ZoneInfo) -> str:
-    return s.starts_at.astimezone(zone).strftime("%a %d %b, %H:%M")
+    at = s.starts_at.astimezone(zone)
+    return f"{at:%a %d %b}, {R.clock(at)}"
 
 
 def _text_callers(callers: list[tuple[str | None, str]], s_name: str, when: str, who: str) -> tuple[int, int]:
@@ -348,7 +350,7 @@ def list_open(
             out.append({
                 "ref": session_ref(r.id), "name": r.name, "booked": booked, "max_attendees": r.max_attendees,
                 "full": booked >= r.max_attendees,
-                "when": f"{a:%a %d %b}, {a:%H:%M} to {b:%H:%M}",  # "10:00-11:00" was read aloud as two sessions
+                "when": f"{a:%a %d %b}, {R.clock(a)} to {R.clock(b)}",  # "10:00-11:00" was read aloud as two sessions
             })
         return out
 
@@ -412,7 +414,7 @@ def join_session(
         zone = _zone(_business(session, owner).timezone)
         result = {
             "ref": session_ref(sid), "name": row.name, "booked": booked + 1, "max_attendees": row.max_attendees,
-            "when": f"{row.starts_at.astimezone(zone):%a %d %b, %H:%M}", "guest": guest.display_name, "booking_ref": str(booking.id)[:8].upper(),
+            "when": _when(row, zone), "guest": guest.display_name, "booking_ref": str(booking.id)[:8].upper(),
         }
         linked_event = row.external_ref is not None
     if linked_event:  # after the commit; a failed patch keeps the seat, the next sync retries it

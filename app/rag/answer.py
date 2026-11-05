@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import tenant_session
+from app.actions.booking import rules as R
 from app.actions.booking.sessions import list_open
 from app.db.models import Business, BusinessProfile, BusinessSummary
 from app.llm import get_chat_client
@@ -146,7 +147,7 @@ def session_name_words(messages: list[dict]) -> set[str]:
 
 _CLOCK = r"\d{1,2}(?::\d{2})?\s?(?:am|pm)?"
 _RANGE = re.compile(rf"({_CLOCK})\s?(?:to|until|-|\u2013)\s?{_CLOCK}", re.I)  # "10:00 to 11:00" is one session
-_TIME = re.compile(r"\b\d{1,2}:\d{2}\b|\b\d{1,2}\s?(?:am|pm)\b", re.I)
+_TIME = re.compile(r"\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}:\d{2}\b", re.I)
 WANTS_LIST = re.compile(
     r"\b(list|all|options?|which|what (sessions|do you have|is on|else)|details?|tell me (more|about)|"
     r"available|schedule|other|else|again|repeat|anything|what'?s on|any other|monday|tuesday|wednesday|thursday|friday|"
@@ -238,7 +239,7 @@ def now_note(session, business_id: uuid.UUID, enabled) -> str:
     can be booked, the open ones with their codes: tool results are not kept in the history, so
     without this the model loses the codes between turns and invents them."""
     zone = ZoneInfo(session.scalar(select(Business.timezone).where(Business.id == business_id)) or "UTC")
-    lines = [f"Now: {datetime.now(zone):%A %d %B %Y, %H:%M} ({zone.key})."]
+    lines = [f"Now: {datetime.now(zone):%A %d %B %Y}, {R.clock(datetime.now(zone))} ({zone.key})."]
     if "join_session" in enabled:
         rows = list_open(business_id)
         if rows:

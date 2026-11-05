@@ -102,7 +102,7 @@ def _check(rules: R.Rules, req: BookingRequest, existing, now: datetime):
     if reason:
         for cand in R.candidate_starts(rules, start):
             if R.violation(rules, cand, cand + length, req.party_size, now, _overlapping(existing, cand, cand + length)) is None:
-                alternatives.append(cand.strftime("%H:%M"))
+                alternatives.append(R.clock(cand))
                 if len(alternatives) == R.MAX_ALTERNATIVES:
                     break
     return start, end, reason, alternatives
@@ -151,7 +151,7 @@ class InternalBackend:
                 name = session.scalar(select(Business.name).where(Business.id == business_id))
             return BookingResult(
                 True, "Booked.", booking.id, str(booking.id)[:REF_LEN].upper(), name,
-                start.strftime("%a %d %b, %H:%M"),
+                f"{start:%a %d %b}, {R.clock(start)}",
             )
 
     def cancel(self, business_id: uuid.UUID, reference: str, phone: str | None, now: datetime | None = None) -> str:

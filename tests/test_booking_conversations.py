@@ -205,8 +205,8 @@ def test_outside_hours_offers_alternatives_from_the_opening_grid(call_for, busin
         "We close at 9. The latest I can offer is 8 pm.",
     )
     assert call.results[-1].startswith("Not available: That time is outside opening hours")
-    assert "Free times that day: 21:00" not in call.results[-1]
-    assert "20:00" in call.results[-1]
+    assert "Free times that day: 9:00 PM" not in call.results[-1]
+    assert "8:00 PM" in call.results[-1]
 
 
 def test_full_slot_second_caller_gets_alternatives_and_takes_one(call_for, business_id):

@@ -47,6 +47,7 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.actions.booking import rules as R
 from app.actions.transfer import TRANSFER_STARTED
 from app.config import get_settings
 from app.db import tenant_session
@@ -726,7 +727,8 @@ class CallSession:
             except (ZoneInfoNotFoundError, ValueError):
                 log.warning("business %s: bad timezone %r, using UTC", self.business_id, business.timezone)
                 tz = ZoneInfo("UTC")
-            now = datetime.now(tz).strftime("%A %Y-%m-%d %H:%M")
+            _now = datetime.now(tz)
+            now = f"{_now:%A %Y-%m-%d} {R.clock(_now)}"
             self._system_prompt = (
                 f"{VOICE_SYSTEM_PROMPT}\n\nCurrent local time at the business: {now}\n\n{format_profile(profile)}"
             )
