@@ -87,7 +87,8 @@ Cost rule (DEC-33): only free or pay-per-use services, no monthly fees. Secrets 
 - **Subagents** (`.claude/agents/`): `Agent_opus_ARCHITECT` (Opus, read-only, plans a feature with steps tagged QWEN / SONNET / CLAUDE / USER), `Agent_sonnet5.5_CODE` (Sonnet, edits files and runs a step's check, never commits), `sonnet5.5_REVIEW` (Sonnet, read-only reviewer of every implemented step).
 - **Local-model tools** (`.claude/tools/`, call LM Studio): `delegate_ask.py` (summarize, find, check), `delegate.py` (draft a shell command), `delegate_code.py` (draft one whole file from a spec), `delegate_doc.py` (plan files, issue drafts, PR text). Review, planning, decisions and commit messages are never delegated.
 - **Hooks** (`.claude/settings.json`): `SessionStart` runs `session_start.sh` (starts ngrok to `PUBLIC_BASE_URL` and the Pixel Agents office on :3100); `SubagentStart` / `SubagentStop` drive the Pixel Agents characters via `pixel.py`. All exit 0 and never block a session.
-- **Skills and MCP servers**: none are checked into the repo. Cloud threads use GitHub MCP tools for issues and PRs. Add any skill or MCP server that the project depends on to this list.
+- **MCP servers** (`.mcp.json`, project scope, versions pinned): `context7` (live library docs for FastAPI, Twilio, Google APIs, pgvector, Vite), `playwright` (Playwright MCP: drive and screenshot the `web/` pages), `postgres` (Postgres MCP Pro, `--access-mode=restricted` = read-only, pointed only at the throwaway `app_scratch` DB, never at `app`). Cloud threads also use GitHub MCP tools for issues and PRs. Local checks: "Claude Code MCP servers and skills" below.
+- **Skills / plugins** (`.claude/settings.json` → `enabledPlugins`): `superpowers@claude-plugins-official` (TDD, debugging, planning and review skills). It overlaps the architect / review flow below; where they disagree, `CLAUDE.md` wins. No project-written skills yet.
 - **Flows**: *feature* = architect plan → `plan/feature-<slug>.md` + GitHub issues → implement (qwen or Sonnet) → Sonnet review → fixes → user check → PR. *Small change* = branch, qwen drafts, real check, Sonnet review, user check, PR. Claude-config-only changes go straight to `main`. Work is tracked as GitHub issues in milestones named `S<stage> · M<n> <name>`; labels `area:*`, `type:*`, `blocked`, `in-progress`, `LOCAL_USER_PHONE` (needs the Mac or a real call). Merged PR → close the issue, remove `in-progress`.
 
 ### Test flows
@@ -103,6 +104,35 @@ Cost rule (DEC-33): only free or pay-per-use services, no monthly fees. Secrets 
 
 There is no CI. Cloud sessions have no LM Studio, Google credentials or Twilio, so checks
 that need them are not run there and are listed in the PR as not run.
+
+### Claude Code MCP servers and skills (check once on the Mac)
+
+Config: `.mcp.json` and `.claude/settings.json`. Needs Node.js (`npx`), [uv](https://docs.astral.sh/uv/)
+(`uvx`) and the compose Postgres running. Nothing here was run when it was added (the cloud
+session has no Mac): run these steps once and report any that fail.
+
+1. **Approve the servers.** Start `claude` in the repo, accept the project MCP prompt, then `/mcp`:
+   `context7`, `playwright` and `postgres` should all say *connected*. First start downloads the packages.
+2. **Context7.** Ask: "use context7 to show the current FastAPI `lifespan` example". It should call
+   `resolve-library-id` / `query-docs` and answer from the docs.
+3. **Playwright MCP.** Build and serve the app, then ask Claude to open it and screenshot it:
+   ```bash
+   (cd web && npm ci && npm run build)
+   uv run uvicorn app.main:app --timeout-graceful-shutdown 1
+   ```
+   Ask: "open http://localhost:8000/web/chat.html and describe the page". It should return a snapshot or screenshot.
+   If the browser is missing: `npx playwright install chromium`. Mic and Twilio flows still need a human.
+4. **Postgres MCP Pro (read-only, scratch DB only).** It is configured for `app_scratch`, so create it first
+   (steps in "Throwaway database" above, option a or b), then ask: "list the tables in the database"
+   and "show the 5 largest `chunks` by text length". Then confirm it is read-only: ask it to
+   `CREATE TABLE x(i int)`; it must be refused. Drop the scratch DB when done. Never change the URI to `app`.
+5. **Superpowers.** `/plugin` should list `superpowers` as installed (if it is not, run
+   `/plugin install superpowers@claude-plugins-official`). Then `/help` or ask "what superpowers skills are available?"
+   and expect names such as brainstorming, test-driven-development, systematic-debugging.
+6. **No regressions.** `uv run pytest -q` and `cd web && npm run typecheck && npm test` still pass.
+
+If a server fails to start, `claude mcp list` shows the error. To turn one off for yourself without
+touching the repo, list it under `disabledMcpjsonServers` in `.claude/settings.local.json` (not git-ignored yet, so do not commit it).
 
 ## Run locally (stage 1)
 
