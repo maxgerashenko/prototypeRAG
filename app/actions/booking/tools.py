@@ -15,12 +15,14 @@ whose `settings["enabled_tools"]` lists them (#151). `app/voice/tools.py` import
 import re
 from difflib import SequenceMatcher
 
+from sqlalchemy import select
+
 from app.actions.booking import sessions as sessions_
 from app.actions.booking.internal import BookingBackend, BookingRequest, InternalBackend
 from app.actions.registry import ActionContext, Tool, register
 from app.config import get_settings
 from app.db import tenant_session
-from app.db.models import Conversation
+from app.db.models import Conversation, Message, heard_text, message_order
 
 E164 = re.compile(r"^\+[1-9]\d{7,14}$")
 
@@ -62,6 +64,70 @@ def _phone(ctx: ActionContext, args: dict) -> str | None:
     return normalize_phone(args.get("phone")) if isinstance(args.get("phone"), str) else None
 
 
+# names a model invents when the caller has not given one (seen in live calls: "John Doe", "Caller")
+_PLACEHOLDER_NAMES = {
+    "john doe", "jane doe", "caller", "caller unknown", "unknown", "unknown caller", "guest", "customer",
+    "client", "name", "user", "test", "anonymous", "n/a", "none",
+}
+NAME_NEEDED = "Error: not booked. The caller has not given their name: ask for it, never make one up."
+
+
+LAST_NAME_NEEDED = (
+    "Error: not booked. The caller gave only a first name: ask for their last name, then call join_session "
+    "again with first_name and last_name."
+)
+
+
+READBACK_NEEDED = (
+    "Error: not booked. The caller has not been asked yet. Read the session, its day and time and the name back "
+    "and ask \"Shall I book it?\"; call join_session with confirmed=true only after their clear yes to that."
+)
+
+
+_NAME_QUESTION = re.compile(
+    r"(first and last name|last name|surname|full name|what(?:'s| is) your name|(?:give|tell|confirm|provide|have) (?:me )?your name(?! as\b))", re.I
+)
+
+
+_DETAIL_QUESTION = re.compile(_NAME_QUESTION.pattern[:-1] + r"|phone number|your number|contact number)", re.I)
+
+
+def _read_back_asked(ctx: ActionContext, first: str, asked: re.Pattern = _NAME_QUESTION) -> bool:
+    """The booking is real only after a read-back: if the bot's last message was asking for the name,
+    "My name is Tom Baker" is the answer to that, not a yes to booking. No conversation (unit tests, API calls): not checked."""
+    if ctx.conversation_id is None:
+        return True
+    with tenant_session(ctx.business_id) as session:
+        last = session.scalars(
+            select(Message.content).where(
+                Message.business_id == ctx.business_id, Message.conversation_id == ctx.conversation_id,
+                Message.role == "assistant",
+            ).order_by(*message_order())
+        ).all()
+    if not last:
+        return False
+    sentences = [x for x in re.split(r"(?<=[.!?])\s+", heard_text(last[-1]).strip()) if x]
+    return not (sentences and asked.search(sentences[-1]))  # a read-back may mention the name; only a closing request counts
+
+
+def _is_placeholder(first: str, last: str = "") -> bool:
+    full = " ".join(f"{first} {last}".lower().split())
+    if any(c in full for c in "[]{}<>_") or "first name" in full or "last name" in full:
+        return True  # an unfilled template: "[Caller's First Name]"
+    return full in _PLACEHOLDER_NAMES or first.lower().strip() in _PLACEHOLDER_NAMES
+
+
+_TABLE_WORDS = {"table", "a table", "table booking", "table reservation", "reservation", "dinner", "restaurant table"}
+
+
+def _service(args: dict) -> str | None:
+    """A service makes the booking an appointment; models sometimes pass "table" as the service."""
+    service = args.get("service")
+    if not isinstance(service, str) or service.strip().lower() in _TABLE_WORDS:
+        return None
+    return service
+
+
 def _request(ctx: ActionContext, args: dict, phone: str | None = None) -> BookingRequest | str:
     for key in ("date", "time"):
         if not isinstance(args.get(key), str) or not args[key].strip():
@@ -71,7 +137,7 @@ def _request(ctx: ActionContext, args: dict, phone: str | None = None) -> Bookin
         return "Error: party_size must be a whole number."
     return BookingRequest(
         day=args["date"], at=args["time"], party_size=party,
-        service=args.get("service") if isinstance(args.get("service"), str) else None,
+        service=_service(args),
         name=str(args.get("first_name") or args.get("name") or ""),
         last_name=str(args.get("last_name") or ""), phone=phone,
         notes=args.get("notes") if isinstance(args.get("notes"), str) else None,
@@ -100,6 +166,10 @@ def create_booking(ctx: ActionContext, args: dict) -> str:
     request = _request(ctx, args, phone)
     if isinstance(request, str):
         return request
+    if _is_placeholder(request.name, request.last_name):
+        return NAME_NEEDED
+    if not _read_back_asked(ctx, request.name, _DETAIL_QUESTION):
+        return READBACK_NEEDED
     result = backend.create(ctx.business_id, request)
     if not result.ok:
         return f"Error: not booked. {result.message}{_alternatives(result.alternatives)}"
@@ -139,8 +209,8 @@ _CLOCK = re.compile(r"(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?m?\b", re.IGNORECASE)
 
 
 def _starts_at(when: str) -> str:
-    """'Mon 02 Nov, 10:00-11:00' -> '10:00'."""
-    return when.split(",")[-1].strip().split("-")[0]
+    """'Mon 02 Nov, 10:00 to 11:00' (or '10:00-11:00') -> '10:00'."""
+    return re.split(r"\s*(?:-|to)\s*", when.split(",")[-1].strip())[0]
 
 
 def _mentions_time(text: str, start: str) -> bool:
@@ -220,6 +290,12 @@ def join_session(ctx: ActionContext, args: dict) -> str:
     first, last = text("first_name") or text("name"), text("last_name")
     if not first:
         return "Error: a name for the booking is needed."
+    if _is_placeholder(first, last):
+        return NAME_NEEDED
+    if not last and len(first.split()) < 2:
+        return LAST_NAME_NEEDED
+    if not _read_back_asked(ctx, first.split()[0]):
+        return READBACK_NEEDED
     try:
         r = sessions_.join_session(
             ctx.business_id, ref, ctx.conversation_id, first, _phone(ctx, args), last_name=last

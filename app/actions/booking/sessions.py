@@ -348,7 +348,7 @@ def list_open(
             out.append({
                 "ref": session_ref(r.id), "name": r.name, "booked": booked, "max_attendees": r.max_attendees,
                 "full": booked >= r.max_attendees,
-                "when": f"{a:%a %d %b}, {a:%H:%M}-{b:%H:%M}",
+                "when": f"{a:%a %d %b}, {a:%H:%M} to {b:%H:%M}",  # "10:00-11:00" was read aloud as two sessions
             })
         return out
 
