@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@4.5.0"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@0.0.84"]
+    },
+    "postgres": {
+      "command": "uvx",
+      "args": ["postgres-mcp==0.3.0", "--access-mode=restricted"],
+      "env": {
+        "DATABASE_URI": "postgresql://app:app@localhost:5432/app_scratch"
+      }
+    }
+  }
+}
