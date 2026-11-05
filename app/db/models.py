@@ -335,6 +335,7 @@ class Conversation(Base):
             "outcome IN ('info_request', 'booked', 'message', 'transferred', 'unresolved')", name="outcome"
         ),
         UniqueConstraint("business_id", "id"),
+        CheckConstraint("review_status IN ('verified', 'in_testing', 'fixed')", name="review_status"),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -353,6 +354,10 @@ class Conversation(Base):
     follow_up: Mapped[bool | None] = mapped_column(Boolean)
     summarized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Manual review: NULL = not checked yet
+    review_status: Mapped[str | None] = mapped_column(Text)
+    review_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 class Message(Base):
     __tablename__ = "messages"

@@ -24,7 +24,7 @@ export function convo(
     at_s: 2 + i * 19,
   }));
   return { id, channel: "voice", source, title, started_at: new Date(now - startedMsAgo).toISOString(), duration_s: durS, messages,
-    summary: null, intent: null, outcome: null, follow_up: null };
+    summary: null, intent: null, outcome: null, follow_up: null, review_status: null, review_note: null };
 }
 
 /** List row for a conversation: preview = last message, "You: " first if the caller said it. */

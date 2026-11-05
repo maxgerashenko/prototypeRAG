@@ -95,11 +95,16 @@ export type ConversationSource = "twilio" | "web";
 /** Post-call summary (app/actions/summary.py); all null until the call is summarized (chats never are). */
 export type CallOutcome = "booked" | "info_request" | "message" | "transferred" | "unresolved";
 
+/** Whether a human/agent checked the conversation; null = not checked yet. */
+export type ReviewStatus = "verified" | "in_testing" | "fixed";
+
 export interface CallSummaryFields {
   summary: string | null;
   intent: string | null;
   outcome: CallOutcome | null;
   follow_up: boolean | null;
+  review_status: ReviewStatus | null;
+  review_note: string | null;
 }
 
 /** Calls nobody spoke in are not listed. `preview` already starts with "You: " when the caller spoke last. */

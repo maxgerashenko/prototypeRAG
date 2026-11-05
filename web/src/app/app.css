@@ -461,6 +461,12 @@ a:hover { color: var(--conversations-light); }
 }
 .badge-outcome.outcome-booked { background: var(--bookings); color: var(--ink); }
 .badge-outcome.outcome-unresolved { border-color: #5c2328; color: #ffc9cc; background: #2a1517; }
+.badge-review {
+  font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 8px;
+  background: var(--conversations-tint); color: var(--text); border: 1px solid var(--conversations);
+}
+.badge-review.review-verified { background: var(--phone-bg); border-color: var(--phone); color: var(--phone); }
+.badge-review.review-in_testing { background: var(--amber-bg); border-color: var(--amber); color: var(--amber); }
 .badge-follow { border-color: #8a6d1f; color: #ffe08a; background: #2b2410; }
 
 /* ---------- pull to refresh (mobile) ---------- */

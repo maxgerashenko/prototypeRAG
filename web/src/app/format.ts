@@ -96,6 +96,18 @@ const OUTCOME_LABELS: Record<string, string> = {
   unresolved: "Unresolved",
 };
 
+const REVIEW_LABELS: Record<string, string> = {
+  verified: "Verified",
+  in_testing: "In testing",
+  fixed: "Fixed",
+};
+
+/** Badge text for a review status; null when not checked. Unknown values are shown as sent. */
+export function reviewLabel(status: string | null | undefined): string | null {
+  if (!status) return null;
+  return REVIEW_LABELS[status] ?? status;
+}
+
 /** Badge text for a call outcome; null when there is none. Unknown values are shown as sent. */
 export function outcomeLabel(outcome: string | null | undefined): string | null {
   if (!outcome) return null;

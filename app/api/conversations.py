@@ -7,7 +7,7 @@ went through Twilio (a phone call or a Voice SDK call, both store `call_sid`), "
 otherwise (the browser voice app or the chat page)."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -18,6 +18,7 @@ from app.db.models import Conversation, Message, message_order
 router = APIRouter()
 
 Source = Literal["twilio", "web"]
+ReviewStatus = Literal["verified", "in_testing", "fixed"]
 
 class CallSummaryFields(BaseModel):
     """Post-call summary columns (app/actions/summary.py); all None until the call is summarized."""
@@ -25,6 +26,8 @@ class CallSummaryFields(BaseModel):
     intent: str | None = None
     outcome: str | None = None
     follow_up: bool | None = None
+    review_status: ReviewStatus | None = None
+    review_note: str | None = None
 
 def summary_fields(conversation: Conversation) -> dict:
     return {
@@ -32,6 +35,8 @@ def summary_fields(conversation: Conversation) -> dict:
         "intent": conversation.intent,
         "outcome": conversation.outcome,
         "follow_up": conversation.follow_up,
+        "review_status": conversation.review_status,
+        "review_note": conversation.review_note,
     }
 
 class ConversationSummary(CallSummaryFields):
@@ -161,3 +166,19 @@ def get_conversation_detail(business_id: uuid.UUID, conversation_id: uuid.UUID) 
             messages=message_outs,
             **summary_fields(conv),
         )
+
+class ReviewIn(BaseModel):
+    status: ReviewStatus | None
+    note: str | None = None
+
+@router.patch("/businesses/{business_id}/conversations/{conversation_id}/review")
+def set_review(business_id: uuid.UUID, conversation_id: uuid.UUID, body: ReviewIn) -> CallSummaryFields:
+    with tenant_session(business_id) as session:
+        conv_stmt = select(Conversation).where(Conversation.id == conversation_id, Conversation.business_id == business_id)
+        conv = session.execute(conv_stmt).scalars().first()
+        if conv is None:
+            raise HTTPException(404, "conversation not found")
+        conv.review_status = body.status
+        conv.review_note = body.note
+        conv.reviewed_at = datetime.now(UTC) if body.status is not None else None
+        return CallSummaryFields(**summary_fields(conv))
