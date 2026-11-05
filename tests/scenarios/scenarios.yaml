@@ -105,6 +105,28 @@ scenarios:
       booking_session: today_plus_1
       seats: {today_plus_2: 0, today_plus_3: 0}
 
+  - id: session_name_with_and_without_suffix
+    problems: [P12]
+    persona: |
+      Your name is Sam Rivera, phone +15550100777. You want the "Polish sauna" session tomorrow morning
+      (today is {day:0}, tomorrow is {day:1}). A later session with almost the same name runs the day after
+      in the evening; you do NOT want that one. When asked for your name give first and last name. If the
+      bot reads details back and asks to book, say yes only if it is tomorrow morning. After you got a
+      booking reference, output <END>.
+    opening: "Hi, I'd like to book the Polish sauna session tomorrow morning."
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: morning, name: Sauna Polish session, day: 1, hour: 10, max_attendees: 6}
+        - {key: evening, name: Sauna Polish, day: 2, hour: 18, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      guest: "Sam Rivera"
+      booking_session: morning
+      hour: 10
+      seats: {evening: 0}
+      bot_mentions_day: 1
+
   - id: session_full
     persona: |
       Your name is Peter Hill, phone +15550100555. You want to join the "Banya Evening" session tomorrow.

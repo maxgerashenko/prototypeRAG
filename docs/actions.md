@@ -202,7 +202,10 @@ with `session_id` and `type='session'`.
   (cancels attendees, deletes the event, texts callers after commit), `remove_attendee`.
 - **Caller side** (tools): `list_open` (public, not ended, next 30 days or one day, up to 10) and
   `join_session` (forced sync, per-calendar lock, private → refused, full → refused, one seat per
-  conversation).
+  conversation). A session `when` is `Thu 05 Nov, 10:00 AM to 11:00 AM`: every caller-facing time
+  comes from `rules.clock()` (12-hour with AM/PM). If the model passes a session name instead of the
+  code, `tools.resolve_session` finds it, using the bot's last read-back as a hint. More in
+  [bookings.md](bookings.md).
 - **With Google** (`get_client()` is not `None` only when `BOOKING_BACKEND=google_calendar`):
   Google owns which sessions exist and when; Postgres owns seats, the private flag and
   attendees. App-made sessions are inserted as events with id = session UUID hex (a Google

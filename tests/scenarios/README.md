@@ -8,7 +8,7 @@ and transcript assertions, never from an LLM grader. Voice, Twilio and TTS are o
 
 ```
 uv run pytest -q tests/scenarios -m scenario          # all (about 15 s per scenario)
-uv run pytest -q tests/scenarios -m P5                # one problem id (P2 P3 P5 P6 P8)
+uv run pytest -q tests/scenarios -m P5                # one problem id (P2 P3 P5 P6 P8 P12)
 uv run python -m tests.scenarios.harness <scenario-id>   # prints the live transcript + DB state
 SCENARIO_RETRIES=0 ...                                 # default 1: a failed scenario is retried once
 ```
@@ -32,6 +32,7 @@ passes only on a retry raises a warning ("flaky").
 - c: no booking without `guest_id`
 - d: bot reply <= 40 words and no new list of several session times, unless the caller asked for a list/details
 - e: a year the bot names is the current (or next) year
+- f: every time the bot says has AM or PM (never `10:00` or `18:00`)
 
 ## Scenarios (`scenarios.yaml`, format described at its top)
 
@@ -49,3 +50,4 @@ passes only on a retry raises a warning ("flaky").
 | name_given_once | P6 | name given once, never asked again, <= 1 confirmation |
 | context_memory_session_then_yes | P6 | chosen session + name remembered, "yes" books it |
 | brevity_no_relist | P5 | after the pick, no other session names, short replies |
+| session_name_with_and_without_suffix | P12 | "Sauna Polish session" tomorrow 10 AM vs "Sauna Polish" the day after 6 PM: the seat is in the morning one |

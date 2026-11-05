@@ -92,6 +92,20 @@ _NAME_QUESTION = re.compile(
 _DETAIL_QUESTION = re.compile(_NAME_QUESTION.pattern[:-1] + r"|phone number|your number|contact number)", re.I)
 
 
+def _last_bot_text(ctx: ActionContext) -> str:
+    """What the caller last heard from the bot in this conversation ("" without one)."""
+    if ctx.conversation_id is None:
+        return ""
+    with tenant_session(ctx.business_id) as session:
+        last = session.scalars(
+            select(Message.content).where(
+                Message.business_id == ctx.business_id, Message.conversation_id == ctx.conversation_id,
+                Message.role == "assistant",
+            ).order_by(*message_order())
+        ).all()
+    return heard_text(last[-1]).strip() if last else ""
+
+
 def _read_back_asked(ctx: ActionContext, first: str, asked: re.Pattern = _NAME_QUESTION) -> bool:
     """The booking is real only after a read-back: if the bot's last message was asking for the name,
     "My name is Tom Baker" is the answer to that, not a yes to booking. No conversation (unit tests, API calls): not checked."""
@@ -208,13 +222,24 @@ _CODE = re.compile(r"[0-9a-fA-F-]{6,}")
 _CLOCK = re.compile(r"(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?m?\b", re.IGNORECASE)
 
 
+_WHEN_START = re.compile(r"(\d{1,2}):(\d{2})\s*([ap]m)?", re.IGNORECASE)
+
+
 def _starts_at(when: str) -> str:
-    """'Mon 02 Nov, 10:00 to 11:00' (or '10:00-11:00') -> '10:00'."""
-    return re.split(r"\s*(?:-|to)\s*", when.split(",")[-1].strip())[0]
+    """'Mon 02 Nov, 10:00 AM to 11:00 AM' (or '3:00 PM', or 24-hour '15:00-16:00') -> 'HH:MM' on a 24-hour clock."""
+    found = _WHEN_START.search(when.split(",")[-1])
+    if not found:
+        return ""
+    hour, minute, ap = int(found[1]), found[2], (found[3] or "").lower()
+    if ap:
+        hour = hour % 12 + (12 if ap == "pm" else 0)
+    return f"{hour:02d}:{minute}"
 
 
 def _mentions_time(text: str, start: str) -> bool:
     """Does `text` name the 'HH:MM' start, as '10:00', '10 am', '3 pm' or '15:00'?"""
+    if not start:
+        return False
     hour, minute = (int(x) for x in start.split(":"))
     for h, m, ap in _CLOCK.findall(text):
         h, m = int(h), int(m or 0)
@@ -252,14 +277,16 @@ def _best_guess(rows: list[dict], text: str) -> dict | None:
     return next((r for r in best if _mentions_time(text, _starts_at(r["when"]))), best[0])
 
 
-def resolve_session(business_id, text: str) -> tuple[str | None, str]:
+def resolve_session(business_id, text: str, hint: str = "") -> tuple[str | None, str]:
     """The model sometimes passes the session's name and time instead of its code (the codes are
     not in the call's history from one turn to the next). Look the session up in the open list:
-    -> (code, "") when exactly one matches, else (None, message listing the candidates)."""
+    -> (code, "") when exactly one matches, else (None, message listing the candidates).
+    `hint` is what the bot last said (its read-back names the session and the time the caller agreed
+    to): it narrows the match, so a bare "Sauna Polish" cannot slip to a differently named later session."""
     rows = sessions_.list_open(business_id)
-    words = set(re.findall(r"[a-z0-9]+", text.lower()))
+    words = set(re.findall(r"[a-z0-9]+", f"{text} {hint}".lower()))
     named = [r for r in rows if set(re.findall(r"[a-z0-9]+", r["name"].lower())) <= words]
-    timed = [r for r in named if _mentions_time(text, _starts_at(r["when"]))]
+    timed = [r for r in named if _mentions_time(f"{text} {hint}", _starts_at(r["when"]))]
     found = timed or named if len(named) > 1 else named
     if len(found) == 1:
         return found[0]["ref"], ""
@@ -283,7 +310,7 @@ def join_session(ctx: ActionContext, args: dict) -> str:
     if not isinstance(ref, str) or not ref.strip():
         return "Error: the session code from list_sessions is needed."
     if not _CODE.fullmatch(ref.strip()):
-        ref, problem = resolve_session(ctx.business_id, ref)
+        ref, problem = resolve_session(ctx.business_id, ref, _last_bot_text(ctx))
         if ref is None:
             return problem
     text = lambda key: args[key].strip() if isinstance(args.get(key), str) else ""  # noqa: E731
@@ -323,7 +350,7 @@ register(Tool(
         "Read the session, time and the name (spelled out) back and get a yes first."
     ),
     parameters={
-        "session": {"type": "string", "description": "Session code from list_sessions, e.g. 3F9A1C2B."},
+        "session": {"type": "string", "description": "The session's 8-character code exactly as list_sessions printed it; never invent one."},
         "first_name": {"type": "string", "description": "Caller's first name."},
         "last_name": {"type": "string", "description": "Caller's last name. Ask for it if they gave only a first name."},
         "phone": {"type": "string", "description": "Only if the caller's number is not known: full international number."},
@@ -363,7 +390,7 @@ register(Tool(
     name="cancel_booking",
     description="Cancel a booking the caller made, by its reference (given when it was booked).",
     parameters={
-        "reference": {"type": "string", "description": "Booking reference, e.g. 3F9A1C2B."},
+        "reference": {"type": "string", "description": "The booking reference the caller read out or was given (8 characters)."},
         "phone": {"type": "string", "description": "Only if the caller's number is not known."},
     },
     required=("reference",),

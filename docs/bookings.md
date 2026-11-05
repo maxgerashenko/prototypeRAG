@@ -52,7 +52,8 @@ the prompt. Every refusal is a tool result string the model sees, so it can reco
 | Read-back needed | `tools._read_back_asked` → `READBACK_NEEDED` | a booking made on the answer to "what is your name?" rather than to a read-back. Looks only at the **last sentence** of the bot's last message, using `heard_text` (what the caller really heard) |
 | Session code resolution | `tools.resolve_session` | the model passing a session *name*; several sessions can share a name, so a name is matched to the soonest open one or refused |
 | Phone from caller ID | `tools._phone` | the model's guessed number; the model's number is used only when there is no caller ID |
-| Date/time parse | `tools._starts_at`, `_mentions_time` | both `10:00` and `10:00 to 11:00` styles |
+| Date/time parse | `tools._starts_at`, `_mentions_time` | reads `10:00 AM to 11:00 AM`, `10:00-11:00` and 24-hour times |
+| Session lookup by name | `tools.resolve_session(…, hint)` | the model lost the code and passed a name; the bot's last read-back (session and time the caller agreed to) narrows the match, so a bare name cannot slip to a differently named later session |
 | Table words as service | `tools._service` | `service="table"` turning a table into an appointment |
 
 Chat-only reply guards (non-streaming `answer_question`, `app/rag/answer.py`). They fix the text the
@@ -79,6 +80,12 @@ voice path (open item, see §5).
 - Seats are counted and compared to `max_attendees` inside the lock.
 - Google event ids are derived from our id (base32hex); a retry after a timeout gets 409 =
   "already there", never a second event.
+
+### 1.4 Times
+
+Every time the caller hears or the model reads is on a 12-hour clock with AM/PM: `rules.clock()`
+gives `10:00 AM`, `6:30 PM`; session lists, booking results, alternatives, cancellation texts and the
+"Now" line in the prompt all use it. Prompts tell the model to say times that way.
 
 ## 2. Source of truth: who owns what
 
@@ -190,16 +197,17 @@ Invariants checked in every scenario:
 | c | no booking without `guest_id` |
 | d | a bot reply has at most 40 words and does not list several session times unless asked |
 | e | a year the bot names is the current (or next) one |
+| f | every time the bot says carries AM or PM (`10:00 AM`, never `10:00` or `18:00`) |
 
 Per-scenario `expect` keys (`scenarios.yaml`): `new_confirmed`, `guest`, `phone`, `booking_session`,
 `booking_type`, `party_size`, `day`, `hour`, `seats`, `cancelled`, `untouched`, `bot_says`,
 `forbid_after`, `max_confirmations`, `bot_mentions_day`, `skip_claim_check`.
 
-The 18 scenarios: session happy path, first name only, declined at read-back, same name on several
+The 19 scenarios: session happy path, first name only, declined at read-back, same name on several
 days, full session, table with party and phone, cancel by reference + phone, changes mind about
 time, garbled session name (STT), name given once, context memory then "yes", brevity / no re-list,
 ambiguous same name on two days, name repeated not re-asked, day and time not re-asked, sessions
-question uses the tool, booking reference is read, yes to read-back books without asking again.
+question uses the tool, booking reference is read, yes to read-back books without asking again, two sessions whose names differ only by the word "session" (P12: the right one is booked).
 Each is tagged with the known problem it guards (P2 false "booked", P3 garbled name, P5 brevity, P6
 context memory, P8 right date; later P9–P11).
 

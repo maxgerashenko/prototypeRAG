@@ -42,4 +42,5 @@ markers = [
     "P5: scenario guards brevity / no re-listing",
     "P6: scenario guards context memory (name once, yes books the chosen session)",
     "P8: scenario guards the real date in read-backs",
+    "P12: scenario guards the right session when the model passes only a name",
 ]

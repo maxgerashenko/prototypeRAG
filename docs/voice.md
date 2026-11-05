@@ -157,7 +157,7 @@ and `tools_prompt()` adds the booking/session rules only for those.
 |---|---|---|
 | `VOICE_SYSTEM_PROMPT` | `session.py` | Answer only from profile or search results; search for anything else; offer `take_message` / `transfer_to_human`; never mention profile/search; name the area for area-specific hours; 1–3 short spoken sentences, no lists/markdown/URLs; caller's language; warm goodbye. |
 | `SYSTEM_PROMPT` | `prompt.py` | Same grounding rule, short answers, same language. |
-| `BOOKING_PROMPT`, `SESSION_PROMPT` | `prompt.py` | Check before offering, read back, wait for yes, `confirmed=true`, never claim done unless the tool said so. |
+| `BOOKING_PROMPT`, `SESSION_PROMPT` | `prompt.py` | Check before offering, read back in one short sentence ending "Shall I book it?" (no apology, no seat counts), wait for yes, `confirmed=true`, times said with AM/PM, never claim done unless the tool said so. |
 | `format_summary` | `prompt.py` | Business summary as tone, not facts; guest themes as opinions; capped at 480 chars. |
 
 ## 6. Key functions
