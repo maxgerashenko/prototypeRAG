@@ -25,6 +25,85 @@ Comparisons: [Crawler vs Scrapy, PDF vs MarkItDown](plan/comparison-scrapy-marki
 
 Working on this repo with Claude Code: see [CLAUDE.md](CLAUDE.md) for the file structure and how architecture discussions are recorded.
 
+## Harness, services and test flows (for agents without file access)
+
+A self-contained summary of how this project is built, run, tested and worked on, so a
+reader that can only see this README (for example the daily "PrototypeRAG updates" scheduled
+task) knows the stack without opening other files. **Keep it current**: the rule in
+[CLAUDE.md](CLAUDE.md) ("Keep the README harness section current") says to update it in the
+same change whenever a flow, skill, agent, hook, MCP server, external service, infrastructure
+piece or test flow changes. Plans and reasons: [plan/DECISIONS.md](plan/DECISIONS.md);
+how each layer is coded: [docs/README.md](docs/README.md).
+
+### Product and stack
+
+Multi-business voice and chat assistant: crawl a business's website → organize into chunks
+and facts → RAG over Postgres + pgvector → answer by chat, in the browser (push-to-talk) and
+by phone (Twilio) → actions (bookings, call transfer, take a message, call summaries). One
+deployment for all businesses, isolated by `business_id` (Row-Level Security comes in stage 3).
+Stages: 1 local (now), 2 many businesses, 3 Google Cloud (Cloud Run, Neon, Gemini).
+
+| Part | Tech |
+|---|---|
+| Backend | Python 3.12, FastAPI + uvicorn (`app/`), SQLAlchemy + Alembic, `uv` for dependencies |
+| Layers | `app/ingest` (crawler, organize, facts), `app/rag` (index, retrieve, answer), `app/voice` (session, VAD, STT/TTS, Twilio), `app/actions` (booking, transfer, messages, summary), `app/api` (REST, WebSocket, SSE), `app/insights` |
+| Database | Postgres 16 + pgvector in Docker (the only container in day-to-day use); vectors and all app data in one DB, no other store |
+| LLM | `openai` client against an OpenAI-compatible endpoint: LM Studio locally, Gemini in cloud (env vars only). No LangChain or LlamaIndex |
+| Front end | React 19 + TypeScript, Vite multi-page app in `web/`, built to `web/dist` and served by FastAPI under `/web` |
+| Speech | Google Speech-to-Text and Text-to-Speech (Application Default Credentials), also locally; `webrtcvad` for voice activity detection |
+
+### Local models (LM Studio on a 64 GB Mac)
+
+- Chat and voice: `qwen/qwen3.6-35b-a3b` with reasoning off (`LLM_MODEL`, `CHAT_REASONING_EFFORT=none`, `VOICE_REASONING_EFFORT=none`); was `google/gemma-4-12b` until 2026-11-02 (DEC-58).
+- Embeddings: `text-embedding-nomic-embed-text-v1.5`, 768 dims (`EMBED_MODEL`, `EMBED_DIM`).
+- Code drafting for Claude Code delegation: the same qwen model with thinking on, loaded only when delegating.
+- Gemini is the cloud swap; switching is env vars plus a re-index (vectors differ).
+
+### External services
+
+| Service | Used for | Where | Credentials |
+|---|---|---|---|
+| LM Studio (local) / Gemini (cloud) | chat, voice and fact-extraction LLM, embeddings | `app/llm.py` | `LLM_*`, `EMBED_*` env vars |
+| Google Speech-to-Text / Text-to-Speech | voice calls | `app/voice/stt.py`, `tts.py` | `gcloud auth application-default login` (ADC) |
+| Twilio | phone number, Voice SDK test calls, webhooks, media stream, SMS | `app/voice/twilio_*.py`, `app/actions/sms.py` | `TWILIO_*`, `PUBLIC_BASE_URL` |
+| ngrok | public URL for Twilio webhooks to the local app | started by the SessionStart hook | `PUBLIC_BASE_URL` in `.env` |
+| Google Calendar | bookings backend (`BOOKING_BACKEND=google_calendar`), polled every 60 s | `app/actions/booking/` | OAuth token file or service-account key |
+| Google Places | business listing data; client code exists, not live-tested and not yet called from the crawl | `app/ingest/places.py` | a Google API key (not set up yet) |
+| Anthropic API (optional) | fact extraction when the Haiku choice is picked | `app/ingest/facts.py` | `ANTHROPIC_API_KEY` |
+
+Cost rule (DEC-33): only free or pay-per-use services, no monthly fees. Secrets live in
+`.env` (git-ignored); `.env.example` lists every variable.
+
+### Data and infrastructure
+
+- Stage 1: Postgres in Docker (`docker compose up -d --wait`); app, crawler and LM Studio run natively. `docker compose --profile app` also runs migrate + API from the one `Dockerfile`; `docker compose run --rm crawler --url <site>` runs the crawler.
+- Schema in `app/db/models.py`, migrations in `app/db/migrations` (`uv run alembic upgrade head`). The dev DB is shared with tests, so leftover test businesses appear in the app; `scripts/prune_businesses.py` cleans them. Never run a downgrade or destructive test on the dev DB; use a throwaway `app_scratch` DB (see "Throwaway database" below).
+- Crawled pages, chunks, facts and conversations are stored in Postgres, not files.
+- Stage 3 target: Cloud Run + Cloud Run Jobs with `min-instances=0`, Neon Postgres, Gemini; no Cloud SQL.
+
+### Claude Code harness (`.claude/`, `CLAUDE.md`)
+
+- **Rules** live in `CLAUDE.md` (checked in): plan-file table, decision workflow (DEC/OPEN/R ids), delegation rules, commit and PR rules (no AI-attribution trailers or "Generated by" footers; ask before commit, push or PR; PRs say `Fixes #n`).
+- **Subagents** (`.claude/agents/`): `Agent_opus_ARCHITECT` (Opus, read-only, plans a feature with steps tagged QWEN / SONNET / CLAUDE / USER), `Agent_sonnet5.5_CODE` (Sonnet, edits files and runs a step's check, never commits), `sonnet5.5_REVIEW` (Sonnet, read-only reviewer of every implemented step).
+- **Local-model tools** (`.claude/tools/`, call LM Studio): `delegate_ask.py` (summarize, find, check), `delegate.py` (draft a shell command), `delegate_code.py` (draft one whole file from a spec), `delegate_doc.py` (plan files, issue drafts, PR text). Review, planning, decisions and commit messages are never delegated.
+- **Hooks** (`.claude/settings.json`): `SessionStart` runs `session_start.sh` (starts ngrok to `PUBLIC_BASE_URL` and the Pixel Agents office on :3100); `SubagentStart` / `SubagentStop` drive the Pixel Agents characters via `pixel.py`. All exit 0 and never block a session.
+- **Skills and MCP servers**: none are checked into the repo. Cloud threads use GitHub MCP tools for issues and PRs. Add any skill or MCP server that the project depends on to this list.
+- **Flows**: *feature* = architect plan → `plan/feature-<slug>.md` + GitHub issues → implement (qwen or Sonnet) → Sonnet review → fixes → user check → PR. *Small change* = branch, qwen drafts, real check, Sonnet review, user check, PR. Claude-config-only changes go straight to `main`. Work is tracked as GitHub issues in milestones named `S<stage> · M<n> <name>`; labels `area:*`, `type:*`, `blocked`, `in-progress`, `LOCAL_USER_PHONE` (needs the Mac or a real call). Merged PR → close the issue, remove `in-progress`.
+
+### Test flows
+
+| Check | Command | Needs |
+|---|---|---|
+| Backend tests (about 40 files in `tests/`) | `uv run pytest -q` | Postgres; `tests/test_rag.py` also needs LM Studio |
+| Frontend type check and unit tests | `cd web && npm run typecheck && npm test` (Vitest) | Node |
+| Browser tests | `cd web && npm run e2e` (Playwright, mocked backend) | Node, `npx playwright install chromium` |
+| RAG eval | `uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml` | DB, LM Studio, an indexed business |
+| Pilot flow | ingest `--url …` → `app.rag.index` → eval; hand questions in `questions/` | DB, LM Studio |
+| Live checks only the Mac can do | voice call, push-to-talk, Twilio call, Google Calendar sync | LM Studio, Google ADC, Twilio, ngrok; listed under "Test on Mac" in `plan/03-voice-channel.md` |
+
+There is no CI. Cloud sessions have no LM Studio, Google credentials or Twilio, so checks
+that need them are not run there and are listed in the PR as not run.
+
 ## Run locally (stage 1)
 
 Needs Docker, [uv](https://docs.astral.sh/uv/) (`brew install uv`) and Node.js 20.19+ or 22.12+
