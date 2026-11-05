@@ -53,6 +53,18 @@ def guard_booking_claim(answer: str, messages: list[dict], start: int, history: 
     return NOT_BOOKED_ANSWER
 
 
+FILLER_SENTENCE = re.compile(
+    r"^(?:i\s+(?:apologi[sz]e|am sorry|'m sorry)|sorry|my apologies|apologies|let me (?:confirm|clarify|recap|double[- ]check))\b", re.I)
+
+
+def drop_filler(text: str) -> str:
+    """The first read-back is not a correction: leading sentences that apologise or say "let me
+    confirm again" are cut, so the reply opens with the actual question. Never empties a reply."""
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept = [x for x in sentences if not FILLER_SENTENCE.match(x)]
+    return " ".join(kept) if kept else text
+
+
 ASKS_NAME = re.compile(
     r"(first and last name|last name|surname|full name|what(?:'s| is) your name|"
     r"(?:have|get|take|tell me|give me|spell)\s+(?:me\s+)?(?:your|the)\s+name)", re.I)
@@ -302,7 +314,7 @@ def answer_question(
         message = response.choices[0].message
         if not message.tool_calls:
             if (message.content or "").strip():
-                answer = shorten(message.content)
+                answer = shorten(drop_filler(message.content))
             elif not empty_retried:  # an empty reply is a lost answer: ask once more
                 empty_retried = True
                 continue
@@ -335,7 +347,7 @@ def answer_question(
         ).choices[0].message
         text = (retry.content or "").strip()
         if text and not any(wrong and still(text) for wrong, _, still in checks):
-            answer = shorten(text)
+            answer = shorten(drop_filler(text))
     answer = guard_booking_claim(answer, messages, start, history)
     return AnswerResult(answer=answer, chunks=chunks, profile=profile, messages=prompt)
 
