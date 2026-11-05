@@ -347,6 +347,26 @@ subtitles). Rules for everyone (Claude, architect, Sonnet, qwen specs, reviewer)
 - **Finishing:** a new reusable pattern or a changed rule is written into `design/` (new doc linked
   from `design/README.md`, or an edit of the existing one) in the same change as the code.
 
+## Layer docs (`docs/`) follow the code
+
+`docs/README.md` indexes the layer docs (crawler, data, voice, actions, integrations, API, web) and
+topic docs such as `docs/bookings.md`. They describe the code as it is, so they change with it.
+At the end of every feature or fix that changes behaviour, fields, tools, prompts, guards or tests
+(the main session, or the agent that did the work; the reviewer checks it):
+
+1. **Check relation.** Ask of each change: does it touch something a doc in `docs/` describes (a
+   module, table, field, tool, guard, config, test layer)? `grep -rn "<name>" docs` for the
+   functions, tables and settings you changed.
+2. **Update every doc that is now wrong or incomplete** in the same change as the code, and fix the
+   cross-references (`docs/README.md` "Depends on / Used by", file-to-layer tables) if a file moved
+   layers. Don't leave a doc describing the old behaviour.
+3. **Propose a new doc** when the feature is a distinct topic that cuts across layers or has its own
+   rules, data and tests (like bookings), and no existing doc covers it well: a section in a layer doc
+   would bury it, or it would take more than about a page. Say so to the user in one line and
+   wait for a yes before creating it; then link it from `docs/README.md` and the root `README.md`.
+   A small addition fits a section of the existing doc instead.
+4. In the summary to the user, say which docs were updated, or that none were affected.
+
 ## Writing style for plan files
 
 - English, concise, tables for comparisons, checklists (`- [ ]`) for tasks.
