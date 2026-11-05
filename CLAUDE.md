@@ -276,6 +276,15 @@ when its result arrives:
 - Subagents don't write these themselves — the session that delegated and reviewed the
   work writes them, so the summary includes the review.
 
+## Keep the README harness section current
+
+`README.md` has a section "Harness, services and test flows (for agents without file access)".
+It is the one place a reader without repo access (the scheduled "PrototypeRAG updates" task)
+learns the harness, services, infrastructure and test flows. In the same change as any of
+these, update that section: a flow (feature, small change, issue/PR tracking), a skill,
+subagent, local-model tool or hook in `.claude/`, an MCP server, an external service or its
+credentials, the stack, data or infrastructure, or a test command or what it needs.
+
 ## Ask before submitting
 
 Any agent working in this repo (Claude Code or otherwise) must ask for explicit
