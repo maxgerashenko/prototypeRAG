@@ -50,8 +50,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.actions.transfer import TRANSFER_STARTED
 from app.config import get_settings
 from app.db import tenant_session
-from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
+from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order, heard_text
 from app.llm import get_async_chat_client
+from app.rag.answer import EMPTY_ANSWER, turn_fallback
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import format_profile, format_summary, tools_prompt
 from app.voice import greeting_cache, tts
@@ -435,7 +436,10 @@ class CallSession:
             # keep only what the caller actually heard as context
             reply = " ".join(sentence for sentence, end in zip(spoken, play_ends) if end <= heard_by)
             self._history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
-            await asyncio.shield(asyncio.to_thread(self._save_turn, text, reply))
+            # the transcript keeps what the bot said even when a barge-in cut it off
+            unheard = " ".join(sentence for sentence, end in zip(spoken, play_ends) if end > heard_by)
+            saved = f"{reply} [not heard: {unheard}]".strip() if unheard else reply
+            await asyncio.shield(asyncio.to_thread(self._save_turn, text, saved))
             if "total_ms" not in timings:
                 timings["total_ms"] = _ms(speech_end)
                 log.info("voice turn %s: %s", self.conversation_id, timings)
@@ -483,13 +487,16 @@ class CallSession:
             {"role": "user", "content": text},
         ]
         client = get_async_chat_client()
-        for round_no in range(MAX_TOOL_ROUNDS + 1):
+        start = len(messages)
+        empty_retried = False
+        tool_rounds = 0  # the one retry after an empty reply doesn't use up a tool round
+        while True:
             round_start = len(spoken)
             settings = get_settings()
             # the last round has no tools: a turn that used all its tool rounds (e.g. a booking that
             # went through on the third call) still gets spoken, instead of "couldn't find that"
             # over a booking that exists
-            final = round_no == MAX_TOOL_ROUNDS
+            final = tool_rounds == MAX_TOOL_ROUNDS
             stream = await client.chat.completions.create(
                 model=settings.llm_model, messages=messages, stream=True,
                 reasoning_effort=settings.voice_reasoning_effort,
@@ -519,9 +526,17 @@ class CallSession:
             if buffer.strip():
                 await self._say(buffer.strip(), spoken, play_ends, speech_end, timings)
             if not calls:
+                if len(spoken) > round_start:  # this round said something: that is the answer
+                    return
+                # an empty reply is a lost answer (the caller hears silence): ask once more, then say something
+                if not empty_retried and not final:
+                    empty_retried = True
+                    continue
+                await self._say(turn_fallback(messages, start, EMPTY_ANSWER), spoken, play_ends, speech_end, timings)
                 return
             if final:
                 break
+            tool_rounds += 1
 
             timings.setdefault("tool_start_ms", _ms(speech_end))
             messages.append({
@@ -542,7 +557,10 @@ class CallSession:
                     self._transfer_pending = True
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
             timings.setdefault("tool_end_ms", _ms(speech_end))
-        await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, play_ends, speech_end, timings)
+        await self._say(
+            turn_fallback(messages, start, "Sorry, I couldn't find that. Can I take a message?"),
+            spoken, play_ends, speech_end, timings,
+        )
 
     async def _say(
         self, sentence: str, spoken: list[str], play_ends: list[float], speech_end: float, timings: dict
@@ -685,7 +703,7 @@ class CallSession:
                     ).order_by(*message_order())
                 ).all()
                 if rows:
-                    self._history = [{"role": m.role, "content": m.content} for m in rows]
+                    self._history = [{"role": m.role, "content": heard_text(m.content)} for m in rows]
                     user_msgs = [m for m in rows if m.role == "user"]
                     if user_msgs:
                         raw = user_msgs[0].content.strip()

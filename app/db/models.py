@@ -5,6 +5,7 @@ another business's row — the database rejects cross-tenant links even before R
 Action tables (bookings, ...) are added in step 5 (plan/04-actions.md); `action_log` is first.
 """
 
+import re
 import uuid
 from datetime import datetime
 
@@ -334,8 +335,8 @@ class Conversation(Base):
         CheckConstraint(
             "outcome IN ('info_request', 'booked', 'message', 'transferred', 'unresolved')", name="outcome"
         ),
-        UniqueConstraint("business_id", "id"),
         CheckConstraint("review_status IN ('verified', 'in_testing', 'fixed')", name="review_status"),
+        UniqueConstraint("business_id", "id"),
     )
 
     id: Mapped[uuid.UUID] = _id()
@@ -353,11 +354,11 @@ class Conversation(Base):
     outcome: Mapped[str | None] = mapped_column(Text)
     follow_up: Mapped[bool | None] = mapped_column(Boolean)
     summarized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
     # Manual review: NULL = not checked yet
     review_status: Mapped[str | None] = mapped_column(Text)
     review_note: Mapped[str | None] = mapped_column(Text)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class Message(Base):
     __tablename__ = "messages"
@@ -636,3 +637,12 @@ def message_order() -> tuple:
     transaction, so both get the same `now()` (transaction start); `created_at` alone
     leaves their order undefined. Within a tie the question comes first."""
     return Message.created_at, case((Message.role == "user", 0), else_=1)
+
+
+_NOT_HEARD = re.compile(r"\s*\[not heard: .*\]\s*$", re.S)
+
+
+def heard_text(content: str) -> str:
+    """A voice reply cut by a barge-in is stored whole as "heard [not heard: rest]" so the
+    transcript shows what the bot said; the model's history gets only what the caller heard."""
+    return _NOT_HEARD.sub("", content)
