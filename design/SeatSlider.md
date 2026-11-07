@@ -11,7 +11,7 @@ stops in `web/src/app/bookings.ts` (`seatsToStop`, `stopToSeats`).
 | Stop | Meaning | Stored (`max_attendees`) |
 |---|---|---|
 | 1 … 30 | seat limit; shows `FULL` when reached | the number |
-| 31 (last) = **Private** | no seat limit, closed to the public (only people added by hand; the assistant must never book into it) | `null` (`private: true` in the API) |
+| 31 (last) = **Private** | no seat limit, closed to the public (never listed or offered; a caller who says its exact name can join) | `null` (`private: true` in the API) |
 
 - Native `<input type="range" min=1 max=31 step=1>`: touch, mouse and arrow keys all move one stop at a time.
 - Big value label above the track: the number, or a lock + "Private" in `--bookings`. Under the track:

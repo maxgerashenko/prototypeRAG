@@ -362,8 +362,9 @@ def session_ref(sid: uuid.UUID) -> str:
 
 
 def find_open(business_id: uuid.UUID, ref: str, now: datetime | None = None) -> dict | None:
-    """Read-only look-up of a public, active, not-ended session by its code (the start of its id, any
-    case): {ref, name, when} if exactly one matches, else None. Same lookup as `join_session`, so it has
+    """Read-only look-up of an active, not-ended session by its code (the start of its id, any case), private
+    ones too (a private session is never listed, but a caller who knows its code or name may join it):
+    {ref, name, when, private} if exactly one matches, else None. Same lookup as `join_session`, so it has
     the same missing business filter (demo rule #300: a Google session is shared by every business).
     No calendar sync and no lock: the tools use it only to refuse a code that cannot work."""
     now = now or datetime.now(timezone.utc)
@@ -374,7 +375,7 @@ def find_open(business_id: uuid.UUID, ref: str, now: datetime | None = None) -> 
         found = session.scalars(
             select(GroupSession).where(
                 GroupSession.status == "active", GroupSession.ends_at > now,
-                GroupSession.private.is_(False), cast(GroupSession.id, Text).startswith(ref),
+                cast(GroupSession.id, Text).startswith(ref),
             ).limit(2)
         ).all()
         if len(found) != 1:
@@ -382,7 +383,32 @@ def find_open(business_id: uuid.UUID, ref: str, now: datetime | None = None) -> 
         row = found[0]
         zone = _zone(_business(session, row.business_id).timezone)
         a, b = row.starts_at.astimezone(zone), row.ends_at.astimezone(zone)
-        return {"ref": session_ref(row.id), "name": row.name, "when": f"{a:%a %d %b}, {R.clock(a)} to {R.clock(b)}"}
+        return {"ref": session_ref(row.id), "name": row.name, "when": f"{a:%a %d %b}, {R.clock(a)} to {R.clock(b)}",
+                "private": bool(row.private)}
+
+
+def find_private_by_name(business_id: uuid.UUID, text: str, now: datetime | None = None) -> list[dict]:
+    """Private, active, not-ended sessions whose whole name the caller said: the name's words are one consecutive run
+    of the words of `text` (any case; a part of a name, reordered or spread-apart words are not enough). [{ref, name, when}], soonest first. Private sessions are never
+    listed, so this is the only way a name reaches one; like `find_open` it has no business filter (demo rule #300)."""
+    now = now or datetime.now(timezone.utc)
+    seq = re.findall(r"[a-z0-9]+", (text or "").lower())
+    if not seq:
+        return []
+    with tenant_session(business_id) as session:
+        rows = session.scalars(
+            select(GroupSession).where(
+                GroupSession.status == "active", GroupSession.ends_at > now, GroupSession.private.is_(True),
+            ).order_by(GroupSession.starts_at).limit(200)
+        ).all()
+        out = []
+        for r in rows:
+            name = re.findall(r"[a-z0-9]+", r.name.lower())
+            if name and any(seq[i:i + len(name)] == name for i in range(len(seq) - len(name) + 1)):
+                zone = _zone(_business(session, r.business_id).timezone)
+                a, b = r.starts_at.astimezone(zone), r.ends_at.astimezone(zone)
+                out.append({"ref": session_ref(r.id), "name": r.name, "when": f"{a:%a %d %b}, {R.clock(a)} to {R.clock(b)}"})
+        return out
 
 
 def join_session(
@@ -391,7 +417,8 @@ def join_session(
 ) -> dict:
     """Put a caller (the conversation) into a session until it is full. `name` is the first name
     when `last_name` is given, else the full name. The seat belongs to a guest (session_guests). -> {ref, name, when, booked,
-    max_attendees, booking_ref}. SessionError carries the reason (full, ended, private, unknown...)."""
+    max_attendees, booking_ref}. SessionError carries the reason (full, ended, unknown...). A private session can be joined by its code
+    (the caller said its name or code); it is only never listed."""
     now = now or datetime.now(timezone.utc)
     ref = (ref or "").strip().lower()
     if len(ref) < 6 or not re.fullmatch(r"[0-9a-f-]+", ref):
@@ -416,8 +443,6 @@ def join_session(
         session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:b, 0))"), {"b": key})
         row = _get_session(session, owner, sid, lock=True)
         _check_not_ended(row, now)
-        if row.private:
-            raise SessionError(403, "This session is private")
         if conversation_id is not None and session.scalar(select(Booking.id).where(
                 Booking.business_id == owner, Booking.session_id == sid, Booking.status == "confirmed",
                 or_(Booking.caller_conversation_id == conversation_id,

@@ -6,7 +6,7 @@ Google owns *when* and *whether* an event exists; `calendar_events` is the app's
   `singleEvents` (recurring events arrive as instances), `showDeleted`, window today -7 to +90
   days. Events of the window that Google did not return are checked one by one with
   `events.get` (a delete during the gap is not reported by a full list).
-- Later passes: incremental, by sync token. The token is saved in the same transaction as the
+- Later passes: incremental, by sync token (full again if a live event has no visibility stored yet). The token is saved in the same transaction as the
   events it covers, so a crash never skips changes.
 - Changes win over the app: an event deleted in Google cancels the `bookings` whose
   `external_ref` is its id; a moved one moves them.
@@ -208,6 +208,18 @@ def _full_sync(client: CalendarEventsClient, session, calendar_id: str, now: dat
     return sync_token
 
 
+def _visibility_unread(session, calendar_id: str, now: datetime) -> bool:
+    """A live (not cancelled, not ended, inside the full-sync window) mirrored event whose visibility was never read: rows from before the
+    column existed. `private` sessions come from it, so one full sync fills it (a full sync always stores one)."""
+    return session.scalar(
+        select(CalendarEvent.google_event_id).where(
+            CalendarEvent.calendar_id == calendar_id, CalendarEvent.visibility.is_(None),
+            CalendarEvent.status != "cancelled", CalendarEvent.ends_at > now,
+            CalendarEvent.starts_at < now + WINDOW_FUTURE,  # a full sync reads only this window: beyond it the NULL would never clear
+        ).limit(1)
+    ) is not None
+
+
 def sync_pass(client: CalendarEventsClient, calendar_id: str, now: datetime | None = None) -> SyncResult:
     """One sync pass for a calendar: incremental if a token is stored, else full."""
     now = now or datetime.now(timezone.utc)
@@ -223,6 +235,8 @@ def sync_pass(client: CalendarEventsClient, calendar_id: str, now: datetime | No
                     _apply(session, calendar_id, items, now, result)
                 except SyncTokenExpired:
                     token = None
+                if token and _visibility_unread(session, calendar_id, now):
+                    token = None  # a private flag must not stay unread: read every event again
             if not token:
                 result = SyncResult(full=True)  # drop counts of a failed incremental attempt
                 new_token = _full_sync(client, session, calendar_id, now, result)

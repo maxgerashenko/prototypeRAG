@@ -130,7 +130,7 @@ def test_create_booking_blank_name_is_refused_before_the_read_back(ctx):
     assert out == tools.NAME_NEEDED
 
 
-def test_find_open_finds_only_public_not_ended_sessions(ctx, monkeypatch):
+def test_find_open_finds_not_ended_sessions_by_code(ctx, monkeypatch):
     monkeypatch.setattr(sessions_.G, "get_client", lambda: None)  # never the real Google Calendar, whatever .env says
     public = sessions_.create_session(ctx.business_id, "2030-01-01", 10, "Public", 4)
     private = sessions_.create_session(ctx.business_id, "2030-01-01", 12, "Private", 4, private=True)
@@ -147,7 +147,8 @@ def _find_open_checks(ctx, public, private):
     ref = sessions_.session_ref(uuid.UUID(public["id"]))
     found = sessions_.find_open(ctx.business_id, ref)
     assert found and found["name"] == "Public" and found["ref"] == ref and "AM" in found["when"]
-    assert sessions_.find_open(ctx.business_id, sessions_.session_ref(uuid.UUID(private["id"]))) is None
+    pf = sessions_.find_open(ctx.business_id, sessions_.session_ref(uuid.UUID(private["id"])))
+    assert pf and pf["name"] == "Private"  # a private session is found by its code (never listed)
     later = datetime(2030, 1, 1, tzinfo=timezone.utc) + timedelta(days=2)
     assert sessions_.find_open(ctx.business_id, ref, now=later) is None  # ended
     assert sessions_.find_open(ctx.business_id, "zz") is None

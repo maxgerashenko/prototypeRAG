@@ -3,7 +3,7 @@
 #
 # setup:
 #   rules:     booking_rules row (default: open 09:00-21:00 every day, 60-min slots, capacity 2, party max 8)
-#   sessions:  [{key, name, day: <days from today>, hour, max_attendees, booked: [seat holders "First Last"]}]
+#   sessions:  [{key, name, day: <days from today>, hour, max_attendees, private: true (never listed), booked: [seat holders "First Last"]}]
 #   bookings:  [{key, day, hour, party_size, name, phone}]  seeded 1:1 table bookings
 # problems: [P2, ...]  the known-problem ids the scenario guards (README): P2 false "booked"/repeated read-back,
 #   P3 garbled name -> one yes/no proposal, P5 brevity/no re-list, P6 context memory, P8 right date.
@@ -21,6 +21,8 @@
 #   bot_says: [regex, ...]        each must match some bot message (case-insensitive)
 #   forbid_after: [{caller: regex, bot: regex}]  from the reply to the first caller line matching `caller` on,
 #                                 no bot message may match `bot` (asking again for what was already said)
+#   bot_never_says: [regex, ...]  no bot message may match (P24: a private session's name)
+#   forbid_before: [{caller: regex, bot: regex}]  no bot message BEFORE the first caller line matching `caller` may match `bot`
 #   bot_says_after: [{caller: regex, bot: regex}]  some bot message AFTER the first caller line matching `caller`
 #                                 must match `bot` (an earlier message does not count)
 #   max_confirmations: N          confirmation questions ("shall I book it?") before the last bot message
@@ -459,3 +461,49 @@ scenarios:
       new_confirmed: 0
       no_false_full: true
       bot_says: ["Polish[^.?!]*(seats|places|spots|room|available)|(seats|places|spots|room|available)[^.?!]*Polish"]
+
+  - id: private_session_not_listed
+    from: 387990ee
+    problems: [P24]
+    persona: |
+      Your name is Jane Miller, phone +15550102001. First ask what sessions there are tomorrow. Then say you
+      would like to book the Sauna Polish session, give your name when asked, and say yes when the bot reads the
+      booking back and asks you to confirm. After it is booked, output <END>.
+    opening: "Hi, what sessions do you have tomorrow?"
+    max_turns: 8
+    setup:
+      sessions:
+        - {key: polish, name: Sauna Polish, day: 1, hour: 10, max_attendees: 8}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 8}
+        - {key: tasting, name: Private Tasting, day: 1, hour: 18, max_attendees: 8, private: true}
+    expect:
+      new_confirmed: 1
+      booking_session: polish
+      guest: "Jane Miller"
+      seats: {polish: 1, german: 0, tasting: 0}
+      bot_never_says: ["Private Tasting|\\btasting\\b"]
+
+  - id: private_session_joined_by_exact_name
+    from: 387990ee
+    problems: [P24]
+    persona: |
+      Your name is Jane Miller, phone +15550102002. First ask what sessions there are tomorrow. Do not
+      mention any name yet. Then say exactly: "I was invited to the Private Tasting, sign me up." Give your
+      name when asked and say yes when the bot reads the booking back and asks you to confirm. After it is
+      booked, output <END>.
+    opening: "Hi, what sessions do you have tomorrow?"
+    max_turns: 9
+    setup:
+      sessions:
+        - {key: polish, name: Sauna Polish, day: 1, hour: 10, max_attendees: 8}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 8}
+        - {key: tasting, name: Private Tasting, day: 1, hour: 18, max_attendees: 8, private: true}
+    expect:
+      new_confirmed: 1
+      booking_session: tasting
+      guest: "Jane Miller"
+      seats: {polish: 0, german: 0, tasting: 1}
+      forbid_before:  # the listing answer never shows it; only after the caller says the name
+        - {caller: "invited", bot: "Private Tasting|\\btasting\\b"}
+      bot_says_after:  # the read-back names it
+        - {caller: "invited", bot: "Private Tasting"}

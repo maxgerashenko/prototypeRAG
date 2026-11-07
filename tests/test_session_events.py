@@ -177,12 +177,10 @@ def test_patch_retries_on_412(cal, biz):
     assert cal.events[ref]["summary"].endswith("1/2 attendees")
 
 
-def test_private_and_ended_sessions_cannot_be_joined(cal, biz):
+def test_private_session_is_never_listed_but_can_be_joined_by_its_code(cal, biz):
     sid, _ = _make(biz, private=True)
-    with pytest.raises(S.SessionError) as e:
-        S.join_session(biz, S.session_ref(sid), None, "Ann", now=NOW)
-    assert e.value.status == 403
-    assert S.list_open(biz, now=NOW) == []
+    assert S.list_open(biz, now=NOW) == []  # never listed
+    assert S.join_session(biz, S.session_ref(sid), _conv(biz), "Ann", now=NOW)  # invited offline: its code works
 
 
 def test_cancel_session_deletes_event_and_failure_keeps_it(cal, biz):

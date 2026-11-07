@@ -47,4 +47,5 @@ markers = [
     "P16: scenario guards against a vague failure (a blamed code or a technical problem)",
     "P19: scenario guards against a read-back of a session that does not exist",
     "P22: scenario guards against calling a session with free seats full",
+    "P24: scenario guards against listing a private session (and its join by exact name)",
 ]

@@ -59,7 +59,7 @@ another business's data.
 | `booking/google_calendar.py` | `GoogleCalendarBackend` (DEC-48): same rules, busy time from the mirror, writes events |
 | `booking/google_client.py` | Thin Google Calendar REST client behind `CalendarClient` / `CalendarEventsClient` protocols; the only file that knows Google's wire format. Logically an integration ([integrations.md](integrations.md)) that lives under `actions/booking/` |
 | `booking/mirror.py` | `CalendarMirror` protocol + `DbMirror`: forced sync and busy-event query over `calendar_events` |
-| `booking/calendar_sync.py` | Mirrors Google Calendar into `calendar_events` (#165): full + incremental sync, background loop, `sync_now`, `post_sync_hooks` |
+| `booking/calendar_sync.py` | Mirrors Google Calendar into `calendar_events` (#165): full + incremental sync (a full one when a live event's visibility is unread), background loop, `sync_now`, `post_sync_hooks` |
 | `booking/sessions.py` | Group sessions (owner side and caller side): create, update, cancel, remove attendee, `list_open`, `join_session` |
 | `booking/session_events.py` | Sessions as Google events (#149): create/delete event, seat-count title patching, `reconcile_events` (Google → sessions) |
 | `booking/tools.py` | Registers the five optional booking/session tools; picks the backend (`make_backend()`) at import |
@@ -202,12 +202,12 @@ with `session_id` and `type='session'`.
   per-business lock as `InternalBackend.create`), `update_session` (name / seats / private; seats
   can't go below the booked count; a Google session's name is read-only), `cancel_session`
   (cancels attendees, deletes the event, texts callers after commit), `remove_attendee`.
-- **Caller side** (tools): `list_open` (public, not ended, next 30 days or one day, up to 10; `seats=False` skips the per-row seat count, used by the name look-ups `resolve_session`/`_join_check`/`_unknown_service`) and
-  `join_session` (forced sync, per-calendar lock, private → refused, full → refused, one seat per
+- **Caller side** (tools): `list_open` (public only: a private session is never listed; not ended, next 30 days or one day, up to 10; `seats=False` skips the per-row seat count, used by the name look-ups `resolve_session`/`_join_check`/`_unknown_service`) and
+  `join_session` (forced sync, per-calendar lock, a private session joins by its code or whole name (`find_open`, `find_private_by_name`), full → refused, one seat per
   conversation). A session `when` is `Thu 05 Nov, 10:00 AM to 11:00 AM`: every caller-facing time
   comes from `rules.clock()` (12-hour with AM/PM). If the model passes a session name instead of the
   code, `tools.resolve_session` finds it, using the bot's last read-back as a hint. A name or code
-  that matches no open session is refused by `join_session`'s `precheck` (before any read-back) with
+  that matches no session (a private one matches by its whole name or code) is refused by `join_session`'s `precheck` (before any read-back) with
   a ready-to-say "Say exactly: There is no ... on the schedule. We have ..." sentence built in code (start times only, no codes, quote marks stripped from names by `tools._quotable`); a code is looked up with `sessions.find_open`.
   The bot cannot create a session. More in [bookings.md](bookings.md).
 - **With Google** (`get_client()` is not `None` only when `BOOKING_BACKEND=google_calendar`):

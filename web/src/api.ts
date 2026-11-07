@@ -278,7 +278,7 @@ export interface SessionItem {
   end_min: number;
   name: string;
   max_attendees: number;
-  private: boolean; // closed to the public: the assistant never books into it, only people added by hand
+  private: boolean; // never listed or offered; a caller who says its exact name can join
   booked: number;
   attendees: SessionAttendee[];
 }

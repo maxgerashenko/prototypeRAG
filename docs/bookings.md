@@ -50,9 +50,10 @@ the prompt. Every refusal is a tool result string the model sees, so it can reco
 | Unknown tool / bad JSON / tool not enabled | `executor.py` | model calling tools it was never offered |
 | Placeholder or missing name (`John Doe`, `Caller`, `[First Name]`) | `tools._is_placeholder` → `NAME_NEEDED` ("ask for their first and last name in one short question") | a made-up name, in `join_session` and `create_booking` |
 | No such session | `tools._join_check` → `_no_such_session` | an invented session ("Steam Bath 2 PM"): the result holds a sentence built in code, `Say exactly: "There is no session called 'X' on the schedule. We have <name> <today/tomorrow/on Friday 6 November> at <start AM/PM>, ..."` (up to 5 open ones, start times only, no codes; a code gives "no session with that code"); "There are no open sessions right now." if none. SESSION_PROMPT tells the model to say a "Say exactly" sentence as written. Order: session given → session exists → first name → not a placeholder → last name |
+| Private sessions (D15-A, P24) | `sessions.list_open` / `find_open` / `find_private_by_name`, `tools.resolve_session` | a private session is **never listed**: not in `list_open`, `list_sessions`, the prompt's open-session list (`open_sessions_note`), the "Say exactly" sentence, the best guess or the offer after a refusal. A caller who says its **whole name** (the name as one run of words in the caller's words, any case; a part of the name, reordered words or words spread apart do not match; a one-word private name is joined by that word alone, so one-word names are easier to guess) or its code can join it, as if invited offline; read-back, full/ended/cancelled checks are as for public sessions. A public session of the same name wins. Several private sessions of one name (a recurring event): the time the caller said picks one, else the soonest. SESSION_PROMPT tells the model to try `join_session` with a name that is not in the list (the tool says if it exists). Nothing a refusal says names a private session. The model has no day and time for it (it is in no list), so while the name, last name or read-back is still missing `tools._private_note` appends "The session the caller named is <name> on <when>; once you have their full name, read that back with it." to the name refusals (and \"…: read that back to them.\" to the read-back one), private sessions only. `resolve_session` looks for a private session when no listed session is named by the caller's own words, before the bot's last message (the hint) is mixed in: the hint is a list of the open sessions and would make two of them match |
 | Last name needed | `join_session` → `LAST_NAME_NEEDED` | first name only (sessions) |
 | Read-back needed | `tools._read_back_asked` → `READBACK_NEEDED` | a booking made on the answer to "what is your name?" rather than to a read-back. Looks only at the **last sentence** of the bot's last message, using `heard_text` (what the caller really heard) |
-| Session code resolution | `tools.resolve_session`; codes (6+ hex characters or hyphens): `sessions.find_open` | the model passing a session *name*; several sessions can share a name, so a name is matched to the soonest open one or refused. A code is looked up read-only (public, active, not ended, exactly one match); a code that is not found, or belongs to a private or ended session, gets the same "no session with that code on the schedule" sentence as an unknown name (not "This session is private") |
+| Session code resolution | `tools.resolve_session`; codes (6+ hex characters or hyphens): `sessions.find_open` | the model passing a session *name*; several sessions can share a name, so a name is matched to the soonest open one or refused. A code is looked up read-only (active, not ended, exactly one match; private sessions too); a code that is not found, or belongs to an ended session, gets the same "no session with that code on the schedule" sentence as an unknown name |
 | Phone from caller ID | `tools._phone` | the model's guessed number; the model's number is used only when there is no caller ID |
 | Date/time parse | `tools._starts_at`, `_mentions_time` | reads `10:00 AM to 11:00 AM`, `10:00-11:00` and 24-hour times |
 | Session lookup by name | `tools.resolve_session(…, hint)` | the model lost the code and passed a name; the bot's last read-back (session and time the caller agreed to) narrows the match, so a bare name cannot slip to a differently named later session |
@@ -128,6 +129,9 @@ Sync direction rules (`calendar_sync.py`, `session_events.py`, `mirror.py`):
 - Event **typed by hand** in Google → becomes a `sessions` row, `source='google'`, default seats, public.
 - Our seat change patches the event title with `If-Match: <etag>` (412 → re-read, retry up to 3). A
   failed patch keeps the seat; the next sync pass retries it (`reconcile_sessions`).
+  A live mirrored event inside the full-sync window (`WINDOW_FUTURE`) whose `visibility` is still unread (NULL) would let a private session look public, so the next
+  `calendar_sync.sync_pass` is then a full sync instead of an incremental one (`_visibility_unread`; a full sync stores
+  `default` when Google sends none, so it happens once).
 - Before every availability check and every booking a **forced sync** runs. If Google cannot be
   reached nothing is booked (`CalendarError` → "The calendar can't be reached right now").
 - Demo rule: one shared calendar; every event blocks every business and every event is a session
@@ -191,7 +195,7 @@ Three layers, cheapest first.
 | Layer | Files | Needs | What it proves |
 |---|---|---|---|
 | Unit / API | `tests/test_booking.py`, `test_google_calendar.py`, `test_calendar_sync.py`, `test_session_events.py`, `test_sessions_api.py`, `test_guests*.py`, `test_bookings_api.py`, `test_google_sessions_view.py` | Postgres | rules, backends, sync, seat counting, guests |
-| Guards | `test_no_invented_sessions.py` (unknown session and unknown service refused, nothing created), `test_actions.py` (precheck, action log), `test_placeholder_names.py`, `test_join_session_lookup.py`, `test_booking_conversations.py`, `test_answer_empty_reply.py`, `test_session_offer.py` (offer after a refusal, `prompt_sessions`, `fix_end_times`, `answer_question`), `test_voice_session.py` (incl. the same two guards on voice) | Postgres | every guard in §1.2 with fixed messages, `heard_text`, no model |
+| Guards | `test_no_invented_sessions.py` (unknown session and unknown service refused, nothing created), `test_private_sessions.py` (a private session is never listed or named in a refusal; its whole name or code joins it, a part does not), `test_actions.py` (precheck, action log), `test_placeholder_names.py`, `test_join_session_lookup.py`, `test_booking_conversations.py`, `test_answer_empty_reply.py`, `test_session_offer.py` (offer after a refusal, `prompt_sessions`, `fix_end_times`, `answer_question`), `test_voice_session.py` (incl. the same two guards on voice) | Postgres | every guard in §1.2 with fixed messages, `heard_text`, no model |
 | Scenarios | `tests/scenarios/` (`scenarios.yaml`, `harness.py`, `test_booking_scenarios.py`, `README.md`) | Postgres + LM Studio, both models loaded | the real bot, end to end |
 
 `tests/conftest.py` has two autouse fixtures (once per session, and again before every test, because
@@ -222,16 +226,16 @@ Invariants checked in every scenario:
 
 Per-scenario `expect` keys (`scenarios.yaml`): `new_confirmed`, `guest`, `phone`, `booking_session`,
 `booking_type`, `party_size`, `day`, `hour`, `seats`, `cancelled`, `untouched`, `bot_says`,
-`forbid_after`, `bot_says_after` (some bot message after the first caller line matching `caller` must match `bot`), `max_confirmations`, `bot_mentions_day`, `skip_claim_check`, `no_false_full` (no sentence calls a session with free seats full / sold out), `relist_ok` (invariant d allows naming the open sessions again), `session_times_only`
+`forbid_after`, `forbid_before` (no bot message before the first caller line matching `caller` may match `bot`), `bot_never_says` (no bot message may match), `bot_says_after` (some bot message after the first caller line matching `caller` must match `bot`), `max_confirmations`, `bot_mentions_day`, `skip_claim_check`, `no_false_full` (no sentence calls a session with free seats full / sold out), `relist_ok` (invariant d allows naming the open sessions again), `session_times_only`
 (every clock time in a bot message is the local start or end of a setup session, or a time the caller said: an invented time fails).
 
-The 21 scenarios: session happy path, first name only, declined at read-back, same name on several
+The 23 scenarios: session happy path, first name only, declined at read-back, same name on several
 days, full session, table with party and phone, cancel by reference + phone, changes mind about
 time, garbled session name (STT), name given once, context memory then "yes", brevity / no re-list,
 ambiguous same name on two days, name repeated not re-asked, day and time not re-asked, sessions
-question uses the tool, booking reference is read, yes to read-back books without asking again, two sessions whose names differ only by the word "session" (P12: the right one is booked), a session that does not exist is not offered or read back (P13, P16, P19: caller asks for a "Steam Bath" session), an empty session is not called full (P22, `no_false_full`).
+question uses the tool, booking reference is read, yes to read-back books without asking again, two sessions whose names differ only by the word "session" (P12: the right one is booked), a session that does not exist is not offered or read back (P13, P16, P19: caller asks for a "Steam Bath" session), an empty session is not called full (P22, `no_false_full`), a private session is never listed (P24, `private_session_not_listed`: setup `private: true`, `bot_never_says`) and joins by its exact name (P24, `private_session_joined_by_exact_name`, from conversation 387990ee: the listing answer never names it, `forbid_before`; then "I was invited to the Private Tasting" books it).
 Each is tagged with the known problem it guards (P2 false "booked", P3 garbled name, P5 brevity, P6
-context memory, P8 right date; later P9–P12; P13 made-up session, P16 vague failure, P19 read-back of a nonexistent session; P22 free seats called full).
+context memory, P8 right date; later P9–P12; P13 made-up session, P16 vague failure, P19 read-back of a nonexistent session; P22 free seats called full; P24 private session listed).
 
 ```
 SCENARIO_RETRIES=0 uv run pytest -q -m scenario -p no:logging              # all, 4–5 minutes
@@ -252,6 +256,7 @@ marked *fixed* only after the scenario built from it passes twice. Until then it
   had 4 failures that were not re-checked after the review fixes.
 - The "booked" claim guard and the other reply-text guards run only in non-streaming `answer_question`;
   the streaming/voice path has the tool-level guards plus the session offer and end-time fix (§1.2).
+- `private_session_joined_by_exact_name` is the most model-dependent scenario (about 4 passes in 5): sometimes after the "Not done" result the model says the private session "is not a scheduled open session" on its own, and the code-built session offer then re-lists the open ones (invariant d); it books on the next turn.
 - No scenario yet for health claims (conversation `efcddc40`, still *in testing*).
 - The caller model sees only text; barge-in, STT errors and the phone line are not simulated.
 - Live Google Calendar is never touched by tests: `tests/conftest.py` has an autouse fixture that, before every test, sets `booking_backend="internal"` and `session_events.set_client(None)` (tests that call `get_settings.cache_clear()` would otherwise turn the Google backend back on); the Google backend is tested with a fake client. Sessions that tests create in the shared dev DB are removed by the test that created them.

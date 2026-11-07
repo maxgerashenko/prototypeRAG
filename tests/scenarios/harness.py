@@ -116,7 +116,8 @@ class World:
             s.add(BusinessProfile(business_id=self.bid, name="Banya Test"))
             s.add(BookingRule(business_id=self.bid, **rules))
         for spec in setup.get("sessions") or []:
-            item = sessions.create_session(self.bid, self.day(spec["day"]), spec["hour"], spec["name"], spec["max_attendees"])
+            item = sessions.create_session(self.bid, self.day(spec["day"]), spec["hour"], spec["name"], spec["max_attendees"],
+                                           private=bool(spec.get("private")))
             sid = uuid.UUID(item["id"])
             self.sessions[spec["key"]] = sid
             self.session_names[spec["key"]] = spec["name"]
@@ -328,6 +329,19 @@ def check(world: World, conv: uuid.UUID | None, transcript: list[tuple[str, str]
         for w, t in transcript[idx + 1:]:
             if w == "bot" and re.search(rule["bot"], t, re.I):
                 fails.append(f"after the caller said /{rule['caller']}/ the bot still said /{rule['bot']}/: {t[:100]!r}")
+                break
+    for pattern in expect.get("bot_never_says") or []:  # P24: no bot message may match (a private session's name)
+        hit = next((t for t in bot if re.search(pattern, t, re.I)), None)
+        if hit:
+            fails.append(f"a bot message matches /{pattern}/ though it must never: {hit[:100]!r}; P24")
+    for rule in expect.get("forbid_before") or []:  # no bot message BEFORE the first caller line matching `caller` may match `bot`
+        idx = next((i for i, (w, t) in enumerate(transcript) if w == "caller" and re.search(rule["caller"], t, re.I)), None)
+        if idx is None:
+            fails.append(f"the caller never said /{rule['caller']}/ (scenario did not reach this point)")
+            continue
+        for w, t in transcript[:idx]:
+            if w == "bot" and re.search(rule["bot"], t, re.I):
+                fails.append(f"before the caller said /{rule['caller']}/ the bot said /{rule['bot']}/: {t[:100]!r}; P24")
                 break
     if "max_confirmations" in expect:  # confirmation questions asked before the last bot message
         asks = [

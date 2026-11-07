@@ -131,6 +131,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-56 | Add a session with a faded **+** in each free hour (user decision 2026-10-31, supersedes DEC-55) | The hold gesture and mouse click-to-add are removed (`holdToAdd.ts` deleted). Every free future hour shows a faded 44 px **+** centred in the row (`hour-add-<h>`); the round bottom-right **+** stays. Visible on touch without hover; no timing to tune, no iOS gesture risks | 1 | ✅ |
 | DEC-57 | Assigning a number also points it at this app in Twilio (user decision 2026-11-02, extends DEC-52) | `PUT /businesses/{id}/number` first calls `ensure_routed`: voice URL empty → set `<PUBLIC_BASE_URL>/twilio/voice` and `/twilio/status` (POST) through the Twilio API; already ours → only a missing status URL is filled; pointing elsewhere → 409, nothing overwritten; missing `PUBLIC_BASE_URL`/credentials or a Twilio error → 503 and the database is unchanged. Unassigning leaves Twilio as it is. Cause: a newly bought number had no voice URL, so calls got no answer | 1 | ✅ |
 | DEC-59 | Guest identity for bookings (user decision 2026-11-02) | Table `session_guests`, one row per person per business: `name_key` for matching, fake email `<name>@guest.invalid` (never changes), phone only breaks ties, near-matches never auto-merged (`merged_into` for owner merges). Every booking (session seat or 1:1) has a `guest_id`. Guests are Google event attendees (OAuth token only, `sendUpdates=none`). Postgres `max_attendees` stays the only seat count: no "Max attendees:" line in Google; guests are added only from the app or by voice (both check the limit), never from Google. A guest removed or declined in Google loses the seat. Plan: `plan/feature-guest-identity.md` | 1 (built, PR #312) · 3 (RLS, auth, business id in guest paths) | ✅ |
+| DEC-60 | Private sessions: never listed, joinable by exact name or code | A session with Google visibility `private` is never listed or offered by chat or voice (`list_open` is public-only); a caller who says its whole name (one run of the name's words, in order) or its 8-hex code can join it through the normal read-back and yes. Reverses the old rule that refused private sessions. A one-word private name is joined by that word alone, so it is easier to guess. The missing `business_id` filter of session lookups (demo rule #300) now also covers private-session lookups | 1 · 3 (RLS closes the cross-business lookup) | ✅ (user decision D15-A/D17-A, 2026-11-07) |
 | DEC-58 | Chat/voice model: qwen3.6-35b-a3b with reasoning off instead of gemma (user decision 2026-11-02, supersedes DEC-32's chat/voice pick) | `.env` `LLM_MODEL=qwen/qwen3.6-35b-a3b`, `CHAT_`/`VOICE_REASONING_EFFORT=none`. Two benchmark runs on 19 graded questions: same accuracy as gemma (18/19 and 17/19 vs 17/19), faster (mean 1.63 s and 0.87 s vs 1.83 s and 1.88 s). Code-drafting delegate stays qwen with thinking on | 1 | ✅ |
 | DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
@@ -1026,6 +1027,20 @@ Consequences:
   (business-wide) — [07-knowledge-quality.md](07-knowledge-quality.md) §5.3.
 - Stage 3: the called number (or app selection) sets the conversation's location; then a
   `conversations.location_id` column carries it (OPEN-21).
+
+### DEC-60 — Private sessions: never listed, joinable by exact name or code (stage 1; RLS follow-up stage 3)
+
+A private session is one the owner invited people to offline (Google `visibility = private`, mirrored to `sessions.private`). Found in conversation 387990ee, where the bot listed a private session to a caller (problem P24). Reverses the earlier rule that a private session could not be joined at all.
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| Who can join a private session | **Only a caller who says its exact name (one run of its words, in order) or its code; never listed, offered, or named in a refusal** | Matches how it is shared (invited offline); invited people can still book | Anyone who guesses the name can join; a one-word name is easy to guess | ✅ (D15-A, D17-A) |
+| | Never bookable by the assistant (old 403 rule) | Simplest, no leak | Invited people cannot book by chat or phone | ❌ superseded |
+| | Listed like the others | Easy | Defeats "private" | ❌ |
+| One-word private names | **Joinable by that word alone** | Natural for the caller | Easier to guess | ✅ (D17-A) |
+| | Need 2+ words or the code | Harder to guess | Invited callers with a short name are refused | ❌ |
+
+Consequences: the name and time of a private session reach only a caller who named it; owner UI text and `design/SeatSlider.md` say "never listed or offered; a caller who says its exact name can join". `find_open` / `find_private_by_name` have no `business_id` filter (demo rule #300), so a caller of one business could name another's private session: closed by RLS in stage 3 ([06-scale.md](06-scale.md)). Details: `docs/bookings.md`.
 
 ### DEC-48 — Google Calendar as the pilot booking backend (stage 2 pilot, OAuth in stage 3)
 

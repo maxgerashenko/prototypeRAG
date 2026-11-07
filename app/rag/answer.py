@@ -371,8 +371,10 @@ def open_sessions_note(business_id: uuid.UUID, enabled) -> str:
         return ""
     return "\n".join([
         "Open sessions (for your reference: codes are for join_session only, never read them aloud; "
-        "do not recite this list unless the caller asks what is on; if a caller asks for a session that is not here, "
-        "say there is none and name these with day and start time):",
+        "do not recite this list unless the caller asks what is on; private sessions are never listed, so when a caller "
+        "names a session that is not here, call join_session with the name they said as `session` (first_name empty "
+        "until you have it) and follow its answer: it books or asks for the name if the session exists, and gives the "
+        "exact sentence to say if there is none):",
         *session_lines(rows),
     ])
 

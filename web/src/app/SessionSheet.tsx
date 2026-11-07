@@ -47,7 +47,7 @@ export function SessionSheet(p: Props) {
 }
 
 /** Attendees 1-30 on a volume-style bar (people icon inside, number outside on the right, one stop per number) with a small
- *  Private switch beside it. Private (closed to the public: the assistant never books into it) keeps the limit. */
+ *  Private switch beside it. Private (never listed or offered; a caller who says its exact name can join) keeps the limit. */
 function SeatPicker({ seats, priv, min, onSeats, onPriv, disabled }: {
   seats: number; priv: boolean; min: number; onSeats: (n: number) => void; onPriv: (on: boolean) => void; disabled?: boolean;
 }) {
@@ -62,7 +62,7 @@ function SeatPicker({ seats, priv, min, onSeats, onPriv, disabled }: {
       </div>
       <output className="ss-seats-value" aria-live="polite">{seats}</output>
       <button type="button" role="switch" aria-checked={priv} className={`ss-private${priv ? " on" : ""}`} disabled={disabled}
-        title="Private: the assistant will not offer it to callers; only people you add" onClick={() => onPriv(!priv)}>
+        title="Private: never listed or offered; a caller who says its exact name can join" onClick={() => onPriv(!priv)}>
         <span className="ss-private-text">Private</span>
         <span className="ss-switch" aria-hidden="true" />
       </button>

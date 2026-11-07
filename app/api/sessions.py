@@ -21,7 +21,7 @@ class SessionIn(BaseModel):
     hour: int
     name: str
     max_attendees: int
-    private: bool = False  # closed to the public: the assistant never books into it
+    private: bool = False  # never listed or offered; a caller who says its exact name can join
 
 
 class SessionPatch(BaseModel):

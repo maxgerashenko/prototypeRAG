@@ -119,6 +119,35 @@ def test_410_drops_the_token_and_full_sync_finds_events_deleted_in_the_gap(cal_i
     assert r.full and rows(cal_id)["b"].status == "cancelled" and rows(cal_id)["a"].status == "confirmed"
 
 
+def test_an_event_with_unread_visibility_makes_the_next_pass_a_full_sync(cal_id):
+    g = FakeGoogle(ev("a", visibility="private"))
+    cs.sync_pass(g, cal_id, NOW)
+    with SessionLocal() as s, s.begin():  # a row from before the visibility column: never read
+        s.execute(CalendarEvent.__table__.update().where(CalendarEvent.calendar_id == cal_id).values(visibility=None))
+    r = cs.sync_pass(g, cal_id, NOW + timedelta(seconds=60))
+    assert r.full and rows(cal_id)["a"].visibility == "private"
+    assert not cs.sync_pass(g, cal_id, NOW + timedelta(seconds=120)).full  # read now: incremental again
+
+
+def test_unread_visibility_of_a_cancelled_or_ended_event_does_not_force_a_full_sync(cal_id):
+    g = FakeGoogle(ev("a"), ev("old", start="2026-10-20T10:00:00Z", end="2026-10-20T11:00:00Z"))
+    cs.sync_pass(g, cal_id, NOW)
+    with SessionLocal() as s, s.begin():
+        s.execute(CalendarEvent.__table__.update().where(CalendarEvent.calendar_id == cal_id).values(visibility=None))
+        s.execute(CalendarEvent.__table__.update().where(
+            CalendarEvent.calendar_id == cal_id, CalendarEvent.google_event_id == "a").values(status="cancelled"))
+    assert not cs.sync_pass(g, cal_id, NOW).full
+
+
+def test_unread_visibility_beyond_the_full_sync_window_does_not_force_a_full_sync(cal_id):
+    g = FakeGoogle(ev("far", start="2027-02-10T10:00:00Z", end="2027-02-10T11:00:00Z"))  # 100 days out
+    cs.sync_pass(g, cal_id, NOW)
+    assert "far" in rows(cal_id)  # stored (the fake does not filter by time), so only the window limit can matter
+    with SessionLocal() as s, s.begin():  # the full sync does not read this far, so it could never fill it
+        s.execute(CalendarEvent.__table__.update().where(CalendarEvent.calendar_id == cal_id).values(visibility=None))
+    assert not cs.sync_pass(g, cal_id, NOW + timedelta(seconds=60)).full
+
+
 def test_deleted_event_in_a_full_listing_without_times_creates_no_row(cal_id):
     g = FakeGoogle({"id": "ghost", "status": "cancelled"}, ev("a"))
     cs.sync_pass(g, cal_id, NOW)

@@ -8,7 +8,7 @@ and transcript assertions, never from an LLM grader. Voice, Twilio and TTS are o
 
 ```
 uv run pytest -q tests/scenarios -m scenario          # all (about 15 s per scenario)
-uv run pytest -q tests/scenarios -m P5                # one problem id (P2 P3 P5 P6 P8 P12 P13 P16 P19 P22)
+uv run pytest -q tests/scenarios -m P5                # one problem id (P2 P3 P5 P6 P8 P12 P13 P16 P19 P22 P24)
 uv run python -m tests.scenarios.harness <scenario-id>   # prints the live transcript + DB state
 SCENARIO_RETRIES=0 ...                                 # default 1: a failed scenario is retried once
 ```
@@ -57,3 +57,5 @@ Per-scenario check `session_times_only: true`: every clock time in every bot mes
 | session_name_with_and_without_suffix | P12 | "Sauna Polish session" tomorrow 10 AM vs "Sauna Polish" the day after 6 PM: the seat is in the morning one |
 | nonexistent_session_not_offered | P13 P16 P19 | caller asks for a "Steam Bath" session that is not on the schedule: it is never offered or read back, no seats claimed, the bot says it is not there and names the real ones (if the model refuses without naming any, `offer_open_sessions` appends them in code), only real session times are said, no booking (not even an appointment for the made-up service) and no new session |
 | empty_session_not_called_full | P22 | sessions with free seats (one empty, one partly booked) and one really full: no bot sentence calls a free one full / fully booked / sold out (`no_false_full`) |
+| private_session_not_listed | P24 | a private session ("Private Tasting") and two public ones: the listing answer and the whole conversation never name the private one (`bot_never_says`); the caller books a public one (first + last name, yes): one confirmed seat there, none in the private one |
+| private_session_joined_by_exact_name | P24 | same setup; the listing answer does not show the private session (`forbid_before`), then the caller says "I was invited to the Private Tasting, sign me up": the bot reads it back by name, the caller says yes and the seat is in the private session |

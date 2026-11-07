@@ -409,11 +409,20 @@ def resolve_session(business_id, text: str, hint: str = "") -> tuple[str | None,
     rows = sessions_.list_open(business_id, limit=200, seats=False)
     words = set(re.findall(r"[a-z0-9]+", f"{text} {hint}".lower()))
     named = [r for r in rows if set(re.findall(r"[a-z0-9]+", r["name"].lower())) <= words]
+    if not any(set(re.findall(r"[a-z0-9]+", r["name"].lower())) <= set(re.findall(r"[a-z0-9]+", text.lower())) for r in rows):
+        # no listed session is named by the caller's own words (the hint, the bot's last list, must not make two
+        # of them match): a private session is never listed, only its whole name said by the caller reaches it
+        private = sessions_.find_private_by_name(business_id, text)
+        if len(private) > 1:  # a recurring private event: the time said picks one, else the soonest
+            timed_p = [r for r in private if _mentions_time(f"{text} {hint}", _starts_at(r["when"]))]
+            private = timed_p[:1] if len(timed_p) == 1 else private[:1]
+        if private:
+            return private[0]["ref"], ""
     timed = [r for r in named if _mentions_time(f"{text} {hint}", _starts_at(r["when"]))]
     found = timed or named if len(named) > 1 else named
     if len(found) == 1:
         return found[0]["ref"], ""
-    guess = _best_guess(rows, text)
+    guess = _best_guess(rows, text)  # public sessions only
     if guess:
         return None, (
             "Error: not booked. The caller's words are close to one session but not exact. Do not list the "
@@ -443,10 +452,21 @@ def _join_check(ctx: ActionContext, args: dict) -> tuple[str, str, str] | str:
     text = lambda key: args[key].strip() if isinstance(args.get(key), str) else ""  # noqa: E731
     first, last = text("first_name") or text("name"), text("last_name")
     if not first or _is_placeholder(first, last):
-        return NAME_NEEDED
+        return NAME_NEEDED + _private_note(ctx, ref, True)
     if not last and len(first.split()) < 2:
-        return LAST_NAME_NEEDED
+        return LAST_NAME_NEEDED + _private_note(ctx, ref, True)
     return ref, first, last
+
+
+def _private_note(ctx: ActionContext, ref: str, name_missing: bool = False) -> str:
+    """A private session is not in the model's lists, so it does not know its day and time for the read-back:
+    tell it (the caller named the session or gave its code, so it may be read back to them)."""
+    found = sessions_.find_open(ctx.business_id, ref)
+    if not found or not found.get("private"):
+        return ""
+    if name_missing:
+        return f" The session the caller named is {found['name']} on {found['when']}; once you have their full name, read that back with it."
+    return f" The session the caller named is {found['name']} on {found['when']}: read that back to them."
 
 
 def join_session_precheck(ctx: ActionContext, args: dict) -> str | None:
@@ -461,7 +481,7 @@ def join_session(ctx: ActionContext, args: dict) -> str:
         return checked
     ref, first, last = checked
     if not _read_back_asked(ctx, first.split()[0]):
-        return READBACK_NEEDED
+        return READBACK_NEEDED + _private_note(ctx, ref)
     try:
         r = sessions_.join_session(
             ctx.business_id, ref, ctx.conversation_id, first, _phone(ctx, args), last_name=last
