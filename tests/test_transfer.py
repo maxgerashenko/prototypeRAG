@@ -1,6 +1,9 @@
 """take_message + transfer_to_human (#50). Real Postgres and Twilio's RequestValidator;
 faked: STT/TTS/LLM. A real transfer (`<Dial>` to a phone) is only checked on the Mac."""
 
+import asyncio
+import threading
+import time
 import uuid
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
@@ -10,7 +13,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from twilio.request_validator import RequestValidator
 
-from app.actions.transfer import transfer_number, transfer_requested
+from app.actions import executor
+from app.actions.transfer import TRANSFER_CANCELLED, cancel_transfer, transfer_number, transfer_requested
 from app.db import tenant_session
 from app.db.models import ActionLog, Business, Conversation, MessageForOwner
 from app.main import app
@@ -18,7 +22,7 @@ from app.voice import session as session_mod
 from app.voice.tools import TOOLS, run_tool
 from tests.async_helpers import run_async
 from tests.test_twilio import AUTH_TOKEN, PUBLIC, settings  # noqa: F401  (fixture)
-from tests.test_voice_session import FakeTranscriber, _chunk, _make_session, _tool_call_delta, _with_hang_up, short_synthesize
+from tests.test_voice_session import FakeTranscriber, RATE, _chunk, _make_session, _tool_call_delta, _with_hang_up, short_synthesize
 
 BOSS = "+15551230000"
 
@@ -110,6 +114,37 @@ def test_transfer_requested_only_counts_an_ok_transfer_on_that_call(business):
     _log_transfer(business, cid)
     assert transfer_requested(business, sid)
     assert not transfer_requested(business, "CAother")
+
+
+def test_only_the_last_transfer_decision_counts(business):
+    """#262: "actually, never mind" after a started transfer (the session's cancel marker)
+    stops /twilio/transfer from dialing; a new transfer after it counts again."""
+    sid = "CA" + uuid.uuid4().hex
+    cid = _conversation(business, sid)
+    _log_transfer(business, cid)
+    cancel_transfer(business, cid)
+    assert not transfer_requested(business, sid)
+    _log_transfer(business, cid, "needs_confirmation")  # asking again is not a decision
+    assert not transfer_requested(business, sid)
+    _log_transfer(business, cid)
+    assert transfer_requested(business, sid)
+
+
+def test_transfer_whose_log_write_fails_is_an_error(business, monkeypatch):
+    """#262: the action_log row is what /twilio/transfer dials on, so without it the model
+    must not tell the caller it is connecting them."""
+    sid = "CA" + uuid.uuid4().hex
+    cid = _conversation(business, sid)
+
+    def broken(_business_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(executor, "tenant_session", broken)
+    out = run_tool(business, "transfer_to_human", {"confirmed": True}, cid, sid, None)
+    assert out.startswith("Error") and "take a message" in out
+    assert not transfer_requested(business, sid)
+    # a tool whose log is only an audit trail still succeeds
+    assert run_tool(business, "take_message", {"message": "hi", "confirmed": True}, cid, sid, None).startswith("Message saved")
 
 
 # --- Twilio routes ------------------------------------------------------------------
@@ -236,3 +271,96 @@ def test_a_failed_transfer_keeps_the_call(business, monkeypatch):
 
     run_async(run())
     assert hung_up == [] and not any(e.get("type") == "hangup" for e in events)
+
+
+class ChangeOfMindLLM(TransferLLM):
+    """Turn 1: transfer_to_human, then the connecting line. Turn 2: a normal answer."""
+
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") != 1 and self.n >= 2:
+            self.n += 1
+
+            async def gen():
+                yield _chunk("Sure, we open at 9.")
+
+            return gen()
+        return await super()._create(**kwargs)
+
+
+def _cancel_rows(business, cid):
+    with tenant_session(business) as s:
+        return s.scalars(select(ActionLog.id).where(ActionLog.conversation_id == cid,
+                                                    ActionLog.tool == TRANSFER_CANCELLED)).all()
+
+
+def test_barge_in_on_the_transfer_line_keeps_the_call(business, monkeypatch):
+    """#225: the caller talks over "Connecting you now." and gets a normal answer: the
+    session does not hang up into a transfer, and /twilio/transfer would not dial."""
+    s, _, events = _make_session(business, ChangeOfMindLLM(), monkeypatch)
+    # the connecting line is 3 s long, so there is time to talk over it
+    s._synthesize = lambda text, rate: b"\0\0" * rate * (3 if text.startswith("Connecting") else 0) or short_synthesize(text, rate)
+    s._call_sid = "CA" + uuid.uuid4().hex
+    s.turn_detection = "manual"
+    said = iter(["Can I talk to a person?", "Actually, never mind. When do you open?"])
+    monkeypatch.setattr(FakeTranscriber, "finish", lambda self, timeout=5.0: next(said))
+    monkeypatch.setattr(session_mod, "HANG_UP_GRACE_S", 0.0)
+    hung_up = _with_hang_up(s)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.start_turn()
+        s.end_turn()
+        while "Connecting you now." not in [e.get("text") for e in events]:
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.2)
+        await s.start_turn()  # barge-in on the connecting line
+        s.end_turn()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert {"type": "clear"} in events
+    assert [e["text"] for e in events if e["type"] == "reply"][-1] == "Sure, we open at 9."
+    assert hung_up == [] and not any(e.get("type") == "hangup" for e in events)
+    assert not transfer_requested(business, s._call_sid)
+    assert len(_cancel_rows(business, s.conversation_id)) == 1
+
+
+def test_barge_in_while_the_transfer_tool_runs_cancels_it(business, monkeypatch):
+    """#262: the caller speaks while transfer_to_human is still running; its log row is
+    written anyway, so the session records the cancellation."""
+    s, _, events = _make_session(business, ChangeOfMindLLM(), monkeypatch)
+    s._synthesize = short_synthesize
+    s._call_sid = "CA" + uuid.uuid4().hex
+    s.turn_detection = "manual"
+    said = iter(["Can I talk to a person?", "Actually, never mind."])
+    monkeypatch.setattr(FakeTranscriber, "finish", lambda self, timeout=5.0: next(said))
+    monkeypatch.setattr(session_mod, "HANG_UP_GRACE_S", 0.0)
+    real_run_tool = session_mod.run_tool
+    started = threading.Event()
+
+    def slow_run_tool(*args):
+        started.set()
+        time.sleep(0.3)
+        return real_run_tool(*args)
+
+    monkeypatch.setattr(session_mod, "run_tool", slow_run_tool)
+    hung_up = _with_hang_up(s)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await s.start_turn()
+        s.end_turn()
+        while not started.is_set():
+            await asyncio.sleep(0.01)
+        await s.start_turn()  # barge-in during the tool call
+        s.end_turn()
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    assert hung_up == []
+    assert not transfer_requested(business, s._call_sid)
+    assert len(_cancel_rows(business, s.conversation_id)) == 1

@@ -47,7 +47,7 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.actions.transfer import TRANSFER_STARTED
+from app.actions.transfer import TRANSFER_STARTED, cancel_transfer
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
@@ -245,6 +245,7 @@ class CallSession:
         self._reprompts = 0  # since the caller last spoke
         self._hung_up = False
         self._transfer_pending = False  # transfer_to_human succeeded: hang up (Twilio dials) after the reply
+        self._transfer_cancel: asyncio.Task | None = None  # writing the cancel marker (#225)
         self._history: list[dict] = []
         self._system_prompt = ""
         self._tools: list[dict] = TOOLS  # per business from _load_business (#151)
@@ -280,6 +281,8 @@ class CallSession:
             await self._cancel_reply()
         except Exception:
             log.exception("voice reply failed during close")
+        if self._transfer_cancel is not None:
+            await self._transfer_cancel  # cancel_transfer never raises
         if self._turn is not None:
             self._turn.cancel()
             self._turn = None
@@ -323,6 +326,12 @@ class CallSession:
     async def _on_speech_start(self, preroll: bytes) -> None:
         self._heard_at = time.monotonic()
         self._reprompts = 0
+        # the caller speaks again after a transfer started (barge-in on "connecting you now",
+        # or the reply failed): the transfer is off until the model starts a new one (#225)
+        if self._transfer_pending:
+            self._transfer_pending = False
+            self._transfer_cancel = asyncio.create_task(
+                asyncio.to_thread(cancel_transfer, self.business_id, self.conversation_id))
         if self._bot_active():
             await self._cancel_reply()
             self._playing_until = 0.0
@@ -393,6 +402,9 @@ class CallSession:
     # --- one turn -------------------------------------------------------------------
 
     async def _handle_turn(self, turn: TurnTranscriber, speech_end: float) -> None:
+        if self._transfer_cancel is not None:
+            # the cancel marker must be older than any transfer this turn starts
+            await asyncio.shield(self._transfer_cancel)
         earlier, self._unanswered_stt = self._unanswered_stt, None
         stt = asyncio.ensure_future(self._transcribe(turn, earlier))
         try:
@@ -534,12 +546,23 @@ class CallSession:
                 ],
             })
             for c in calls.values():
-                result = await asyncio.to_thread(
+                run = asyncio.ensure_future(asyncio.to_thread(
                     run_tool, self.business_id, c["name"], c["arguments"], self.conversation_id,
                     self._call_sid, self._caller,
-                )
-                if c["name"] == "transfer_to_human" and result.startswith(TRANSFER_STARTED):
-                    self._transfer_pending = True
+                ))
+                if c["name"] != "transfer_to_human":
+                    result = await run
+                else:
+                    try:
+                        result = await asyncio.shield(run)
+                    except asyncio.CancelledError:
+                        # barge-in while the tool runs: its thread still logs the transfer, and
+                        # the caller has moved on, so record it as cancelled (#262)
+                        if (await run).startswith(TRANSFER_STARTED):
+                            await asyncio.to_thread(cancel_transfer, self.business_id, self.conversation_id)
+                        raise
+                    if result.startswith(TRANSFER_STARTED):
+                        self._transfer_pending = True
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
             timings.setdefault("tool_end_ms", _ms(speech_end))
         await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, play_ends, speech_end, timings)

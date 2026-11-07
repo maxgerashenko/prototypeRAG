@@ -7,9 +7,17 @@ continues with the `<Redirect>` that follows `<Connect>` in the call's TwiML
 (`transfer_requested`) and answers with `<Dial>` -- so no Twilio REST credentials are
 needed and the decision survives a restart or another instance.
 
+Only the caller's last decision counts (#225, #262): when the caller speaks again after a
+transfer started (a barge-in on "connecting you now", "actually, never mind"), the session
+writes a `transfer_cancelled` row (`cancel_transfer`), and `transfer_requested` dials only
+if the latest transfer row is an `ok` transfer_to_human. The tool is `log_required`, so a
+failed log write turns into an error result and the bot never promises a transfer that
+`/twilio/transfer` can't find.
+
 The number is `businesses.settings["transfer_number"]` (E.164); there is no settings UI yet.
 """
 
+import logging
 import re
 import uuid
 
@@ -19,7 +27,10 @@ from app.actions.registry import ActionContext, Tool, register
 from app.db import tenant_session
 from app.db.models import ActionLog, Business, Conversation
 
+log = logging.getLogger(__name__)
+
 TRANSFER_STARTED = "Transfer started."
+TRANSFER_CANCELLED = "transfer_cancelled"  # action_log.tool of the session's cancel marker
 E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 
 
@@ -32,17 +43,33 @@ def transfer_number(business_id: uuid.UUID) -> str | None:
 
 
 def transfer_requested(business_id: uuid.UUID, call_sid: str) -> bool:
-    """Did the bot start a transfer on this call? (an `ok` transfer_to_human in the action log)"""
+    """Is a transfer the caller's last decision on this call? The latest of the `ok`
+    transfer_to_human rows and the session's `transfer_cancelled` rows must be a transfer."""
     with tenant_session(business_id) as session:
-        found = session.scalars(
-            select(ActionLog.id)
+        latest = session.scalars(
+            select(ActionLog.tool)
             .join(Conversation, (Conversation.id == ActionLog.conversation_id)
                   & (Conversation.business_id == ActionLog.business_id))
             .where(ActionLog.business_id == business_id, Conversation.call_sid == call_sid,
-                   ActionLog.tool == "transfer_to_human", ActionLog.status == "ok")
+                   ((ActionLog.tool == "transfer_to_human") & (ActionLog.status == "ok"))
+                   | (ActionLog.tool == TRANSFER_CANCELLED))
+            .order_by(ActionLog.created_at.desc())
             .limit(1)
         ).first()
-    return found is not None
+    return latest == "transfer_to_human"
+
+
+def cancel_transfer(business_id: uuid.UUID, conversation_id: uuid.UUID | None) -> None:
+    """The caller spoke again after a transfer started: record that the transfer is off,
+    so a later hang-up (goodbye, silence) doesn't dial the business."""
+    try:
+        with tenant_session(business_id) as session:
+            session.add(ActionLog(
+                business_id=business_id, conversation_id=conversation_id, tool=TRANSFER_CANCELLED,
+                arguments={}, result="The caller kept talking after the transfer started.", status="ok",
+            ))
+    except Exception:  # the call goes on; the worst case is the old behaviour (dial on hang-up)
+        log.exception("could not record the cancelled transfer for %s", conversation_id)
 
 
 def transfer_to_human(ctx: ActionContext, args: dict) -> str:
@@ -65,5 +92,6 @@ register(Tool(
     ),
     parameters={"reason": {"type": "string", "description": "Why the caller needs a person, in a few words."}},
     side_effect=True,
+    log_required=True,  # the action_log row is what /twilio/transfer dials on
     handler=transfer_to_human,
 ))
