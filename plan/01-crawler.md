@@ -41,7 +41,7 @@ Google Places API ─► place_id only (live lookup for display, R9) ───�
 1. **Discover pages**
    - Start from `sitemap.xml` if present, otherwise follow internal links from the home page.
    - Stay on the same domain; skip login, cart, media files; dedupe by normalized URL.
-   - Limits: max depth (3) and max pages (e.g. 200) per business.
+   - Limits: max depth (3: link hops on the BFS path, URL path segments on the sitemap path) and max pages (e.g. 200) per business.
    - Respect `robots.txt` and add a delay between requests.
 
 2. **Fetch / render**

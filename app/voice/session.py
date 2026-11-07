@@ -21,6 +21,11 @@ because audio goes out faster than real time and the transport plays it from a b
 Every `feed()` tells the VAD whether the bot is active (`set_bot_active`, V9/V10): while
 it is, `speech_start` needs a stricter aggressiveness and a longer minimum speech length
 before it fires, so speaker echo or a cough/"mm-hm" doesn't trigger a false barge-in.
+V15 (#240): every reply task runs in a generation (a context variable, inherited by the
+working-sound task it starts); a barge-in starts a new generation before it cancels the reply
+and sends `clear`, and `_play` drops audio (and its mark) from an older generation and ends
+that task, so no chunk of a cut reply can reach the caller after `clear`, whatever the order
+the transport's sends interleave in.
 
 Silence (V17, VAD mode only -- the phone case; push-to-talk callers aren't expected to
 talk at any moment): ~6 s with nothing from the caller after the bot finished speaking
@@ -38,6 +43,7 @@ conversation for the status callback.
 """
 
 import asyncio
+import contextvars
 import logging
 import re
 import time
@@ -47,7 +53,7 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.actions.transfer import TRANSFER_STARTED
+from app.actions.transfer import TRANSFER_STARTED, cancel_transfer
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order
@@ -63,6 +69,9 @@ from app.voice.vad import TurnDetector
 from sqlalchemy import select
 
 log = logging.getLogger(__name__)
+
+# V15 (#240): the barge-in generation the current reply task was spawned in; None outside one
+_reply_generation: contextvars.ContextVar[int | None] = contextvars.ContextVar("reply_generation", default=None)
 
 SendAudio = Callable[[bytes], Awaitable[None]]
 SendEvent = Callable[[dict], Awaitable[None]]
@@ -235,6 +244,7 @@ class CallSession:
         self._working_task: asyncio.Task | None = None
         # STT of a turn a barge-in cut off before it was answered; its words lead the next turn
         self._unanswered_stt: asyncio.Task | None = None
+        self._generation = 0  # V15: bumped by each barge-in; older reply tasks' audio is dropped
         self._playing_until = 0.0  # monotonic time the caller's buffer runs out of bot audio
         # V11: with `playback_marks` the client echoes a mark once it has played the audio
         # before it; name → estimated end. Until the echo arrives the bot counts as playing.
@@ -245,6 +255,7 @@ class CallSession:
         self._reprompts = 0  # since the caller last spoke
         self._hung_up = False
         self._transfer_pending = False  # transfer_to_human succeeded: hang up (Twilio dials) after the reply
+        self._transfer_cancel: asyncio.Task | None = None  # writing the cancel marker (#225)
         self._history: list[dict] = []
         self._system_prompt = ""
         self._tools: list[dict] = TOOLS  # per business from _load_business (#151)
@@ -280,6 +291,8 @@ class CallSession:
             await self._cancel_reply()
         except Exception:
             log.exception("voice reply failed during close")
+        if self._transfer_cancel is not None:
+            await self._transfer_cancel  # cancel_transfer never raises
         if self._turn is not None:
             self._turn.cancel()
             self._turn = None
@@ -323,7 +336,14 @@ class CallSession:
     async def _on_speech_start(self, preroll: bytes) -> None:
         self._heard_at = time.monotonic()
         self._reprompts = 0
+        # the caller speaks again after a transfer started (barge-in on "connecting you now",
+        # or the reply failed): the transfer is off until the model starts a new one (#225)
+        if self._transfer_pending:
+            self._transfer_pending = False
+            self._transfer_cancel = asyncio.create_task(
+                asyncio.to_thread(cancel_transfer, self.business_id, self.conversation_id))
         if self._bot_active():
+            self._generation += 1  # first: anything the old reply still sends is dropped (V15)
             await self._cancel_reply()
             self._playing_until = 0.0
             self._marks.clear()  # the client echoes them at once on `clear`; nothing left to wait for
@@ -340,7 +360,11 @@ class CallSession:
     def _spawn(self, coro) -> asyncio.Task:
         """Reply tasks are never awaited on the happy path, so a failure (TTS without
         credentials, LLM down) would otherwise vanish; log it and tell the client."""
-        task = asyncio.create_task(coro)
+        # V15: the task runs in its own copy of the context with this barge-in generation;
+        # tasks it creates (the working sound) copy it in turn
+        context = contextvars.copy_context()
+        context.run(_reply_generation.set, self._generation)
+        task = asyncio.create_task(coro, context=context)
 
         def report(t: asyncio.Task) -> None:
             if not t.cancelled() and t.exception() is not None:
@@ -349,6 +373,10 @@ class CallSession:
 
         task.add_done_callback(report)
         return task
+
+    def _stale(self) -> bool:
+        generation = _reply_generation.get()
+        return generation is not None and generation != self._generation
 
     async def _try_send_event(self, event: dict) -> None:
         try:
@@ -393,6 +421,9 @@ class CallSession:
     # --- one turn -------------------------------------------------------------------
 
     async def _handle_turn(self, turn: TurnTranscriber, speech_end: float) -> None:
+        if self._transfer_cancel is not None:
+            # the cancel marker must be older than any transfer this turn starts
+            await asyncio.shield(self._transfer_cancel)
         earlier, self._unanswered_stt = self._unanswered_stt, None
         stt = asyncio.ensure_future(self._transcribe(turn, earlier))
         try:
@@ -534,12 +565,23 @@ class CallSession:
                 ],
             })
             for c in calls.values():
-                result = await asyncio.to_thread(
+                run = asyncio.ensure_future(asyncio.to_thread(
                     run_tool, self.business_id, c["name"], c["arguments"], self.conversation_id,
                     self._call_sid, self._caller,
-                )
-                if c["name"] == "transfer_to_human" and result.startswith(TRANSFER_STARTED):
-                    self._transfer_pending = True
+                ))
+                if c["name"] != "transfer_to_human":
+                    result = await run
+                else:
+                    try:
+                        result = await asyncio.shield(run)
+                    except asyncio.CancelledError:
+                        # barge-in while the tool runs: its thread still logs the transfer, and
+                        # the caller has moved on, so record it as cancelled (#262)
+                        if (await run).startswith(TRANSFER_STARTED):
+                            await asyncio.to_thread(cancel_transfer, self.business_id, self.conversation_id)
+                        raise
+                    if result.startswith(TRANSFER_STARTED):
+                        self._transfer_pending = True
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
             timings.setdefault("tool_end_ms", _ms(speech_end))
         await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, play_ends, speech_end, timings)
@@ -657,7 +699,13 @@ class CallSession:
             pass
 
     async def _play(self, audio: bytes) -> None:
+        # V15: a reply cut by a barge-in must not send audio after `clear`, nor push the
+        # playback end or a mark that would keep the bot "active" for the new turn
+        if self._stale():
+            raise asyncio.CancelledError
         await self._send_audio(audio)
+        if self._stale():
+            raise asyncio.CancelledError
         now = time.monotonic()
         self._playing_until = max(now, self._playing_until) + tts.pcm16_duration_s(audio, self.sample_rate)
         if self._playback_marks:

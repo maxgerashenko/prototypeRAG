@@ -4,6 +4,7 @@ server-rendered; Crawl4AI/headless rendering is added when a JS-heavy site is hi
 
 import io
 import math
+import multiprocessing
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -30,6 +31,19 @@ REQUEST_HEADERS = {
 }
 # a menu or price list is well under this; bigger PDFs are brochures/scans not worth the download
 MAX_PDF_BYTES = 20_000_000
+# Other bodies are capped too (#190): a huge or endless response must not be read into memory.
+# robots.txt: RFC 9309 asks parsers to read at least 500 KiB, so that much is kept and the
+# rest dropped; for HTML and sitemaps an over-limit body skips the URL.
+MAX_HTML_BYTES = 5_000_000
+MAX_ROBOTS_BYTES = 512_000
+MAX_SITEMAP_BYTES = 20_000_000
+# total time for one response body, on top of httpx's per-read timeout: a server dripping a
+# byte every 10 s never trips that one. Checked between chunks, so it ends the read at the next one.
+MAX_BODY_SECONDS = 60.0
+# one PDF's text extraction (MarkItDown/pdfminer, pypdf) runs in a child process killed after this,
+# with its address space limited (Linux; macOS does not enforce it) so a decompression bomb dies there
+PDF_EXTRACT_SECONDS = 60.0
+PDF_EXTRACT_MEMORY_BYTES = 4_000_000_000
 
 # Transient failures (5xx, 429, timeouts) get RETRIES more tries: Retry-After when it is a
 # plain number of seconds (capped), else 2 s then 4 s. `_sleep` is replaced in tests.
@@ -100,12 +114,40 @@ def x_robots_noindex(values: list[str]) -> bool:
     return False
 
 
+def _read_capped(response: httpx.Response, max_bytes: int, truncate: bool = False) -> bytes:
+    """The body of a streamed `response`, at most `max_bytes` and `MAX_BODY_SECONDS` of
+    reading. Over the byte limit: ValueError, or with `truncate` the first `max_bytes`.
+    Over the time limit: TimeoutError. `Content-Length` is checked first so an honest
+    server's huge body is never started."""
+    if not truncate and int(response.headers.get("content-length") or 0) > max_bytes:
+        raise ValueError(f"body larger than {max_bytes} bytes")
+    deadline = time.monotonic() + MAX_BODY_SECONDS
+    body = bytearray()
+    for part in response.iter_bytes():
+        body.extend(part)
+        if len(body) > max_bytes:
+            if truncate:
+                return bytes(body[:max_bytes])
+            raise ValueError(f"body larger than {max_bytes} bytes")
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"body not complete after {MAX_BODY_SECONDS:g} s")
+    return bytes(body)
+
+
+def _decode(response: httpx.Response, body: bytes) -> str:
+    """Body text in the response's charset (header, else UTF-8); bad bytes replaced."""
+    try:
+        return body.decode(response.encoding or "utf-8", errors="replace")
+    except LookupError:  # unknown charset name in the header
+        return body.decode("utf-8", errors="replace")
+
+
 def fetch_text(url: str, client: httpx.Client, timeout: float = 15.0) -> str:
-    """GET `url` and return its body text. Raises on a non-2xx response (after retries)."""
+    """GET `url` and return its body text (at most MAX_HTML_BYTES). Raises on a non-2xx
+    response (after retries), an over-limit or too slow body."""
     with _get(url, client, timeout) as response:
-        response.read()
         response.raise_for_status()
-        return response.text
+        return _decode(response, _read_capped(response, MAX_HTML_BYTES))
 
 
 @dataclass
@@ -116,6 +158,7 @@ class FetchedDocument:
     pdf_text: str | None = None
     pdf_title: str | None = None
     noindex: bool = False
+    url: str | None = None  # where the request ended up after redirects (#188)
 
 
 def _is_pdf_response(response: httpx.Response) -> bool:
@@ -128,25 +171,33 @@ def _is_pdf_response(response: httpx.Response) -> bool:
     return response.url.path.lower().endswith(".pdf") and "html" not in content_type and "text/" not in content_type
 
 
-def fetch_document(url: str, client: httpx.Client, timeout: float = 15.0) -> FetchedDocument:
-    """GET `url` as HTML or PDF, decided by the response's Content-Type. Raises on a
-    non-2xx response or a PDF over MAX_PDF_BYTES (checked from Content-Length before the
-    body is read, and again on the body)."""
+def fetch_document(
+    url: str, client: httpx.Client, timeout: float = 15.0, allow_final: Callable[[str], bool] | None = None
+) -> FetchedDocument:
+    """GET `url` as HTML or PDF, decided by the response's Content-Type. `.url` of the result
+    is the final URL after redirects; when it differs from `url` and `allow_final` says no
+    (another domain, disallowed by that host's robots.txt) this raises, so a same-site link
+    that redirects off-site is never stored as this business's content (#188). Also raises
+    on a non-2xx response, a PDF over MAX_PDF_BYTES (checked from Content-Length before the
+    body is read, and again on the body), an HTML body over MAX_HTML_BYTES or a body that
+    takes longer than MAX_BODY_SECONDS."""
     with _get(url, client, timeout) as response:
         response.raise_for_status()
+        final_url = str(response.url)
+        if final_url != url and allow_final is not None and not allow_final(final_url):
+            raise ValueError(f"redirected to {final_url}, not allowed")
         noindex = x_robots_noindex(response.headers.get_list("x-robots-tag"))
         if not _is_pdf_response(response):
-            response.read()
-            return FetchedDocument(html=response.text, noindex=noindex)
-        if int(response.headers.get("content-length") or 0) > MAX_PDF_BYTES:
-            raise ValueError(f"PDF larger than {MAX_PDF_BYTES} bytes")
-        body = bytearray()
-        for part in response.iter_bytes():
-            body.extend(part)
-            if len(body) > MAX_PDF_BYTES:
-                raise ValueError(f"PDF larger than {MAX_PDF_BYTES} bytes")
-    pdf_bytes = bytes(body)
-    return FetchedDocument(pdf_text=extract_pdf_text(pdf_bytes), pdf_title=pdf_title(pdf_bytes, url), noindex=noindex)
+            return FetchedDocument(
+                html=_decode(response, _read_capped(response, MAX_HTML_BYTES)), noindex=noindex, url=final_url
+            )
+        try:
+            pdf_bytes = _read_capped(response, MAX_PDF_BYTES)
+        except ValueError:
+            raise ValueError(f"PDF larger than {MAX_PDF_BYTES} bytes") from None
+    return FetchedDocument(
+        pdf_text=extract_pdf_text_limited(pdf_bytes), pdf_title=pdf_title(pdf_bytes, final_url), noindex=noindex, url=final_url
+    )
 
 
 def fetch_robots_txt(base_url: str, client: httpx.Client) -> str | None:
@@ -158,8 +209,10 @@ def fetch_robots_txt(base_url: str, client: httpx.Client) -> str | None:
     try:
         with _get(url, client, 15.0) as response:
             if 200 <= response.status_code < 300:
-                response.read()
-                return response.text
+                try:
+                    return _decode(response, _read_capped(response, MAX_ROBOTS_BYTES, truncate=True))
+                except TimeoutError as exc:  # a robots.txt that never ends is as good as unreachable
+                    raise RobotsUnavailable(f"robots.txt {exc}") from exc
             if 400 <= response.status_code < 500 and response.status_code != 429:
                 return None
             raise RobotsUnavailable(f"robots.txt {response.status_code}")
@@ -167,45 +220,50 @@ def fetch_robots_txt(base_url: str, client: httpx.Client) -> str | None:
         raise RobotsUnavailable(f"robots.txt {type(exc).__name__}") from exc
 
 
-# the sitemap protocol's own limit per file; also the cap on what a .gz may inflate to
-MAX_SITEMAP_BYTES = 50_000_000
 _SITEMAP_ROOTS = ("urlset", "sitemapindex")
 
 
 def _gunzip_capped(body: bytes) -> bytes | None:
     """Inflate a gzip body, None when it is corrupt or inflates past MAX_SITEMAP_BYTES
     (a small .gz can expand enormously)."""
-    decoder = zlib.decompressobj(wbits=31)
     try:
-        out = decoder.decompress(body, MAX_SITEMAP_BYTES + 1)
+        out = zlib.decompressobj(wbits=31).decompress(body, MAX_SITEMAP_BYTES + 1)
     except zlib.error:
         return None
     return None if len(out) > MAX_SITEMAP_BYTES else out
 
 
-def _fetch_sitemap_body(url: str, client: httpx.Client) -> str | None:
-    """One sitemap's XML text, or None when the request fails, is not 200, or the body is
-    not a sitemap (`<urlset>` / `<sitemapindex>`; a soft-404 HTML page or login wall is not).
-    Gzip is detected by its magic bytes, not the `.gz` name or Content-Type: a server may
-    already have inflated a .xml.gz (Content-Encoding) or serve plain XML under that name."""
+def _get_sitemap_body(url: str, client: httpx.Client) -> str | None:
+    """A sitemap's XML text, or None when the request fails (after the retries of `_get`),
+    is not 200, is over-limit (MAX_SITEMAP_BYTES, also once inflated) or too slow (reported
+    on a printed line), or is not a sitemap (`<urlset>` / `<sitemapindex>` root; a soft-404
+    HTML page or login wall is not). Gzip is detected by its magic bytes, not the `.gz` name
+    or Content-Type: a server may already have inflated a .xml.gz (Content-Encoding) or
+    serve plain XML under that name."""
     try:
         with _get(url, client, 15.0) as response:
             if response.status_code != 200:
                 return None
-            body = response.read()
+            body = _read_capped(response, MAX_SITEMAP_BYTES)
+            if body[:2] == b"\x1f\x8b":
+                inflated = _gunzip_capped(body)
+                if inflated is None:
+                    return None
+                text = inflated.decode("utf-8", errors="replace")
+            else:
+                text = _decode(response, body)
     except httpx.HTTPError:
         return None
-    if body[:2] == b"\x1f\x8b":
-        body = _gunzip_capped(body)
-        if body is None:
-            return None
+    except (ValueError, TimeoutError) as exc:
+        print(f"sitemap skipped: {url} ({exc})")
+        return None
     try:
-        root = ET.fromstring(body)
+        root = ET.fromstring(text.encode("utf-8"))
     except ET.ParseError:
         return None
     if root.tag.rsplit("}", 1)[-1] not in _SITEMAP_ROOTS:
         return None
-    return body.decode("utf-8", errors="replace")
+    return text
 
 
 def fetch_sitemap(
@@ -225,7 +283,7 @@ def fetch_sitemap(
     for i, url in enumerate(candidates + [default]):
         if i:
             time.sleep(client._crawl_delay)
-        body = _fetch_sitemap_body(url, client)
+        body = _get_sitemap_body(url, client)
         if body is not None:
             return body
     return None
@@ -263,7 +321,7 @@ def fetch_child_sitemaps(
             visited.add(url)
             time.sleep(client._crawl_delay)
             fetched += 1
-            body = _fetch_sitemap_body(url, client)
+            body = _get_sitemap_body(url, client)
             if body is None:
                 continue
             nested = parse_sitemap_index(body)
@@ -296,6 +354,53 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
         text = _pypdf_text(pdf_bytes) or text
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _extract_pdf_child(pdf_bytes: bytes, memory_bytes: int, conn) -> None:
+    """Child-process entry for `extract_pdf_text_limited`: sends the text back, "" on any error."""
+    try:
+        try:
+            import resource
+
+            resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
+        except (ImportError, ValueError, OSError):
+            pass  # no limit available here (Windows); the timeout still applies
+        conn.send(extract_pdf_text(pdf_bytes))
+    except BaseException:  # MemoryError included
+        conn.send("")
+    finally:
+        conn.close()
+
+
+def extract_pdf_text_limited(
+    pdf_bytes: bytes, timeout: float | None = None, memory_bytes: int | None = None
+) -> str:
+    """`extract_pdf_text` in a child process (#190): killed after `timeout` seconds
+    (default PDF_EXTRACT_SECONDS) and limited to `memory_bytes` of address space, so one
+    hostile or broken PDF can't stall the crawl or eat its memory. A PDF that hits a
+    limit is skipped with a printed line and returns "" (the crawl then skips it as
+    "PDF has no text")."""
+    ctx = multiprocessing.get_context("spawn")
+    receiver, sender = ctx.Pipe(duplex=False)
+    process = ctx.Process(
+        target=_extract_pdf_child, args=(pdf_bytes, memory_bytes or PDF_EXTRACT_MEMORY_BYTES, sender), daemon=True
+    )
+    process.start()
+    sender.close()
+    try:
+        if receiver.poll(timeout if timeout is not None else PDF_EXTRACT_SECONDS):
+            try:
+                return receiver.recv()
+            except EOFError:  # child died (killed, out of memory)
+                print("PDF skipped: text extraction crashed")
+                return ""
+        print(f"PDF skipped: text extraction took longer than {timeout or PDF_EXTRACT_SECONDS:g} s")
+        return ""
+    finally:
+        receiver.close()
+        if process.is_alive():
+            process.kill()
+        process.join()
 
 
 def _pypdf_text(pdf_bytes: bytes) -> str:

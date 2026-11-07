@@ -2,6 +2,7 @@
 the LLM call is faked, so these run without LM Studio. The site-chrome text (with the
 footer's opening hours, V23) comes from the saved pilot page."""
 
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -706,3 +707,47 @@ def test_lenient_match_keeps_value_and_statement_together(business_id, model):
     run.extract_facts(business_id)
     banya = [f for f in _facts(business_id).values() if f.subject == "Banya"]
     assert len(banya) == 1 and (banya[0].value, banya[0].statement) == ("135F", "Banya is 135F.")
+
+
+def test_failed_facts_step_still_settles_pages_it_already_applied(business_id, chrome_text, model, monkeypatch):
+    """#297: the service page lost its price and was applied (its source deleted), then the
+    next page's write failed. The run must still settle: the sourceless fact may not stay
+    active with a retrievable chunk until some later run."""
+    ids = _setup(business_id, chrome_text)
+    with tenant_session(business_id) as s:
+        s.get(Page, ids["blogpost"]).page_type = "faq"
+    model.answers["Starts at $39"] = [raw_fact(quote="Starts at $39")]
+    model.answers["$45 this week"] = [raw_fact(value="$45", quote="Day Pass is $45")]
+    run.extract_facts(business_id)
+    assert ("price", "from $39", "active") in _facts(business_id)
+
+    with tenant_session(business_id) as s:
+        p = s.get(Page, ids["daypass"])
+        p.markdown, p.content_hash = "# Day Pass\n\nCome visit.", "d2"
+        b = s.get(Page, ids["blogpost"])
+        b.markdown, b.content_hash = "# Post\n\nThe Day Pass is $45 this week. New sauna too.", "b2"
+    model.answers.pop("Starts at $39")
+    real_apply, real_model = run.apply_page_facts, facts_mod.chat_json
+    daypass_applied = threading.Event()
+
+    def model_after_daypass(messages, schema, name, model=None, **kwargs):
+        if "New sauna" in messages[-1]["content"]:
+            daypass_applied.wait(5)  # the failing write comes after the day-pass page is applied
+        return real_model(messages, schema, name, model)
+
+    def apply_then_fail(session, bid, page, extracted, stats=None):
+        if page.id != ids["daypass"]:
+            raise RuntimeError("DB write failed")
+        real_apply(session, bid, page, extracted, stats)
+        daypass_applied.set()
+
+    monkeypatch.setattr(facts_mod, "chat_json", model_after_daypass)
+    monkeypatch.setattr(run, "apply_page_facts", apply_then_fail)
+    monkeypatch.setattr(get_settings(), "facts_parallel", 2)
+    with pytest.raises(RuntimeError, match="DB write failed"):
+        run.extract_facts(business_id)
+    facts = _facts(business_id)
+    assert set(facts) == {("price", "from $39", "stale"), ("price", "$45", "active")}
+    with tenant_session(business_id) as s:
+        chunks = list(s.scalars(select(Chunk).where(Chunk.business_id == business_id, Chunk.kind == "fact")))
+    assert [c.fact_id for c in chunks] == [facts[("price", "$45", "active")].id]

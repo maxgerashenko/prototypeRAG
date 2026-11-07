@@ -33,7 +33,7 @@ from app.ingest.discover import (
     prioritize,
     same_domain,
 )
-from app.ingest.fetch import extract_pdf_text, fetch_document, fetch_sitemap, pdf_title
+from app.ingest.fetch import FetchedDocument, extract_pdf_text, fetch_document, fetch_sitemap, pdf_title
 from app.ingest.identity import domain_of, site_root
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 
@@ -101,7 +101,7 @@ def test_crawl_delay_from_robots_txt():
 
 def test_normalize_url():
     assert normalize_url("https://X.com/a/#frag") == "https://x.com/a"
-    assert normalize_url("https://x.com/?q=1") == "https://x.com/"
+    assert normalize_url("https://x.com/?utm_source=a&q=1") == "https://x.com/?q=1"  # #189: only tracking is dropped
 
 
 def test_discover_links_on_real_homepage(homepage_html: str):
@@ -250,7 +250,9 @@ def test_bfs_never_queues_robots_disallowed_links(monkeypatch):
     """Regression: disallowed links were skipped when fetching the frontier but still
     added to the crawl list, so crawl_business fetched them anyway (R10)."""
     html = '<a href="https://x.com/private">p</a><a href="https://x.com/ok">o</a>'
-    monkeypatch.setattr(run, "fetch_text", lambda url, client, timeout=15.0: html)
+    monkeypatch.setattr(
+        run, "fetch_document", lambda url, client, timeout=15.0, allow_final=None: FetchedDocument(html=html, url=url)
+    )
     monkeypatch.setattr(run.time, "sleep", lambda s: None)
     client = SimpleNamespace(_crawl_delay=0)
     urls, _ = run._expand_by_links("https://x.com/", client, RobotsChecker("User-agent: *\nDisallow: /private\n"), 10, 3)

@@ -2,6 +2,7 @@
 name and wildcards, noindex in any form, retries with backoff, and a failed crawl that keeps
 the stored pages instead of deleting them."""
 
+import threading
 import uuid
 
 import httpx
@@ -9,9 +10,11 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.db import tenant_session
-from app.db.models import Business, Page
+from app.db.models import Business, Chunk, Fact, FactSource, Page
 from app.ingest import fetch, run
 from app.ingest.discover import BOT_TOKEN, RobotsChecker, has_noindex
+from app.ingest.fact_chunks import sync_fact_chunks
+from app.ingest.lock import CrawlInProgress, crawl_lock
 
 ROOT = "https://safety.example.com/"
 
@@ -227,3 +230,98 @@ def test_small_shrink_deletes_but_one_of_four_skips(monkeypatch, business):
     summary = run.crawl_business(business, ROOT, extract_profile=False)
     assert summary["deleted_pages"] == 0 and "fetched 1 pages" in summary["deletes_skipped"]
     assert f"{ROOT}gift-cards" in _urls(business)
+
+
+# --- one crawl per business (#196) and fact sources of deleted pages (#297) ------------
+
+THREE_PAGE_SITE = {
+    "/robots.txt": (404, ""),
+    "/": (200, '<html><body><main><h1>Home</h1><p>Welcome to the spa.</p><a href="/about">About</a><a href="/prices">Prices</a></main></body></html>'),
+    "/about": (200, "<html><body><main><h1>about</h1><p>All about the spa.</p></main></body></html>"),
+    "/prices": (200, "<html><body><main><h1>prices</h1><p>All about prices at the spa.</p></main></body></html>"),
+}
+
+
+def test_second_crawl_of_the_same_business_is_refused_while_one_runs(monkeypatch, business):
+    """Two crawls at once: the second is refused and touches nothing; the first finishes,
+    and the lock is free again afterwards. Another business is never blocked."""
+    started, release = threading.Event(), threading.Event()
+    site = dict(THREE_PAGE_SITE)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/about":
+            started.set()
+            release.wait(10)  # the first crawl stays mid-fetch until the second one has tried
+        status, body = site.get(request.url.path, (404, ""))
+        return httpx.Response(status, text=body, headers={"content-type": "text/html"})
+
+    def fake_client(delay_seconds: float = 0.5) -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+        client._crawl_delay = 0
+        return client
+
+    monkeypatch.setattr(run, "make_client", fake_client)
+    first: dict = {}
+    thread = threading.Thread(target=lambda: first.update(run.crawl_business(business, ROOT, extract_profile=False)))
+    thread.start()
+    try:
+        assert started.wait(10)
+        before = _urls(business)
+        second = run.crawl_business(business, ROOT, extract_profile=False)
+        assert "already running" in second["aborted"]
+        assert _urls(business) == before
+        with crawl_lock(uuid.uuid4()):  # a different business crawls freely
+            pass
+    finally:
+        release.set()
+        thread.join(30)
+    assert first["deleted_pages"] == 1  # the first crawl ran to the end (/team is gone)
+    assert "aborted" not in run.crawl_business(business, ROOT, extract_profile=False)
+
+
+def test_lock_is_released_when_the_crawl_fails(business):
+    with pytest.raises(RuntimeError), crawl_lock(business):
+        raise RuntimeError("crawl crashed")
+    with crawl_lock(business), pytest.raises(CrawlInProgress), crawl_lock(business):
+        pass
+
+
+def _fact_from_team_page(bid) -> uuid.UUID:
+    """An active fact (with its retrievable fact chunk) whose only source is /team."""
+    with tenant_session(bid) as s:
+        team = s.scalar(select(Page).where(Page.business_id == bid, Page.url == f"{ROOT}team"))
+        team.page_type = "service"
+        fact = Fact(business_id=bid, type="price", subject="Massage", attribute="price", value="$90",
+                    statement="A massage costs $90.", fact_key="price|massage|price", status="active", origin="crawl")
+        s.add(fact)
+        s.flush()
+        s.add(FactSource(business_id=bid, fact_id=fact.id, page_id=team.id, quote="Massage $90", page_hash=team.content_hash))
+        sync_fact_chunks(s, bid)
+        return fact.id
+
+
+def _fact_state(bid, fact_id):
+    with tenant_session(bid) as s:
+        status = s.get(Fact, fact_id).status
+        chunks = s.scalars(select(Chunk).where(Chunk.business_id == bid, Chunk.fact_id == fact_id)).all()
+        return status, len(chunks)
+
+
+@pytest.mark.parametrize("extract_profile", [True, False])
+def test_deleted_page_takes_its_facts_out_of_search_even_if_the_facts_step_fails(monkeypatch, business, extract_profile):
+    """#297: /team is gone from the site, so its page is deleted (cascading to its fact
+    sources). The facts step then fails (LLM down) or doesn't run at all (--no-profile):
+    the fact only /team stated must still go stale and lose its fact chunk."""
+    fact_id = _fact_from_team_page(business)
+    assert _fact_state(business, fact_id) == ("active", 1)
+
+    def llm_down(*args, **kwargs):
+        raise RuntimeError("LLM down")
+
+    for step in ("extract_profile_from_text", "extract_facts", "summarize_business", "pregenerate_greeting"):
+        monkeypatch.setattr(run, step, llm_down)
+    monkeypatch.setattr(run, "assign_timezones", lambda bid: 0)
+    _site(monkeypatch, THREE_PAGE_SITE)
+    summary = run.crawl_business(business, ROOT, extract_profile=extract_profile)
+    assert summary["deleted_pages"] == 1 and f"{ROOT}team" not in _urls(business)
+    assert _fact_state(business, fact_id) == ("stale", 0)

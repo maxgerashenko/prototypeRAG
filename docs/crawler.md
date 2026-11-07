@@ -20,6 +20,7 @@ the only part of the app that talks to a business's website.
 | `app/ingest/identity.py` | Business identity from a URL: `domain_of` (www-stripped host), `site_root` |
 | `app/ingest/run.py` — crawl half | CLI entry, `resolve_business`, `_expand_by_links` (BFS), the fetch loop of `crawl_business`, the delete-safety threshold |
 | `app/ingest/store.py` — `upsert_page`, `delete_pages_not_in` | Writes and deletes `pages` rows |
+| `app/ingest/lock.py` — `crawl_lock`, `CrawlInProgress` | One crawl per business at a time (#196) |
 
 **Not in the layer** (but in the same package or file)
 
@@ -50,8 +51,12 @@ organize-step columns on `pages` (`page_type`, `location_id`, `retrievable`,
   `docker compose run --rm crawler --url <site>` (`docker-compose.yml`, service
   `crawler`, entrypoint `python -m app.ingest.run`). There is no separate crawler image:
   `Dockerfile` says one is added only with Crawl4AI (DEC-36).
-- Synchronous and single-threaded for HTTP. One crawl at a time is assumed; there is no
-  lock.
+- Synchronous and single-threaded for HTTP. One crawl per business at a time (#196):
+  `crawl_business` (and `--only summary|facts`, except a facts dry run) holds
+  `lock.crawl_lock`, a Postgres `pg_try_advisory_xact_lock` on `crawl:<business_id>` kept
+  by an open transaction on its own connection (works through Neon's transaction-mode
+  pooler, R20). A second run of the same business is refused at once (`{"aborted": ...}`,
+  or exit with a message for `--only`), not queued; other businesses are not blocked.
 
 ## Data flow
 
@@ -202,7 +207,6 @@ and the meta/`X-Robots-Tag` part of L1 are fixed on `main` and not repeated here
 - **robots.txt is read for the start host only (review L3)**; `www.` and bare host pass
   `same_domain` but share one rule set.
 - **The User-Agent's contact URL is a placeholder (review L4).**
-- **No lock against two crawls of one business (review L5).**
 - **Page text goes to LLM steps unfiltered (review L6)**: prompt injection is handled, if
   at all, by the data layer's quote checks.
 
