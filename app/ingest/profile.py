@@ -65,6 +65,11 @@ def _none_if_placeholder(key: str, value):
     return None if _is_placeholder(key, value) else value
 
 
+# businesses.settings key the Settings screen sets when the owner saves a name; the crawler
+# then stops taking og:site_name (#192, DEC-11).
+NAME_CONFIRMED = "name_confirmed"
+
+
 def is_placeholder_name(name: str | None) -> bool:
     """True when a business name isn't a real one: missing, the "(pending)" stand-in, or
     a model placeholder echo. The one rule for businesses.name and business_profile.name

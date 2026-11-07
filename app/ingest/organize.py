@@ -329,7 +329,7 @@ class OrganizeResult:
 
 
 def organize_business(
-    business_id: uuid.UUID, start_url: str, site_root: str, noindex_urls: frozenset[str] = frozenset()
+    business_id: uuid.UUID, start_url: str, site_root: str
 ) -> OrganizeResult:
     """DB-touching orchestration, called once per crawl after all pages are fetched and
     stored (A4): dedupe site chrome into one pseudo-page, detect/upsert `locations` from
@@ -359,7 +359,7 @@ def organize_business(
                 location_by_slug.setdefault(slugify(loc.name), loc)
         slug_set = set(location_by_slug)
 
-        organized_ids = _organize_pages(pages, location_by_slug, slug_set, noindex_urls)
+        organized_ids = _organize_pages(pages, location_by_slug, slug_set)
         session.flush()
 
     return OrganizeResult(
@@ -448,7 +448,6 @@ def _upsert_locations(
 
 def _organize_pages(
     pages: list[Page], location_by_slug: dict[str, Location], slug_set: set[str],
-    noindex_urls: frozenset[str] = frozenset(),
 ) -> list[uuid.UUID]:
     by_hash: dict[str, list[Page]] = {}
     for p in pages:
@@ -459,15 +458,12 @@ def _organize_pages(
         dupes = by_hash[p.content_hash]
         canonical = min(dupes, key=lambda x: len(x.url)) if len(dupes) > 1 else p
         duplicate_of = canonical.id if canonical.id != p.id else None
-        noindex = p.url in noindex_urls
-
-        page_hash = f"{p.content_hash}:{ORGANIZER_VERSION}"
-        # noindex isn't persisted (no DB column for it -- it's only known at crawl time,
-        # from the raw HTML, which isn't stored, DEC-09): a page already organized under
-        # this content+version is skipped UNLESS this run observed noindex and the page
-        # is still marked retrievable, so that signal still gets applied even though it
-        # can't be re-detected on a later `--only organize` run without a fresh fetch.
-        if p.organized_hash == page_hash and p.duplicate_of == duplicate_of and not (noindex and p.retrievable):
+        # noindex is stored on the page (set by run.py from each fetch, #289) and is part of
+        # the organized hash, so a change in either direction re-organizes the page and a
+        # run that doesn't re-fetch it keeps it non-retrievable.
+        noindex = p.noindex
+        page_hash = f"{p.content_hash}:{ORGANIZER_VERSION}" + (":noindex" if noindex else "")
+        if p.organized_hash == page_hash and p.duplicate_of == duplicate_of:
             continue  # already organized under this content + version -- no-op (idempotency)
 
         page_type = classify_page_type(p.url, slug_set)

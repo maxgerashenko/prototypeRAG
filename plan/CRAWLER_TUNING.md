@@ -12,7 +12,7 @@ the voice-side knobs are in [VOICE_TUNING.md](VOICE_TUNING.md) §5).
 
 Flow ([01-crawler.md](01-crawler.md), [07-knowledge-quality.md](07-knowledge-quality.md)):
 **discover → fetch → clean → store → organize → chunk → (profile, timezone, facts, summary)
-→ index (embed)**. Run: `python -m app.ingest.run --url <site>`, then `python -m app.rag.index`.
+→ index (embed)**. Run: `python -m app.ingest.run --url <site>`; a full crawl (profile step on) ends by embedding the new chunks (#282). After `--no-profile` run `python -m app.rag.index --business-id <id>` by hand.
 
 Values are the current defaults in the code (approximate, stage 1). **Where a knob lives:**
 *CLI* = a flag of `app.ingest.run`; *env* = `.env` / [app/config.py](../app/config.py);
