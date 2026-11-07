@@ -331,8 +331,8 @@ def test_cancel_by_reference_frees_the_slot_for_someone_else(call_for, business_
 def test_cancel_unknown_reference(call_for, business_id):
     call = call_for()
     call.turn(
-        "Cancel booking ZZZZZZZZ, confirmed.",
-        tool("cancel_booking", reference="ZZZZZZZZ", confirmed=True),
+        "Cancel booking ABCDEF12, confirmed.",
+        tool("cancel_booking", reference="ABCDEF12", confirmed=True),
         "I can't find that booking.",
     )
     assert call.results[-1].startswith("No upcoming booking found")
