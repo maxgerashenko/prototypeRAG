@@ -32,7 +32,7 @@ from app.db.models import Business, BusinessProfile, Location, Page
 from app.db.session import SessionLocal
 from app.ingest.chunk import chunk_markdown
 from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
-from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, normalize_url, parse_robots_sitemaps, parse_sitemap_index, same_domain
+from app.ingest.discover import HostRobots, RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, normalize_url, parse_robots_sitemaps, parse_sitemap_index, same_domain
 from app.ingest.fetch import (
     RobotsUnavailable, fetch_child_sitemaps, FetchedDocument, fetch_document, fetch_robots_txt, fetch_sitemap, make_client,
 )
@@ -121,7 +121,7 @@ def resolve_business(url: str, business_id: uuid.UUID | None) -> uuid.UUID:
 
 
 def _expand_by_links(
-    start_url: str, client, robots_checker: RobotsChecker | None, max_pages: int, max_depth: int
+    start_url: str, client, robots_checker: RobotsChecker | HostRobots | None, max_pages: int, max_depth: int
 ) -> tuple[list[str], dict[str, FetchedDocument | None]]:
     """BFS from `start_url` when there's no usable sitemap. One fetch per URL, through
     `fetch_document` (so a link serving a PDF is parsed as a PDF, #188), cached for reuse:
@@ -355,8 +355,8 @@ def _crawl_business(
             # any stored page, so the business keeps what it had (legal and data safety)
             print(f"crawl aborted, stored data kept: {exc}")
             return {"aborted": str(exc)}
-        robots_checker = RobotsChecker(robots_txt) if robots_txt else None
-        robots_delay = robots_checker.crawl_delay() if robots_checker else None
+        start_checker = RobotsChecker(robots_txt) if robots_txt else None
+        robots_delay = start_checker.crawl_delay() if start_checker else None
         if robots_delay is not None and robots_delay > client._crawl_delay:
             # honour it in full, however long (correctness & legal first): only ever
             # raises our own delay, never lowers it below delay_seconds
@@ -373,21 +373,35 @@ def _crawl_business(
             )
             print(f"crawl aborted, stored data kept: {reason}")
             return {"aborted": reason}
+
+
+        def load_host_robots(host_base: str) -> str | None:
+            # another host of the same domain (www vs bare, #194): its own robots.txt, once,
+            # after the crawl delay; an unreadable one raises and HostRobots disallows the host
+            time.sleep(client._crawl_delay)
+            body = fetch_robots_txt(host_base, client)
+            other = RobotsChecker(body).crawl_delay() if body else None
+            if other is not None and other > client._crawl_delay:
+                client._crawl_delay = other
+            return body
+
+        robots_checker = HostRobots(start_url, start_checker, load_host_robots)
         # robots.txt `Sitemap:` lines first, then /sitemap.xml (#136); after the delay is set
         sitemap_xml = fetch_sitemap(
             base_url, client, parse_robots_sitemaps(robots_txt),
-            robots_checker.can_fetch if robots_checker else lambda url: True,
+            robots_checker.can_fetch,
         )
         child_sitemaps: list[str] = []
         children = parse_sitemap_index(sitemap_xml) if sitemap_xml else []
         if children:  # sitemap index (Yoast/WordPress): follow it one level, same delay + robots
             child_sitemaps = fetch_child_sitemaps(
-                children, client, robots_checker.can_fetch if robots_checker else lambda url: True, base_url
+                children, client, robots_checker.can_fetch, base_url
             )
         time.sleep(client._crawl_delay)  # after the robots.txt + sitemap requests
 
         sitemap_urls = discover_pages(
-            start_url, sitemap_xml, robots_txt, max_pages, max_depth, child_sitemaps=child_sitemaps
+            start_url, sitemap_xml, robots_txt, max_pages, max_depth, child_sitemaps=child_sitemaps,
+            can_fetch=robots_checker.can_fetch,
         )
         if len(sitemap_urls) > 1:
             urls_to_crawl, fetched = sitemap_urls, {}

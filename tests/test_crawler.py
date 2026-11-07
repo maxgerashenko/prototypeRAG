@@ -1122,3 +1122,107 @@ def test_chunk_markdown_numbers_chunks_continuously_across_sections():
     drafts = chunk_markdown(md)
     assert [(d.section_heading, d.text, d.chunk_index) for d in drafts] == [
         ("A", "first body", 0), ("B", "second body", 1)]
+
+
+# --- sitemap edge cases (#193) and per-host robots.txt (#194) ---
+
+import gzip  # noqa: E402
+
+_URLSET = '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://x.test/a</loc></url></urlset>'
+
+
+def _bytes_client(routes: dict[str, httpx.Response | bytes], seen: list[str]) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        r = routes.get(str(request.url))
+        if r is None:
+            return httpx.Response(404)
+        return r if isinstance(r, httpx.Response) else httpx.Response(200, content=r)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client._crawl_delay = 0
+    return client
+
+
+def test_fetch_sitemap_retries_a_503(monkeypatch):
+    monkeypatch.setattr("app.ingest.fetch._sleep", lambda s: None)
+    replies = iter([httpx.Response(503), httpx.Response(200, content=_URLSET.encode())])
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: next(replies)))
+    client._crawl_delay = 0
+    assert fetch_sitemap("https://x.test", client) == _URLSET
+
+
+def test_fetch_sitemap_inflates_gzip_by_magic_bytes_not_name():
+    from app.ingest.fetch import fetch_child_sitemaps
+
+    gz = gzip.compress(_URLSET.encode())
+    client = _bytes_client({"https://x.test/sitemap.xml": gz}, [])  # gzip served under a plain name
+    assert fetch_sitemap("https://x.test", client) == _URLSET
+    # plain XML under a .gz name is read as is
+    client = _bytes_client({"https://x.test/c.xml.gz": _URLSET.encode()}, [])
+    assert fetch_child_sitemaps(["https://x.test/c.xml.gz"], client) == [_URLSET]
+    # a gzip bomb (inflates past the cap) is dropped, not parsed
+    client = _bytes_client({"https://x.test/sitemap.xml": gzip.compress(b"<urlset>" + b" " * 2000 + b"</urlset>")}, [])
+    import app.ingest.fetch as fetch_mod
+
+    original = fetch_mod.MAX_SITEMAP_BYTES
+    fetch_mod.MAX_SITEMAP_BYTES = 1000
+    try:
+        assert fetch_sitemap("https://x.test", client) is None
+    finally:
+        fetch_mod.MAX_SITEMAP_BYTES = original
+
+
+def test_fetch_sitemap_skips_a_declared_sitemap_that_is_not_xml():
+    seen: list[str] = []
+    client = _bytes_client(
+        {"https://x.test/soft404": b"<html><body>Not found</body></html>", "https://x.test/sitemap.xml": _URLSET.encode()},
+        seen,
+    )
+    assert fetch_sitemap("https://x.test", client, ["https://x.test/soft404"]) == _URLSET
+    assert seen == ["https://x.test/soft404", "https://x.test/sitemap.xml"]
+
+
+def test_fetch_child_sitemaps_follows_nested_indexes_with_bounds():
+    from app.ingest.fetch import MAX_CHILD_SITEMAPS, fetch_child_sitemaps
+
+    def index(*urls: str) -> bytes:
+        body = "".join(f"<sitemap><loc>{u}</loc></sitemap>" for u in urls)
+        return f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</sitemapindex>'.encode()
+
+    seen: list[str] = []
+    routes = {
+        "https://x.test/mid.xml": index("https://x.test/mid.xml", "https://x.test/leaf.xml", "https://x.test/deep.xml"),
+        "https://x.test/leaf.xml": _URLSET.encode(),
+        "https://x.test/deep.xml": index("https://x.test/too-deep.xml"),
+        "https://x.test/too-deep.xml": _URLSET.encode(),
+    }
+    bodies = fetch_child_sitemaps(["https://x.test/mid.xml"], _bytes_client(routes, seen), base_url="https://x.test")
+    assert bodies == [_URLSET]  # the self-listing index is no loop; the third level is not followed
+    assert seen == ["https://x.test/mid.xml", "https://x.test/leaf.xml", "https://x.test/deep.xml"]
+
+    many = [f"https://x.test/s{i}.xml" for i in range(MAX_CHILD_SITEMAPS + 10)]
+    seen = []
+    fetch_child_sitemaps(many, _bytes_client({u: _URLSET.encode() for u in many}, seen))
+    assert len(seen) == MAX_CHILD_SITEMAPS
+
+
+def test_host_robots_reads_each_host_own_rules_once():
+    from app.ingest.discover import HostRobots
+
+    loads: list[str] = []
+    rules = {"https://www.x.test": "User-agent: *\nDisallow: /private/\n", "https://down.x.test": None}
+
+    def load(base: str):
+        loads.append(base)
+        if base not in rules:
+            raise RuntimeError("unreadable")
+        return rules[base]
+
+    start = RobotsChecker("User-agent: *\nDisallow: /admin/\n")
+    robots = HostRobots("https://x.test/", start, load)
+    assert not robots.can_fetch("https://x.test/admin/a") and robots.can_fetch("https://x.test/private/a")
+    assert robots.can_fetch("https://www.x.test/admin/a") and not robots.can_fetch("https://www.x.test/private/a")
+    assert robots.can_fetch("https://www.x.test/menu") and robots.can_fetch("https://down.x.test/anything")  # no robots.txt
+    assert not robots.can_fetch("https://broken.x.test/menu")  # unreadable = disallowed
+    assert loads == ["https://www.x.test", "https://down.x.test", "https://broken.x.test"]
