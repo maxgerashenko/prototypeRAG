@@ -19,6 +19,7 @@ import argparse
 import sys
 import time
 import uuid
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -38,6 +39,7 @@ from app.ingest.fetch import (
 from app.ingest.fact_chunks import sync_fact_chunks
 from app.ingest.facts import FactsBackend, extract_page_facts, facts_backend, pages_to_extract
 from app.ingest.identity import domain_of, site_root
+from app.ingest.lock import CrawlInProgress, crawl_lock
 from app.ingest.merge import MergeStats, apply_page_facts, conflicts_report, settle_facts
 from app.ingest.organize import (
     chrome_pseudo_url,
@@ -214,6 +216,7 @@ def extract_facts(
         pool.submit(extract_page_facts, page, name, locations, location_names.get(page.location_id), model=model, backend=backend): page
         for page in todo
     }
+    settled = False
     try:
         for future in as_completed(futures):
             page = futures[future]
@@ -237,19 +240,35 @@ def extract_facts(
                 if live is None or live.content_hash != page.content_hash:
                     continue  # re-crawled while the model ran; the next run extracts the new text
                 apply_page_facts(session, business_id, live, result.facts, stats)
+        if not dry_run:
+            chunks = _settle(business_id, stats)
+            settled = True
     finally:
         # Ctrl-C or a failed write: drop the queued pages instead of waiting for all of them
         pool.shutdown(wait=False, cancel_futures=True)
-    if not dry_run:
-        with tenant_session(business_id) as session:
-            settle_facts(session, business_id, stats)
-            chunks = sync_fact_chunks(session, business_id)
+        if not dry_run and not settled:
+            # #297: pages already applied above replaced their sources; without a settle
+            # here a fact that just lost its last source would stay active (and keep its
+            # retrievable fact chunk) until some later run. Best effort: the original
+            # error is the one to report, so a failing settle only prints.
+            try:
+                _settle(business_id, stats)
+            except Exception as exc:
+                print(f"facts settle after a failed facts step also failed: {exc}", flush=True)
     return {
         "pages_extracted": stats.pages if not dry_run else len(todo_ids) - failed,
         "facts_seen": stats.facts_seen, "facts_created": stats.created,
         "rejected": rejected, "failed": failed, "by_status": stats.by_status,
         "fact_chunks": None if dry_run else f"+{chunks.created} ~{chunks.updated} -{chunks.deleted}",
     }
+
+
+def _settle(business_id: uuid.UUID, stats: MergeStats | None = None):
+    """Re-decide every fact's status from its current sources and rebuild the fact chunks
+    to match, in one transaction (no LLM, cheap). Returns the fact-chunk stats."""
+    with tenant_session(business_id) as session:
+        settle_facts(session, business_id, stats)
+        return sync_fact_chunks(session, business_id)
 
 
 def _rechunk_page(session, business_id: uuid.UUID, page: Page, business_name: str) -> None:
@@ -283,7 +302,19 @@ def _rechunk_page(session, business_id: uuid.UUID, page: Page, business_name: st
     replace_chunks(session, business_id, page.id, drafts, location_id=page.location_id)
 
 
-def crawl_business(
+def crawl_business(business_id: uuid.UUID, start_url: str, **kwargs) -> dict:
+    """One full crawl (`_crawl_business`) under the business's crawl lock (#196): a second
+    crawl of the same business while one runs is refused with `{"aborted": ...}`, like an
+    unreadable robots.txt, and touches nothing."""
+    try:
+        with crawl_lock(business_id):
+            return _crawl_business(business_id, start_url, **kwargs)
+    except CrawlInProgress as exc:
+        print(f"crawl aborted: {exc}")
+        return {"aborted": str(exc)}
+
+
+def _crawl_business(
     business_id: uuid.UUID,
     start_url: str,
     max_pages: int = 200,
@@ -454,6 +485,14 @@ def crawl_business(
                 deleted_pages = delete_pages_not_in(
                     session, business_id, keep_urls=[*urls_to_crawl, chrome_pseudo_url(root)]
                 )
+                if deleted_pages:
+                    # #297: deleting a page cascades to its fact_sources, so a fact only that
+                    # page stated is left with no source but still `active` (and retrieved)
+                    # until a settle. Settle in the same transaction as the delete, not only
+                    # at the end of the facts step: that step may fail (LLM down) or not run
+                    # at all (--no-profile), and then the gone page's facts would stay live.
+                    settle_facts(session, business_id)
+                    sync_fact_chunks(session, business_id)
 
         profile_extracted = False
         with tenant_session(business_id) as session:
@@ -565,15 +604,22 @@ def main() -> None:
             lines = conflicts_report(session, business_id)
         print("\n".join(lines) or "no conflicts")
         return
-    if args.only == "summary":
-        print(f"summary: {summarize_business(business_id, force=args.force)}")
-        return
-    if args.only == "facts":
-        for key, value in extract_facts(
-            business_id, force=args.force, model=args.model, dry_run=args.dry_run, verbose=True,
-            choice=args.facts_model,
-        ).items():
-            print(f"{key}: {value}")
+    if args.only:
+        # same lock as a crawl (#196): these steps write the facts/summary a crawl rewrites;
+        # a dry run writes nothing, so it may run beside a crawl
+        lock = nullcontext() if args.only == "facts" and args.dry_run else crawl_lock(business_id)
+        try:
+            with lock:
+                if args.only == "summary":
+                    print(f"summary: {summarize_business(business_id, force=args.force)}")
+                else:
+                    for key, value in extract_facts(
+                        business_id, force=args.force, model=args.model, dry_run=args.dry_run, verbose=True,
+                        choice=args.facts_model,
+                    ).items():
+                        print(f"{key}: {value}")
+        except CrawlInProgress as exc:
+            raise SystemExit(str(exc)) from None
         return
 
     summary = crawl_business(
