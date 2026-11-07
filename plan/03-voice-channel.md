@@ -226,7 +226,7 @@ Findings:
 | V12 | `AudioContext({sampleRate: 16000})` — fails in Firefox (mixed sample rates); Safari untested | Closed (Safari ✅ 2026-10-19: works, mic streams; Firefox explicitly not supported/tested — not a target browser) | Open page in Chrome, Safari | — |
 | V13 | Sentence splitter cuts at "Dr. " / "5 p.m. on", and a long reply without punctuation is only spoken at the end | Fixed in code (#77), unconfirmed on real replies | Look at `reply` events of real answers | Abbreviation list; text past 120 chars is cut at the last `,;:` (min 30 chars) or space |
 | V14 | LLM may still output markdown, lists or URLs, which TTS reads aloud | Potential | Ask for "address and website" | Strip markdown before TTS |
-| V15 | Reply-task sends and feed-path sends (`clear`) can interleave on one WebSocket | Potential | Barge-in many times quickly | One send queue per connection |
+| V15 | Reply-task sends and feed-path sends (`clear`) can interleave on one WebSocket | Fixed in code 2026-11-07 (#240): barge-in generation counter, a cut reply's audio is dropped after `clear`; live check pending | Barge-in many times quickly ("Test on Mac") | — |
 
 **Fixed or closed in code 2026-10-05** (stage 1 tuning, the locally testable items not owned
 by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to do):
@@ -245,6 +245,14 @@ by T1–T4b or B1–B6; unit tests with fakes, live re-check on the Mac still to
   to the transport in one synchronous call, so two sends can't interleave mid-message, and
   `_on_speech_start` awaits the cancelled reply task before sending `clear`, so no audio
   of that reply follows it. The Twilio adapter must keep that order (cancel, then `clear`).
+  **Reopened and fixed 2026-11-07 (#240):** the working sound is cancelled but not awaited,
+  so any sender a reply starts as a child task is not covered by that order. Each reply task
+  now runs in a barge-in generation (a context variable its child tasks inherit); a barge-in
+  starts a new generation before cancelling and sending `clear`, and `_play` ends a task of
+  an older generation instead of sending its audio, playback estimate or mark. Tests:
+  `test_barge_in_while_audio_is_being_sent_sends_nothing_after_clear`,
+  `test_stale_sender_the_barge_in_did_not_cancel_is_dropped` (fake socket, the second fails
+  without the fix).
 
 **Fixed or closed in code 2026-10-18** (step 4, DEC-44; unit tests with the real VAD on
 the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to do):
@@ -279,7 +287,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 | # | Problem | Kind | How to test | Fix idea if it fails |
 |---|---|---|---|---|
 | V16 | Turns with `search_business_info` take ≈ 5 s to the first sentence (1.8 s to emit the tool call, 3.2 s over 5 chunks) — budget is 1.5 s | Real | `latency` events | Ticks while the tool runs (T1, done; spoken filler dropped, #40); fewer/shorter chunks; LM Studio prompt caching; faster model; compare Gemini (step 6) |
-| V17 | Silence re-prompt / hang-up — **fixed in code 2026-10-05**: VAD mode only (phone, `voice-debug.html`), not push-to-talk; 6 s quiet after the bot's audio ends → "Are you still there?", 6 s more → goodbye line, `hangup` event, socket closed (1000). A caller whose last sentence is a farewell (`is_farewell()`, English regex, never on a question) is answered, then hung up on. Re-prompt/goodbye go to the transcript, not the LLM history | Fixed in code | "Test on Mac" below | Farewell by LLM tool (`end_call`) if the regex misses too often or for other languages |
+| V17 | Silence re-prompt / hang-up — **fixed in code 2026-10-05**: VAD mode only (phone, `voice-debug.html`), not push-to-talk; 6 s quiet after the bot's audio ends → "Are you still there?", 6 s more → goodbye line, `hangup` event, socket closed (1000). A caller whose last sentence is a farewell (`is_farewell()`, English regex plus es/ru from `phrases.py` by `VOICE_LANGUAGE`, never on a question) is answered, then hung up on. Re-prompt/goodbye go to the transcript, not the LLM history | Fixed in code | "Test on Mac" below | Farewell by LLM tool (`end_call`) if the regex misses too often or for other languages |
 
 ### Needs Twilio / later stages
 
@@ -349,13 +357,20 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **Web front-end fixes (#207, #210, #215)**: (a) Settings → open the greeting editor, type a draft, then phone the pilot number: the screen stays on Settings, the draft survives, the green "live call" button appears and opens the call. (b) In `/web/` Tab to "Business settings", a conversation row and Back and press Space: each acts as a button press, no call starts (Space on the selected business card or the call button still calls). (c) Firefox: press Call in `/web/` and `voice-debug.html`: expect the message "This browser can’t capture audio at 16 kHz. Use Chrome, Edge or Safari." instead of a silent failure; Chrome/Safari calls still connect and show "Hang up" only once the socket is open
 - [ ] **Voice SDK token refresh (#213)**: open `/web/call.html` on localhost, press Call and hang up, then leave the page open for over an hour (the token TTL is 3600 s). The log shows "Voice token refreshed." around the 59-minute mark; press Call again — it connects with no "Device error" (20104). For a quick check, temporarily set a short TTL in the `/twilio/token` route.
 
+- [ ] **API review fixes, batch A (#230/#231/#233/#241/#242/#243)**: (1) in the Docker image open `/web/call.html` from the Mac: if `GET /twilio/token` answers 403, read the client address from the log line / `docker compose logs api` and set `TWILIO_TOKEN_ALLOWED_CIDRS` to its range (#241); (2) `/web/chat.html` shows the prompt only with `DEBUG_ENDPOINTS=true` (#230); (3) stop LM Studio, ask in chat: 503 from `/chat`, an `error` event then `[DONE]` from `/chat/stream`, and no empty conversation in the list (#231/#233); (4) a live phone call and a `/web/` call still connect (stream token now carries a timestamp, `/voice/browser` checks Origin; `npm run dev` on :5173 may need `WS_ALLOWED_ORIGINS=http://localhost:5173`) (#243)
+
 - [ ] **Pre-generated greeting (V6, #74)**: `uv run alembic upgrade head`, then `uv run python -m app.voice.greeting_cache
   --business-id <pilot id>` (prints `generated: 2`; again → `0`). Call from `/web/` and the phone: the greeting
   starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
   TTS). Restart the app and call again — still instant. Change `TTS_VOICE` → one slow call, then instant.
 
+- [ ] **Hybrid vs vector-only retrieval (2026-11-07)**: on the pilot, run
+  `uv run python -m app.rag.eval --business-id <pilot id> --file tests/eval/bathhouse.yaml --retrieval vector`, then the same with
+  `--retrieval hybrid`. Compare "Pass rate" and "Retrieval hit@k" between the two reports and note the gain from full-text search
+  (and which questions flip) under "Known problems" / `02-local-rag.md`.
 - [ ] **Tool loop in text chat (#51)**: with `google/gemma-4-12b` loaded, `POST /chat` and `GET /chat/stream` on the pilot with a question that makes the model call `search_business_info` (e.g. "Do you have parking?"): the answer arrives, no error, `llm chat` log lines show `tool_calls=1` then a text round. Then a plain greeting (no tool call) still answers. Repeat in the voice app (`/web/`) to confirm the voice loop still works after the shared-tool change.
 - [ ] **Sessions questions on a call (2026-11-01)**: with `BOOKING_BACKEND=google_calendar` (business without `enabled_tools` now gets all optional tools; `SESSION_PROMPT` tells the model to call `list_sessions`), ask "What sessions do you have today?" / "any specials?" on a call and in `/web/chat.html`. Expect the sessions read aloud, or "no open sessions" when the calendar is empty; then book one via `join_session`.
+- [ ] **Embedding outside the DB transaction (#276, #227)**: with the DB and LM Studio up, run `uv run pytest -q tests/test_rag.py tests/test_fact_chunks.py tests/test_location_scope.py tests/test_voice.py tests/test_voice_session.py` (they need Postgres and LM Studio embeddings; the cloud box had no pgvector), then ask a question in `/web/chat.html` and on a call: answers still carry the retrieved facts and `GET /debug/retrieve` still returns chunks.
 - [ ] **Booking conversations with a real model (#55)**: the booking tools are wired in (#151) but off by default: first `UPDATE businesses SET settings = settings || '{"enabled_tools": ["check_availability", "create_booking", "cancel_booking"]}' WHERE id = '...'` (new calls/requests pick it up; no restart). Check that a business without the setting gets no booking tools. With `google/gemma-4-12b` (and later Gemini) loaded, play the scripts in `tests/test_booking_conversations.py` by hand in `/web/chat.html` or on a call: happy path, a closed day, a full slot, a change of mind before saying yes, a cancellation. Check the model checks availability first, reads details back before `confirmed=true`, reads the reference aloud, and never books after a "no". Record failures under "Known problems"
 - [ ] **V29 (#109)** Voice prompt rule added 2026-10-28: re-ask on a call "What types of sauna sessions do you have?" and "What are your hours?" — no mention of "the profile"; area hours (e.g. Rooftop Pool) are labelled as that area's. Also try STT phrase hints per business (sauna, Aufguss, banya) on Twilio audio, or note the result under #73
 - [ ] **V28 / #108 latency with `SEARCH_TOP_N=5`**: run the eval set (the three "Till what time…" / "When do you close?" questions must pass), then a phone or `/web/` call asking "Till what time are you working?" → business hours (midnight), not the Rooftop Pool's. Compare the latency line with the V16 figure (~3.7 s post-search LLM time with 5); if too slow, set `SEARCH_TOP_N` back to 3 and fill an hours fact (#41) instead
@@ -367,6 +382,11 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   a `messages_for_owner` row with `recording_url`; (2) a normal goodbye still ends the call (Redirect → Hangup);
   (3) say "leave a message" in a call: the bot reads it back, a row without `recording_url` appears.
   Check that Twilio accepts relative `<Redirect>`/`action` URLs and that the stream closing really runs the Redirect
+- [ ] **Change of mind after a transfer started (#225, #262)**: with the transfer number set as above, ask for a
+  person and say yes. (1) Talk over "connecting you now" ("actually, never mind, when do you open?"): the bot stops,
+  answers, and does not hang up; then say goodbye: the call ends with no ring on the transfer number. (2) Ask again
+  and let the line play out: it rings. `SELECT tool, status, created_at FROM action_log WHERE conversation_id = '…'`
+  shows `transfer_to_human ok`, `transfer_cancelled ok`, `transfer_to_human ok` in that order
 - [ ] **Facts extraction (OPEN-20, V23)** on the crawled pilot: `uv run python -m app.ingest.run
   --url https://www.abathhouse.com/ --only facts --dry-run --force --model google/gemma-4-12b`,
   then again with `--model qwen/qwen3.6-35b-a3b` (`lms ps` first). Audit 5 pages: every
@@ -377,11 +397,20 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **Google Calendar booking backend (#105)**: in Google Cloud create a service account and a JSON key (outside the repo); share the owner's (test) calendar with the account's email ("Make changes to events"). In `.env`: `BOOKING_BACKEND=google_calendar`, `GOOGLE_CALENDAR_ID=<calendar id>`, `GOOGLE_CALENDAR_CREDENTIALS_FILE=<path>`. Then (1) `check_availability` for a free slot → Available; add an owner entry by hand in Google Calendar over that time → Not available with alternatives; (2) `create_booking` → an event appears with name, phone, service and reference, and `bookings.external_ref` holds its id; (3) `cancel_booking` with the reference and phone → event disappears, row `cancelled`; (4) unshare the calendar (or break the key path) → the bot says the calendar can't be reached and nothing is booked. Enable the booking tools for the business first (see the #55 item), then test in `/web/chat.html` or on a call
 - [ ] **Sessions in a real Google Calendar (#150)**: after #149, #163 (demo calendar + service account) and #166 are merged, with the shared demo calendar in `.env` as above. The demo calendar is shared by all businesses (every event is open to every business; `business_id` is stored but not used for filtering), and the attendee of a booking is the conversation id (phone is saved, not required). Check: (1) hand-typed and recurring events in Google appear in the app within 60 s; (2) creating a session in the app creates exactly one event in Google; (3) joining it from a real call updates the title and the FULL marking, and the attendee links to the stored conversation; (4) two businesses cannot book the same slot; (5) an event deleted in Google cancels its session and bookings in the app, a moved event moves them; (6) unshared calendar / bad key: the bot says the calendar can't be reached and books nothing. Record the result in #150 and here
 - [ ] **Availability from the calendar mirror, lock per calendar (#166)** — needs the demo calendar from #163 and the sync (#165) running. Two businesses on the same `GOOGLE_CALENDAR_ID`: (1) type an event by hand in Google, then immediately `check_availability` / `create_booking` for that time on either business → refused (forced sync, no wait for the 60 s loop); (2) book a slot on business A, then ask business B for the same slot → refused; (3) with `capacity` 2, two bookings fit and a third is refused; (4) the event in Google has id = the booking id in base32hex (26 chars), description with name, last 4 phone digits, reference and a `…/web/#conversation=<id>` link that opens the conversation, and no guests; (5) book the same slot from two businesses at the same moment (two calls/tabs) → exactly one event. Set `APP_BASE_URL` in `.env` first
+- [ ] **Booking cancel order and session/booking lock (#266, #271)** — with the demo calendar as in the #166 item: (1) `cancel_booking` → row `cancelled` and the event gone from Google; (2) break the key path (or unshare the calendar) and cancel another booking → the bot says it was not cancelled, the row is still `confirmed` with `cancelled_at` NULL, and the event is still in Google; (3) at the same moment, create a session in `/web/` and book a 1:1 slot by chat for the same hour on the same calendar → exactly one of them succeeds (the other gets "A booking already overlaps that hour" or a not-available answer). Record the result in #266 / #271
 - [ ] **Google Calendar sync (#165)**: with the calendar set up as in the item above and `BOOKING_BACKEND=google_calendar`, run `alembic upgrade head` and start the app. Within ~60 s (1) events already in the calendar, including a recurring one and one typed by hand, appear in `calendar_events` (`SELECT google_event_id, summary, starts_at, status FROM calendar_events`); (2) move one in Google → `starts_at` changes after the next pass; (3) delete one → `status='cancelled'`, and a `bookings` row whose `external_ref` is that event id becomes `cancelled`; (4) `calendar_sync_state.last_error` stays NULL (a wrong calendar id or unshared calendar shows up there). `CALENDAR_SYNC_INTERVAL_SECONDS` (default 60)
+- [ ] **No audio after `clear` (V15, #240)**: on a real phone call and in `voice-debug.html` (VAD), barge in
+  many times quickly, including during the working-sound ticks of a search: playback stops at once every time,
+  no word or tick of the cut reply is heard after it stops, and the next answer still plays in full
 - [ ] **Race-safe number moves (#237)**: the cloud box ran the new tests against a throwaway Postgres 16 that
   had only the non-vector tables. On the Mac, with the real dev DB, run `uv run pytest -q tests/test_business_settings.py -k number`
   (all pass, no deadlock error). Then in Settings move a number between two businesses a few times quickly and
   check `SELECT id, phone_numbers FROM businesses WHERE '+1…' = ANY(phone_numbers)` returns exactly one row
+- [ ] **Voice turn robustness (#224, #234, #232, #238)**: (1) stop LM Studio mid-call and ask a question: the caller hears
+  "Sorry, I'm having trouble. Can I take a message?" and the call stays open; (2) a booking/message then more tool calls
+  till the cap: the closing line says the earlier request went through; (3) re-run the eval set (`tests/eval/bathhouse.yaml`)
+  against `/chat`: retrieved chunks now arrive fenced inside the user message, not in the system prompt — no regression;
+  (4) with `VOICE_LANGUAGE=es-ES`/`ru-RU` say a farewell in that language (hang-up) and stay silent (fallback lines in that language)
 - [ ] **Twilio playback marks (#76, V11/V26)**: on a real call (Voice SDK or phone), interrupt the bot
   right as a sentence ends and again just after it stops — no false barge-in, first word not swallowed
 - [ ] **Tests that need LM Studio's embedding model (coverage audit 2026-11-01)**: the cloud box has no

@@ -3,8 +3,9 @@ name and a capacity; attendees are `bookings` rows with `session_id` set.
 
 Rules are enforced here, not in the screen: create needs a future start, edit/cancel/remove
 need a session that has not ended, one active session per hour, no confirmed 1:1 booking
-overlapping the hour. `create_session` takes the same per-business advisory lock as
-`InternalBackend.create`. Callers affected by a cancel/remove are texted (mock sender) only
+overlapping the hour. `create_session` and `join_session` take the same advisory lock as 1:1
+bookings (`booking_lock_key`): per calendar in Google mode (`GoogleCalendarBackend.create`), per
+business otherwise (`InternalBackend.create`). Callers affected by a cancel/remove are texted (mock sender) only
 after the transaction committed; a failing send never undoes the change."""
 
 import logging
@@ -158,6 +159,17 @@ def _owner(session, business_id: uuid.UUID, sid: uuid.UUID) -> uuid.UUID:
     return owner or business_id
 
 
+def booking_lock_key(business_id: uuid.UUID) -> str:
+    """Advisory-lock key shared with 1:1 bookings. Google mode: the calendar id, as in
+    `GoogleCalendarBackend.create` (all businesses on one calendar queue up, #271); otherwise the
+    business id, as in `InternalBackend.create`."""
+    return (G.calendar_for(business_id) if G.get_client() is not None else "") or str(business_id)
+
+
+def _lock(session, business_id: uuid.UUID) -> None:
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": booking_lock_key(business_id)})
+
+
 def _check_not_ended(s: GroupSession, now: datetime) -> None:
     if s.ends_at <= now:
         raise SessionError(422, "This session has ended")
@@ -177,8 +189,9 @@ def create_session(
             raise SessionError(422, "A session must start in the future")
         starts = start.astimezone(timezone.utc)
         ends = starts + timedelta(hours=1)
-        # same key as InternalBackend.create: serializes sessions and 1:1 bookings of one business
-        session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:b, 0))"), {"b": str(business_id)})
+        # same key as the 1:1 bookings (per calendar in Google mode): a session and a booking for
+        # one hour can't both pass their checks (#271)
+        _lock(session, business_id)
         if session.scalar(select(GroupSession.id).where(
             GroupSession.business_id == business_id, GroupSession.status == "active",
             GroupSession.starts_at == starts,
@@ -381,9 +394,7 @@ def join_session(
             raise SessionError(404, "session not found")
         owner, sid = found[0].business_id, found[0].id
     with tenant_session(owner) as session:
-        # one lock per calendar (all writers to it queue up); without Google, per business as for bookings
-        key = (G.calendar_for(owner) if G.get_client() else "") or str(owner)
-        session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:b, 0))"), {"b": key})
+        _lock(session, owner)  # one lock per calendar (all writers to it queue up); without Google, per business
         row = _get_session(session, owner, sid, lock=True)
         _check_not_ended(row, now)
         if row.private:

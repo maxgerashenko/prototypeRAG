@@ -41,6 +41,9 @@ class Tool:
     required: tuple[str, ...] = ()
     side_effect: bool = False
     optional: bool = False  # off unless the business lists it in settings["enabled_tools"]
+    # the action_log row is the action itself (transfer: /twilio/transfer reads it), so an
+    # `ok` result whose log write failed is turned into an error for the model
+    log_required: bool = False
 
     def schema(self) -> dict:
         properties = dict(self.parameters)

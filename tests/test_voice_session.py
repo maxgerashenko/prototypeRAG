@@ -1239,3 +1239,180 @@ def test_mark_echo_of_later_mark_clears_earlier_and_unknown_is_ignored(business,
         await s.close()
 
     run_async(run())
+
+
+# --- V15 (#240): no audio of a cut reply after `clear` ---------------------------------
+
+
+class FakeSocket:
+    """One ordered wire like the Twilio adapter (ws.py): audio goes out in 20 ms frames with
+    an await between them, events in between, all in the order they hit the socket."""
+
+    FRAME = RATE // 50 * 2  # 20 ms of PCM16
+
+    def __init__(self) -> None:
+        self.wire: list[tuple[str, object]] = []
+
+    async def send_audio(self, pcm: bytes) -> None:
+        for i in range(0, len(pcm), self.FRAME):
+            await asyncio.sleep(0.001)  # the socket yields between frames
+            self.wire.append(("audio", len(pcm[i:i + self.FRAME])))
+
+    async def send_event(self, event: dict) -> None:
+        await asyncio.sleep(0)
+        self.wire.append((event["type"], event.get("name")))
+
+    def after_clear(self) -> list[tuple[str, object]]:
+        kinds = [kind for kind, _ in self.wire]
+        assert "clear" in kinds
+        return self.wire[kinds.index("clear") + 1:]
+
+
+def _socket_session(business, monkeypatch):
+    s, _, _ = _make_session(business, FakeLLM(), monkeypatch)
+    sock = FakeSocket()
+    s._send_audio, s._send_event = sock.send_audio, sock.send_event
+    s._playback_marks = True
+    return s, sock
+
+
+def test_barge_in_while_audio_is_being_sent_sends_nothing_after_clear(business, monkeypatch):
+    s, sock = _socket_session(business, monkeypatch)
+
+    async def run():
+        await s.start()  # the greeting's 3 s go out frame by frame
+        while sum(kind == "audio" for kind, _ in sock.wire) < 5:
+            await asyncio.sleep(0.001)
+        await _feed(s, _speech()[:8000])  # caller talks over it mid-send
+        await asyncio.sleep(0.3)
+        assert [kind for kind, _ in sock.after_clear() if kind in ("audio", "mark")] == []
+        assert s._playing_until == 0.0 and s._marks == {}
+        await s.close()
+
+    run_async(run())
+
+
+def test_stale_sender_the_barge_in_did_not_cancel_is_dropped(business, monkeypatch):
+    # The working sound is cancelled but not awaited by a barge-in: any sender started by a
+    # reply (a child task) that is still running after `clear` must not reach the caller.
+    s, sock = _socket_session(business, monkeypatch)
+    child: list[asyncio.Task] = []
+
+    async def reply_with_child():
+        async def late_chunks():
+            await asyncio.sleep(0.05)  # resumes after the barge-in's `clear`
+            await s._play(b"\0\0" * RATE)
+
+        child.append(asyncio.create_task(late_chunks()))
+        await s._play(b"\0\0" * RATE * 3)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._reply_task = s._spawn(reply_with_child())
+        while not child:
+            await asyncio.sleep(0.001)
+        await _feed(s, _speech()[:8000])  # barge in; only the reply task is cancelled
+        assert not child[0].done()
+        await asyncio.sleep(0.3)
+        assert child[0].cancelled()  # it ended at its first send
+        assert [kind for kind, _ in sock.after_clear() if kind in ("audio", "mark")] == []
+        assert s._playing_until == 0.0 and s._marks == {}
+        # a new reply (new generation) still plays
+        s._reply_task = s._spawn(s._play(b"\0\0" * (RATE // 10)))
+        await s._reply_task
+        assert ("audio", FakeSocket.FRAME) in sock.after_clear()
+        await s.close()
+
+    run_async(run())
+
+
+# --- #224 / #234 / #238 -------------------------------------------------------------
+
+
+class FailingLLM(FakeLLM):
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:
+            return await super()._create(**kwargs)
+        self.requests.append(kwargs)
+        raise RuntimeError("LLM down")
+
+
+def test_failed_reply_speaks_a_fixed_line_and_keeps_the_call_open(business, monkeypatch):
+    s, _, events = _make_session(business, FailingLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task  # greeting
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task  # the turn
+        assert not s._hung_up
+        await s.close()
+
+    run_async(run())
+    replies = [e["text"] for e in events if e["type"] == "reply"][1:]
+    assert replies == [session_mod.phrases.LINES["en"]["trouble"]]
+
+
+def test_search_failure_does_not_end_the_turn(business, monkeypatch):
+    def boom(*a):
+        raise RuntimeError("db down")
+
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    monkeypatch.setattr(session_mod, "run_tool", boom)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    replies = [e["text"] for e in events if e["type"] == "reply"][1:]
+    assert replies == [session_mod.phrases.LINES["en"]["trouble"]]
+
+
+class ToolsEveryRoundLLM(FakeLLM):
+    """Keeps calling tools even in the round that has none offered: the cap is hit."""
+
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:
+            return await super()._create(**kwargs)
+        self.requests.append(kwargs)
+        n = len(self.requests)
+        name = "take_message" if n == 1 else "search_business_info"
+        pieces = [_chunk(tool_calls=[_tool_call_delta(0, id=f"c{n}", name=name, arguments="{}")])]
+
+        async def gen():
+            for p in pieces:
+                yield p
+
+        return gen()
+
+
+def test_cap_after_a_successful_action_says_it_went_through(business, monkeypatch):
+    s, _, events = _make_session(business, ToolsEveryRoundLLM(), monkeypatch)
+    monkeypatch.setattr(session_mod, "run_tool", lambda *a: "Message saved.")
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    replies = [e["text"] for e in events if e["type"] == "reply"][1:]
+    assert replies == [session_mod.phrases.LINES["en"]["give_up_done"]]
+
+
+@pytest.mark.parametrize("lang,text", [("es-ES", "Gracias, adiós."), ("ru-RU", "Спасибо, до свидания.")])
+def test_non_english_farewell_and_lines_follow_voice_language(monkeypatch, lang, text):
+    from app.config import get_settings
+
+    assert not session_mod.is_farewell(text)  # en-US: not recognised
+    monkeypatch.setattr(get_settings(), "voice_language", lang)
+    assert session_mod.is_farewell(text)
+    assert session_mod.phrases.line("reprompt") == session_mod.phrases.LINES[lang[:2]]["reprompt"]
+    assert not session_mod.is_farewell("¿A qué hora cierran?" if lang == "es-ES" else "Во сколько вы закрываетесь?")
