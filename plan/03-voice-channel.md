@@ -341,6 +341,13 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **Voice stack comparison (`scripts/bench_voice.py`)**: `uv run python scripts/bench_voice.py --list`, then e.g.
+  `--stt google faster-whisper:small --tts google` (needs ADC; `uv pip install faster-whisper`). Add Parakeet TDT, Qwen3-TTS,
+  Piper or Fish Audio as `cmd:` templates (see the script header). Record real phone audio from a Twilio test call as
+  `tests/fixtures/voice_bench/<name>.wav` + `<name>.txt` (reference words) — the committed fixture has no reference text, so it is timed only.
+  Compare WER, p50/max seconds, RTF and approx. cost; TTS first-audio latency while streaming needs a live call. Write the result under V27 and OPEN-08
+- [ ] **Voice SDK token refresh (#213)**: open `/web/call.html` on localhost, press Call and hang up, then leave the page open for over an hour (the token TTL is 3600 s). The log shows "Voice token refreshed." around the 59-minute mark; press Call again — it connects with no "Device error" (20104). For a quick check, temporarily set a short TTL in the `/twilio/token` route.
+
 - [ ] **Pre-generated greeting (V6, #74)**: `uv run alembic upgrade head`, then `uv run python -m app.voice.greeting_cache
   --business-id <pilot id>` (prints `generated: 2`; again → `0`). Call from `/web/` and the phone: the greeting
   starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
@@ -371,6 +378,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **Availability from the calendar mirror, lock per calendar (#166)** — needs the demo calendar from #163 and the sync (#165) running. Two businesses on the same `GOOGLE_CALENDAR_ID`: (1) type an event by hand in Google, then immediately `check_availability` / `create_booking` for that time on either business → refused (forced sync, no wait for the 60 s loop); (2) book a slot on business A, then ask business B for the same slot → refused; (3) with `capacity` 2, two bookings fit and a third is refused; (4) the event in Google has id = the booking id in base32hex (26 chars), description with name, last 4 phone digits, reference and a `…/web/#conversation=<id>` link that opens the conversation, and no guests; (5) book the same slot from two businesses at the same moment (two calls/tabs) → exactly one event. Set `APP_BASE_URL` in `.env` first
 - [ ] **Booking cancel order and session/booking lock (#266, #271)** — with the demo calendar as in the #166 item: (1) `cancel_booking` → row `cancelled` and the event gone from Google; (2) break the key path (or unshare the calendar) and cancel another booking → the bot says it was not cancelled, the row is still `confirmed` with `cancelled_at` NULL, and the event is still in Google; (3) at the same moment, create a session in `/web/` and book a 1:1 slot by chat for the same hour on the same calendar → exactly one of them succeeds (the other gets "A booking already overlaps that hour" or a not-available answer). Record the result in #266 / #271
 - [ ] **Google Calendar sync (#165)**: with the calendar set up as in the item above and `BOOKING_BACKEND=google_calendar`, run `alembic upgrade head` and start the app. Within ~60 s (1) events already in the calendar, including a recurring one and one typed by hand, appear in `calendar_events` (`SELECT google_event_id, summary, starts_at, status FROM calendar_events`); (2) move one in Google → `starts_at` changes after the next pass; (3) delete one → `status='cancelled'`, and a `bookings` row whose `external_ref` is that event id becomes `cancelled`; (4) `calendar_sync_state.last_error` stays NULL (a wrong calendar id or unshared calendar shows up there). `CALENDAR_SYNC_INTERVAL_SECONDS` (default 60)
+- [ ] **Race-safe number moves (#237)**: the cloud box ran the new tests against a throwaway Postgres 16 that
+  had only the non-vector tables. On the Mac, with the real dev DB, run `uv run pytest -q tests/test_business_settings.py -k number`
+  (all pass, no deadlock error). Then in Settings move a number between two businesses a few times quickly and
+  check `SELECT id, phone_numbers FROM businesses WHERE '+1…' = ANY(phone_numbers)` returns exactly one row
 - [ ] **Twilio playback marks (#76, V11/V26)**: on a real call (Voice SDK or phone), interrupt the bot
   right as a sentence ends and again just after it stops — no false barge-in, first word not swallowed
 - [ ] **Tests that need LM Studio's embedding model (coverage audit 2026-11-01)**: the cloud box has no

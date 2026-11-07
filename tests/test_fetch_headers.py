@@ -45,3 +45,8 @@ def test_robots_and_sitemaps_send_headers():
     fetch.fetch_child_sitemaps(["https://x.test/child.xml"], client)
     assert len(seen) == 3
     _assert_headers(seen)
+
+
+def test_user_agent_carries_configured_contact_url():
+    assert fetch.get_settings().crawler_contact_url in fetch.USER_AGENT
+    assert "placeholder" not in fetch.USER_AGENT

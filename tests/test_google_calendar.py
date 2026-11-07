@@ -47,12 +47,6 @@ class FakeCalendar:
         if op in self.fail:
             raise CalendarError(f"{op} failed")
 
-    def busy(self, calendar_id, start, end):
-        self._check("busy")
-        own = [(datetime.fromisoformat(e["start"]["dateTime"]), datetime.fromisoformat(e["end"]["dateTime"]))
-               for e in self.events.values()]
-        return [(a, b) for a, b in own + self.external_busy if a < end and b > start]
-
     def insert_event(self, calendar_id, body):
         self._check("insert")
         assert calendar_id == CAL
@@ -434,25 +428,11 @@ def _client(*responses):
     return c, c._session
 
 
-def test_client_busy_parses_free_busy_response():
-    c, http = _client(_Resp(200, {"calendars": {CAL: {"busy": [{"start": "2026-11-05T19:00:00Z", "end": "2026-11-05T20:00:00Z"}]}}}))
-    start = datetime(2026, 11, 5, tzinfo=timezone.utc)
-    assert c.busy(CAL, start, start + timedelta(days=1)) == [
-        (datetime(2026, 11, 5, 19, tzinfo=timezone.utc), datetime(2026, 11, 5, 20, tzinfo=timezone.utc))]
-    method, url, kw = http.requests[0]
-    assert (method, url.endswith("/freeBusy"), kw["json"]["items"], kw["timeout"]) == ("POST", True, [{"id": CAL}], 10)
-
-
 def test_client_errors_become_calendar_error():
-    start = datetime(2026, 11, 5, tzinfo=timezone.utc)
-    with pytest.raises(CalendarError):
-        _client(_Resp(403, {"error": "x"}))[0].busy(CAL, start, start)
-    with pytest.raises(CalendarError, match="notFound"):  # calendar not shared with the service account
-        _client(_Resp(200, {"calendars": {CAL: {"errors": [{"reason": "notFound"}]}}}))[0].busy(CAL, start, start)
     with pytest.raises(CalendarError):
         _client(_Resp(500))[0].insert_event(CAL, {})
     with pytest.raises(CalendarError):
-        GoogleCalendarClient("").busy(CAL, start, start)  # no key file configured
+        GoogleCalendarClient("").insert_event(CAL, {})  # no key file configured
 
 
 def test_client_insert_and_delete():

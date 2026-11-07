@@ -15,9 +15,10 @@ from urllib.parse import unquote, urlparse
 import httpx
 from pypdf import PdfReader
 
+from app.config import get_settings
 from app.ingest.discover import BOT_TOKEN, same_domain
 
-USER_AGENT = f"{BOT_TOKEN}/0.1 (+https://github.com/placeholder; learning project, see robots.txt)"
+USER_AGENT = f"{BOT_TOKEN}/0.1 (+{get_settings().crawler_contact_url}; learning project, see robots.txt)"
 # httpx's default `Accept: */*` gets a 403 from some bot rules (bhbarbershop.com, #121); send
 # realistic content negotiation headers but keep our honest User-Agent.
 REQUEST_HEADERS = {

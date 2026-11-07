@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Call, Device } from "@twilio/voice-sdk";
 import { fetchToken, type Business } from "../api";
+import { keepTokenFresh } from "./tokenRefresh";
 
 interface Line {
   id: number;
@@ -70,6 +71,7 @@ export function CallApp() {
         const { token } = await fetchToken();
         device.current = new Device(token, { logLevel: "warn", codecPreferences: [Call.Codec.Opus, Call.Codec.PCMU] });
         device.current.on("error", (err: { message?: string }) => log("Device error: " + (err.message ?? String(err))));
+        keepTokenFresh(device.current, fetchToken, log); // token TTL is 1 h (#213)
       }
       log(`Calling business ${bid} …`);
       const c = await device.current.connect({ params: { business_id: bid } });

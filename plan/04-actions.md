@@ -5,8 +5,8 @@ messages, and gives the business owner a summary of every conversation.
 
 **Done when:** in one phone call, a caller books an appointment (the stage-1 pilot is a
 spa, DEC-31 — table booking uses the same tools); the booking appears in the owner
-dashboard (or Google Calendar), the caller gets an SMS confirmation, and the call has a
-saved summary.
+dashboard (or Google Calendar), the model reads the booking reference back to the caller
+(no SMS confirmation: dropped, #138), and the call has a saved summary.
 
 ---
 
@@ -25,26 +25,36 @@ caller: "8 please, name is Anna"
   LLM ─► confirms details back to the caller
 caller: "yes"
   LLM ─► create_booking(date=..., time=20:00, party_size=4, name="Anna", phone=<caller id>)
-  code ─► booking saved, SMS sent
+  code ─► booking saved; LLM reads the reference back
 ```
 
 ## Tools
 
-| Tool | Parameters | Used by |
+| Tool | Parameters | Optional per business? |
 |---|---|---|
-| `check_availability` | date, time, party_size / service, duration | restaurants, appointments |
-| `create_booking` | date, time, party_size, name, phone, notes | restaurants |
-| `create_appointment` | service, date, time, name, phone | salons, clinics, services |
-| `cancel_or_change_booking` | phone, booking reference, new time | both |
-| `take_message` | name, phone, message, urgency | fallback for anything |
-| `transfer_to_human` | reason | voice channel (Twilio `<Dial>`) |
-| `send_sms` | text | confirmations (internal, called after bookings) |
+| `check_availability` | date, time, party_size, service | yes |
+| `create_booking` | date, time, party_size, service, name, phone, notes | yes |
+| `cancel_booking` | reference, phone | yes |
+| `list_sessions` | date | yes |
+| `join_session` | session code, name, phone | yes |
+| `take_message` | message, name, phone, urgency | always on |
+| `transfer_to_human` | reason (Twilio `<Dial>`; number = `businesses.settings.transfer_number`) | always on |
+| `search_business_info` | query (RAG, DEC-30) | always on |
+
+There is no change/reschedule tool (cancel and book again) and no `send_sms` tool: SMS was
+dropped (#138, OPEN-24); `app/actions/sms.py` is a mock used by the owner-side session screens.
 
 Rules enforced **in code**, not only in the prompt:
-- Always read back details and get explicit "yes" before `create_*` (confirm step flag).
-- Validate against opening hours from the business profile.
-- Caller phone comes from caller ID, not from what the model guesses.
-- Which tools are enabled is a per-business setting.
+- Side-effect tools (`create_booking`, `cancel_booking`, `join_session`, `take_message`,
+  `transfer_to_human`) get a `confirmed` boolean; the executor refuses to run them until the
+  model passes `confirmed=true` after reading the details back and hearing a "yes".
+- Opening hours, capacity, lead time and max party come from `booking_rules` (`rules.py`).
+  Hours are checked only when `booking_rules.hours` is set; the profile's `opening_hours`
+  is free text, so with no rule row there is no hours check.
+- Caller phone comes from caller ID, not from what the model guesses (`phone` is only used
+  when the number is unknown).
+- Booking tools are enabled per business by `businesses.settings["enabled_tools"]`
+  (#151); the executor refuses an optional tool the business did not enable.
 
 ## Booking backends (pluggable)
 
@@ -58,7 +68,7 @@ class BookingBackend(Protocol):
 | Backend | When | Notes |
 |---|---|---|
 | **Internal** (Postgres `bookings` table + capacity rules) | First — no external dependency | Tables/slots per time window, max party size |
-| **Google Calendar API** (DEC-48) | Pilot, right after the internal backend | Free/busy query + create event; pilot auth is either OAuth user credentials of the calendar owner (no key, DEC-48) or a service account with the calendar shared to it; per-business self-service OAuth in stage 3 |
+| **Google Calendar API** (DEC-48) | Pilot, right after the internal backend | Free/busy query + create event; pilot auth is either OAuth user credentials of the calendar owner (no key, DEC-48) or a service account with the calendar shared to it; per-business self-service OAuth in stage 2 (onboarding) |
 | Cal.com / Calendly | Businesses using them | Cal.com is open-source with a good API |
 | OpenTable / Resy etc. | Later | Partner APIs, access is restricted |
 
@@ -133,8 +143,8 @@ throttles CPU after a response is sent (DEC-24, R19):
 
 Built in the React + TypeScript web app (`web/`, DEC-41 — supersedes the earlier Jinja + HTMX plan, DEC-19),
 calling JSON API routes, served by the same FastAPI service from the built `web/dist`.
-Stages 1–2: minimal dashboard without login (local / single pilot, access restricted).
-Stage 3: login (Google sign-in or magic link — OPEN-12) and onboarding flow before the
+Stage 1: minimal dashboard without login (local, access restricted).
+Stage 2: login (Google sign-in or magic link — OPEN-12) and onboarding flow before the
 second business ([06-scale.md](06-scale.md)).
 
 ## Data model additions
@@ -142,12 +152,12 @@ second business ([06-scale.md](06-scale.md)).
 - `bookings` — id, business_id, conversation_id, type, start, end, party_size/service,
   name, phone, status, external_ref
 - `booking_rules` — business_id, capacity per slot, slot length, lead time, max party
-- `messages_for_owner` — id, business_id, conversation_id, text, status
-- `conversations` — + summary, outcome, intent, follow_up, recording_url
+- `messages_for_owner` — id, business_id, conversation_id, text, status, recording_url (voicemail after an unanswered transfer)
+- `conversations` — + summary, outcome, intent, follow_up
 - `action_log` — business_id, conversation_id, tool, arguments, result, timestamp (debugging + audit)
 - `calendar_connections` — business_id, provider, encrypted refresh token (key in Secret Manager, R14)
 
-All tables carry `business_id` and are covered by Row-Level Security (R18).
+All tables carry `business_id`; Row-Level Security (R18) is switched on in stage 2.
 
 ## Code layout
 
@@ -155,9 +165,10 @@ All tables carry `business_id` and are covered by Row-Level Security (R18).
 app/actions/
   registry.py        tool schemas + per-business enabled tools
   executor.py        runs tool calls, confirmation guard, logging
-  booking/           backend interface, internal.py, google_calendar.py
+  booking/           tools.py, rules.py, internal.py, google_calendar.py, calendar_sync.py, sessions.py
   messages.py        take_message, owner notifications
-  sms.py             Twilio SMS
+  sms.py             mock SMS for the owner-side session screens (real SMS dropped, #138)
+  transfer.py        transfer_to_human
   summary.py         post-conversation summary job
 app/api/dashboard.py  JSON routes for the dashboard screens
 web/src/dashboard/   dashboard screens (React, DEC-41)
@@ -178,7 +189,7 @@ web/src/dashboard/   dashboard screens (React, DEC-41)
 - [ ] Google Calendar backend for the pilot (service account, free/busy, create event, `external_ref`) — DEC-48
 - [x] Calendar auth without a service account key (#163): `GOOGLE_CALENDAR_TOKEN_FILE` = OAuth user token from `scripts/google_calendar_login.py` (one-time consent, token saved outside the repo, refresh token → access tokens by google-auth); `GoogleCalendarClient(credentials_file, token_file)` prefers it over the service account key; setup steps in "Google Calendar auth setup" above; mocked tests in `tests/test_google_auth.py`; live check under "Test on Mac"
 - [x] Booking tools wired into chat and voice, per-business enabled tools (#151): booking tools are `Tool(optional=True)`, so `TOOLS` holds only the always-on tools; `registry.tools_for(business_id)` adds the ones listed in `businesses.settings["enabled_tools"]` (e.g. `{"enabled_tools": ["check_availability", "create_booking", "cancel_booking"]}`; missing/malformed/unknown names = off). The executor refuses an optional tool the business didn't enable, even if the model calls it. Chat (`answer.py`) and the voice session (`_load_business`, also the warm-up request) send the per-business list, and the prompt gets a booking rule (`prompt.BOOKING_PROMPT`) only then. Tested with fakes (`tests/test_enabled_tools.py`); live check under "Test on Mac". `list_sessions`/`join_session` follow the same way once the group-sessions tools (#149) register with `optional=True`; the setting already accepts their names. No settings UI yet (SQL, like `transfer_number`)
-- [ ] Google Calendar per-business OAuth (R14) — stage 3
+- [ ] Google Calendar per-business OAuth (R14) — stage 2
 - [ ] Owner notifications
 - [x] Test scripts: simulated conversations for booking happy path + edge cases (#55): `tests/test_booking_conversations.py` — scripted calls where a fake model plays tool calls and answers through the real tool loop (`answer_question`), executor, booking tools, rules and Postgres. Covers happy path, appointment with a service, closed day, outside hours, full slot (+ alternatives), party too large, change of mind, declining at the read-back, bad date / missing name, cancellation (frees the slot, wrong phone, unknown reference), text chat without caller ID, caller ID beating a made-up number. Tests only: the booking tools are still not wired into live calls (#151), and a fake model doesn't show how a real model behaves — live run under 03 "Test on Mac"
 - [x] Owner-side group sessions in the Bookings view (branch `feature-bookings-sessions`, DEC-54/DEC-56): `sessions` table + `bookings.session_id` (migration 0012), `POST/PATCH/DELETE /businesses/{id}/sessions[/{sid}]` and attendee removal, faded per-hour **+** UI, mock SMS (`app/actions/sms.py`, OPEN-24). Sessions do not yet block 1:1 bookings and have no real attendees until the assistant side (#149) lands; iPhone check pending. [plan](feature-bookings-sessions.md)
