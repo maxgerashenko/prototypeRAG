@@ -9,7 +9,6 @@ The number endpoint reads and writes across tenants like app/api/businesses.py a
 the owner login / an RLS-exempt path in stage 3."""
 
 import logging
-import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -22,6 +21,7 @@ from app.db.models import Business, BusinessProfile, Message, message_order
 from app.db.session import SessionLocal
 from app.insights import questions as insights
 from app.llm import embed
+from app.phone import is_e164
 from app.voice import greeting_cache, twilio_numbers
 
 log = logging.getLogger(__name__)
@@ -51,9 +51,6 @@ def _greeting_state(business_id: uuid.UUID) -> dict:
         "text": owner, "is_default": not owner, "cached": cached, "cached_at": cached_at,
         "max_length": greeting_cache.MAX_GREETING_LEN, "full_text": full,
     }
-
-
-E164 = re.compile(r"\+[1-9]\d{6,14}")
 
 
 @router.get("/businesses/{business_id}/greeting")
@@ -130,7 +127,7 @@ def put_number(business_id: uuid.UUID, body: NumberIn) -> dict:
     business in the same transaction. Twilio is set up first (voice + status URLs when the
     voice URL is empty), so a failure there leaves the database unchanged."""
     number = body.number.strip()
-    if not E164.fullmatch(number):
+    if not is_e164(number):
         raise HTTPException(status_code=422, detail="number must look like +15551234567")
     with SessionLocal() as session:
         if session.get(Business, business_id) is None:

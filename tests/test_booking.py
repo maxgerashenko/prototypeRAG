@@ -197,3 +197,15 @@ def test_normalize_phone():
     n = booking_tools.normalize_phone
     assert n(" +1 (555) 010-0100 ") == "+15550100100"
     assert all(n(x) is None for x in (None, "", "5550100100", "+0123", "+1555"))
+
+
+def test_one_e164_check_everywhere():
+    """Booking tools, the transfer number and the number setting share app/phone.py (#296)."""
+    from app import phone
+    from app.actions import transfer
+    from app.api import business_settings
+
+    assert booking_tools.normalize_phone is phone.normalize_phone
+    assert transfer.is_e164 is phone.is_e164 and business_settings.is_e164 is phone.is_e164
+    assert phone.is_e164("+1555123") and phone.is_e164("+" + "1" * 15)
+    assert not any(phone.is_e164(x) for x in ("15551234567", "+0555123456", "+12345", "+" + "1" * 16, "+1555123456x"))
