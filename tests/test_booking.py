@@ -209,3 +209,23 @@ def test_one_e164_check_everywhere():
     assert transfer.is_e164 is phone.is_e164 and business_settings.is_e164 is phone.is_e164
     assert phone.is_e164("+1555123") and phone.is_e164("+" + "1" * 15)
     assert not any(phone.is_e164(x) for x in ("15551234567", "+0555123456", "+12345", "+" + "1" * 16, "+1555123456x"))
+
+
+@pytest.mark.parametrize("ref", ["%", "%%%%%%", "______", "abc%ef", "abc", "123456789", "zzzzzz", ""])
+def test_cancel_rejects_non_hex_references(ref):
+    """#257: a LIKE wildcard must not match the id prefix; only 6-8 hex chars are references."""
+    from app.actions.booking.internal import parse_reference
+    assert parse_reference(ref) is None
+    assert InternalBackend().cancel(uuid.uuid4(), ref, "+15550100100", NOW).startswith("Error")
+
+
+def test_parse_reference_accepts_6_to_8_hex_any_case():
+    from app.actions.booking.internal import parse_reference
+    assert parse_reference(" AbC123 ") == "abc123"
+    assert parse_reference("0123abcd") == "0123abcd"
+
+
+def test_bad_timezone_refuses_instead_of_booking_at_utc():
+    """#273"""
+    with pytest.raises(ValueError, match="timezone"):
+        R.local_start(R.Rules(timezone="Mars/Olympus"), "2026-11-05", "10:00")

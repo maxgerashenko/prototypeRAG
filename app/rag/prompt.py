@@ -1,5 +1,7 @@
 """Prompt builder (plan/02-local-rag.md "Answer pipeline" / "Prompt rules")."""
 
+from datetime import datetime, timezone
+
 from app.db.models import BusinessProfile, BusinessSummary
 from app.rag.retrieve import RetrievedChunk
 
@@ -126,8 +128,10 @@ def build_prompt(
     summary: BusinessSummary | None = None,
     locations: str = "",
     enabled_tools: frozenset[str] | set[str] = frozenset(),
+    now: datetime | None = None,
 ) -> list[dict]:
     """System message (rules + profile + locations + summary + chunks) + history + the new question."""
-    sections = [SYSTEM_PROMPT, tools_prompt(enabled_tools), format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
+    today = (now or datetime.now(timezone.utc)).strftime("%A %Y-%m-%d")  # #222: "today"/"tomorrow" need a date
+    sections = [SYSTEM_PROMPT, f"Today's date: {today}", tools_prompt(enabled_tools), format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
     system_content = "\n\n".join(s for s in sections if s)
     return [{"role": "system", "content": system_content}, *history, {"role": "user", "content": question}]

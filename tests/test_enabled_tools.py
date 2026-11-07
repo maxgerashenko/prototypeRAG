@@ -166,3 +166,10 @@ def test_calendar_backend_enables_all_optional_tools_when_unset(monkeypatch):
     current.clear()
     monkeypatch.setattr(get_settings(), "booking_backend", "internal")
     assert registry.enabled_tool_names(bid) == frozenset()
+
+
+def test_prompt_has_the_current_date():
+    """#222"""
+    from datetime import datetime, timezone
+    content = build_prompt(None, [], [], "hi", now=datetime(2026, 11, 7, tzinfo=timezone.utc))[0]["content"]
+    assert "Today's date: Saturday 2026-11-07" in content
