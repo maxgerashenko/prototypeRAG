@@ -200,11 +200,20 @@ def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
     """The debug view's prompt is the exact prompt sent to the LLM: system (rules +
     profile + chunks) + history + question. /debug/prompt builds it without the LLM
     and without creating a conversation."""
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    from app.api import chat as chat_api
+    from app.config import get_settings
     from app.db.models import Conversation, Message
-    from app.main import app
     from app.rag import answer
+
+    # /debug/* and the `prompt` field exist only with DEBUG_ENDPOINTS (review M1): mount the
+    # debug router in this test's own app and switch the flag on.
+    monkeypatch.setattr(chat_api, "get_settings", lambda: get_settings().model_copy(update={"debug_endpoints": True}))
+    app = FastAPI()
+    app.include_router(chat_api.router)
+    app.include_router(chat_api.debug_router)
 
     chunk = RetrievedChunk(chunk_id=uuid.uuid4(), text="We open at 9.", section_heading="Hours",
                            kind="scraped", score=0.9, source="both")

@@ -3,10 +3,11 @@ main Twilio number to one of them. Reads and writes across tenants, so it must m
 the owner login (and RLS-aware admin access) in stage 2."""
 
 import uuid
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import any_, func, select, text, update
 from sqlalchemy.orm import Session
+from app.api.deps import require_business
 from app.config import get_settings
 from app.db.session import SessionLocal
 from app.db.models import Business, BusinessProfile, Location, Message
@@ -103,7 +104,7 @@ def assign_main_number(business_id: uuid.UUID) -> dict:
     return {"business_id": business_id, "number": number}
 
 
-@router.delete("/businesses/{business_id}/main-number")
+@router.delete("/businesses/{business_id}/main-number", dependencies=[Depends(require_business)])
 def unassign_main_number(business_id: uuid.UUID) -> dict:
     """Take the main number off this business; calls to it then hear "not in service"."""
     number = _main_number()

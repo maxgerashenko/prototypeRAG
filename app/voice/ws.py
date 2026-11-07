@@ -12,6 +12,7 @@ caller said goodbye) the socket is closed, which ends the call. All events, and 
 audio went out, also go to the web app's live feed (`call_feed.py`, DEC-46), so `/web/` shows the call as it happens.
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -27,6 +28,7 @@ from app.voice.twilio_routes import check_stream_token
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+START_TIMEOUT_S = 10  # a socket that sends no `start` in this time is closed (review L2)
 FRAME_BYTES = 160  # 20 ms of 8 kHz μ-law — the frame size Twilio itself sends
 
 
@@ -61,7 +63,15 @@ async def twilio_media_stream(ws: WebSocket) -> None:
     try:
         while True:
             try:
-                data = json.loads(await ws.receive_text())
+                # before `start` (session None) wait only START_TIMEOUT_S: the socket is open to
+                # anyone who can reach the host, so idle ones must not pile up
+                text = await asyncio.wait_for(ws.receive_text(), START_TIMEOUT_S if session is None else None)
+            except asyncio.TimeoutError:
+                log.warning("twilio stream: no start event within %s s, closing", START_TIMEOUT_S)
+                await ws.close(code=4408, reason="no start event")
+                return
+            try:
+                data = json.loads(text)
             except json.JSONDecodeError:
                 continue
             if not isinstance(data, dict):

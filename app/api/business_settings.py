@@ -59,6 +59,15 @@ def get_greeting(business_id: uuid.UUID) -> dict:
     return _greeting_state(business_id)
 
 
+def _tts_error_text(exc: Exception) -> str:
+    """Text for the browser. Our own errors (RuntimeError/LookupError/ValueError, e.g. "no Google
+    credentials") are safe to show; a Google API error's text can carry project or credential
+    details, so only its class name goes out and the rest stays in the server log."""
+    if isinstance(exc, (RuntimeError, LookupError, ValueError)):
+        return str(exc) or type(exc).__name__
+    return f"speech service error ({type(exc).__name__}); see the server log"
+
+
 @router.put("/businesses/{business_id}/greeting")
 def put_greeting(business_id: uuid.UUID, body: GreetingIn) -> dict:
     text = body.text.strip()
@@ -80,7 +89,7 @@ def put_greeting(business_id: uuid.UUID, body: GreetingIn) -> dict:
         greeting_cache.pregenerate(business_id)
     except Exception as exc:  # the text is saved; the first call fills the cache
         log.warning("greeting audio failed for %s", business_id, exc_info=True)
-        cache_error = str(exc) or type(exc).__name__
+        cache_error = _tts_error_text(exc)
     state = _greeting_state(business_id)
     greeting_cache.prune(business_id, state["full_text"])
     return {**state, "cache_error": cache_error}
