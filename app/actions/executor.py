@@ -46,7 +46,11 @@ def execute(ctx: ActionContext, name: str, arguments: str | dict) -> str:
         return f"Error: arguments for {name} must be a JSON object."
 
     if not tool.side_effect:
-        return tool.handler(ctx, arguments)
+        try:
+            return tool.handler(ctx, arguments)
+        except Exception as exc:  # docstring promise: never an exception; a DB/embedding error must not end the turn
+            log.exception("tool %s failed", name)
+            return f"Error: {name} failed ({type(exc).__name__})."
 
     confirmed = arguments.pop("confirmed", False) is True
     if not confirmed:

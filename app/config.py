@@ -10,6 +10,10 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://app:app@localhost:5432/app"
 
+    # contact URL in the crawler's User-Agent (#195, R10 "honest crawler"); set to the owner's
+    # real site or mailto: so a site owner can reach us
+    crawler_contact_url: str = "https://github.com/maxgerashenko/prototypeRAG"
+
     llm_base_url: str = "http://localhost:1234/v1"
     llm_api_key: str = "lm-studio"
     llm_model: str = "google/gemma-4-12b"  # chat/voice model (DEC-32)
