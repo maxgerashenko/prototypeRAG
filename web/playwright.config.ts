@@ -16,6 +16,9 @@ export default defineConfig({
     timezoneId: "UTC", // date labels ("Today · 2:58 PM") are asserted exactly
     permissions: ["microphone"],
     launchOptions: {
+      // PW_CHROMIUM_PATH: use an installed Chromium whose build differs from the one the pinned
+      // @playwright/test wants (the cloud box has /opt/pw-browsers/chromium); unset = Playwright's own
+      ...(process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {}),
       args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"],
     },
   },
