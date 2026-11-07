@@ -10,7 +10,6 @@ needed and the decision survives a restart or another instance.
 The number is `businesses.settings["transfer_number"]` (E.164); there is no settings UI yet.
 """
 
-import re
 import uuid
 
 from sqlalchemy import select
@@ -18,9 +17,9 @@ from sqlalchemy import select
 from app.actions.registry import ActionContext, Tool, register
 from app.db import tenant_session
 from app.db.models import ActionLog, Business, Conversation
+from app.phone import is_e164
 
 TRANSFER_STARTED = "Transfer started."
-E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 
 
 def transfer_number(business_id: uuid.UUID) -> str | None:
@@ -28,7 +27,7 @@ def transfer_number(business_id: uuid.UUID) -> str | None:
     with tenant_session(business_id) as session:
         business = session.get(Business, business_id)
         number = (business.settings or {}).get("transfer_number") if business else None
-    return number.strip() if isinstance(number, str) and E164.match(number.strip()) else None
+    return number.strip() if isinstance(number, str) and is_e164(number.strip()) else None
 
 
 def transfer_requested(business_id: uuid.UUID, call_sid: str) -> bool:

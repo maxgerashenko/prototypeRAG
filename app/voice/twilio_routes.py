@@ -20,7 +20,7 @@
 Business resolution: a Voice SDK call sends `business_id` as a custom parameter (mode B);
 a phone call is matched by the dialled number (`To`) against `businesses.phone_numbers`
 (mode A). Both lookups read across tenants before a business is known — like
-`/businesses`, they need an RLS-exempt path in stage 3.
+`/businesses`, they need an RLS-exempt path in stage 2.
 
 Webhooks are checked against `X-Twilio-Signature` (the ngrok URL is public, OPEN-19). The
 stream's custom parameters carry an HMAC of business + CallSid, so `/voice/ws` only runs
@@ -256,7 +256,7 @@ def twilio_token(request: Request) -> dict:
     """Access token for the Voice SDK page (mode B). Each token can start billed calls,
     so it's only handed out to the developer's own browser: a loopback client with no
     proxy header — requests through ngrok also come from loopback but carry
-    X-Forwarded-For. Real access control comes with OPEN-19 (stage 2)."""
+    X-Forwarded-For. Real access control comes with OPEN-19 (stage 3, cloud)."""
     client = request.client.host if request.client else ""
     try:
         loopback = ipaddress.ip_address(client).is_loopback

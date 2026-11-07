@@ -3,18 +3,23 @@ greeting in calls. Real parts: Postgres (business, settings JSONB, greeting_audi
 phone numbers) and the /twilio/voice webhook. Faked: TTS, the embedding server and the Twilio
 account (the number list). Needs Postgres."""
 
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import any_, delete, select, update
 from twilio.request_validator import RequestValidator
 
 from app.api import business_settings
+from app.api.businesses import lock_phone_number
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, Conversation, GreetingAudio, Message
+from app.db.session import SessionLocal
 from app.main import app
 from app.voice import greeting_cache, tts, twilio_numbers, twilio_routes
 from tests.test_twilio import AUTH_TOKEN, NUMBER, PUBLIC, _stream_params
@@ -310,6 +315,80 @@ def test_put_number_errors(client, biz, monkeypatch):
 
     monkeypatch.setattr(twilio_numbers, "account_numbers", no_creds)
     assert client.put(f"/businesses/{biz}/number", json={"number": NUMBER}).status_code == 503
+
+
+# --- number moves are race-safe (issue #237) -----------------------------------------
+
+def _holders(number):
+    with SessionLocal() as s:
+        return set(s.scalars(select(Business.id).where(number == any_(Business.phone_numbers))))
+
+
+def _fake_account(monkeypatch, *numbers, routed=lambda number: True):
+    monkeypatch.setattr(twilio_numbers, "account_numbers", lambda: _account(*numbers))
+    monkeypatch.setattr(twilio_numbers, "ensure_routed", routed)
+
+
+@pytest.fixture
+def three_biz():
+    ids = [uuid.uuid4() for _ in range(3)]
+    with SessionLocal() as s, s.begin():
+        s.add_all(Business(id=bid, name=f"Race {i}", phone_numbers=[]) for i, bid in enumerate(ids))
+    yield ids
+    with SessionLocal() as s, s.begin():
+        s.execute(delete(Business).where(Business.id.in_(ids)))
+
+
+def test_put_number_waits_for_a_move_in_progress(biz, other_biz, monkeypatch):
+    """Deterministic: while another transaction holds the number's lock and moves it to `biz`,
+    put_number for `other_biz` blocks, then sees that move and takes the number off `biz`.
+    Without the lock it would have read "nobody holds it" and left it on both."""
+    _fake_account(monkeypatch, FREE_NUMBER)
+    with SessionLocal() as held:
+        lock_phone_number(held, FREE_NUMBER)
+        with ThreadPoolExecutor(1) as pool:
+            future = pool.submit(business_settings.put_number, other_biz, business_settings.NumberIn(number=FREE_NUMBER))
+            time.sleep(0.5)
+            assert not future.done()  # waiting on the lock
+            held.execute(update(Business).where(Business.id == biz).values(phone_numbers=[FREE_NUMBER]))
+            held.commit()  # releases the lock
+            result = future.result(timeout=10)
+    assert result["moved_from"] == [biz]
+    assert _holders(FREE_NUMBER) == {other_biz}
+
+
+def test_concurrent_assigns_of_one_number_leave_exactly_one_holder(three_biz, monkeypatch):
+    barrier = threading.Barrier(len(three_biz))
+    _fake_account(monkeypatch, FREE_NUMBER, routed=lambda number: barrier.wait(timeout=10) or True)  # all enter the DB step together
+    with ThreadPoolExecutor(len(three_biz)) as pool:
+        results = list(pool.map(
+            lambda bid: business_settings.put_number(bid, business_settings.NumberIn(number=FREE_NUMBER)), three_biz))
+    assert len(_holders(FREE_NUMBER)) == 1
+    # they ran one after another: every later one took it off exactly the one before
+    assert sorted(len(r["moved_from"]) for r in results) == [0, 1, 1]
+
+
+def test_crossed_moves_do_not_deadlock(biz, other_biz, monkeypatch):
+    """biz takes other_biz's number while other_biz takes biz's: both rows get locked by both
+    requests, in the same (id) order, so neither fails with a deadlock."""
+    barrier = threading.Barrier(2)
+    _fake_account(monkeypatch, NUMBER, OTHER_NUMBER, routed=lambda number: barrier.wait(timeout=10) or True)
+    with ThreadPoolExecutor(2) as pool:
+        a = pool.submit(business_settings.put_number, biz, business_settings.NumberIn(number=OTHER_NUMBER))
+        b = pool.submit(business_settings.put_number, other_biz, business_settings.NumberIn(number=NUMBER))
+        a.result(timeout=10), b.result(timeout=10)
+    assert _holders(OTHER_NUMBER) == {biz} and _holders(NUMBER) == {other_biz}
+
+
+def test_put_number_for_a_business_deleted_during_the_twilio_call_is_404(client, biz, other_biz, monkeypatch):
+    def delete_it(number):
+        with SessionLocal() as s, s.begin():
+            s.execute(delete(Business).where(Business.id == biz))
+        return True
+
+    _fake_account(monkeypatch, OTHER_NUMBER, routed=delete_it)
+    assert client.put(f"/businesses/{biz}/number", json={"number": OTHER_NUMBER}).status_code == 404
+    assert _holders(OTHER_NUMBER) == {other_biz}  # nothing was taken off the holder
 
 
 def _fake_twilio(monkeypatch, row):

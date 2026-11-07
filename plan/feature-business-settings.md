@@ -66,7 +66,7 @@ Hand-made 3-D vectors, no DB: pair_turns (answers matched, two user rows in a ro
 ### Step 4 — app/voice/twilio_numbers.py
 - `account_numbers() -> list[dict]`: missing `twilio_account_sid`/`twilio_auth_token` → `RuntimeError("TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN are not set")`; else `twilio.rest.Client(...).incoming_phone_numbers.list(limit=100)` mapped to `{number, friendly_name, voice, sms, routed}` (`routed` = voice_url path ends with `/twilio/voice`).
 - `holders(numbers) -> dict[str, tuple[uuid, str]]`: `SessionLocal()`, businesses (outer join profile) → number → `(id, display_name)` using `display_name` from `app.api.businesses`.
-- `GET /twilio/numbers`: on exception log a warning and return `{"numbers": [], "error": str(exc)}`; else add `business_id`/`business_name`, sort by number, `error: None`. Docstring: reads across tenants like `app/api/businesses.py` (RLS-exempt path in stage 3).
+- `GET /twilio/numbers`: on exception log a warning and return `{"numbers": [], "error": str(exc)}`; else add `business_id`/`business_name`, sort by number, `error: None`. Docstring: reads across tenants like `app/api/businesses.py` (RLS-exempt path in stage 2).
 
 ### Step 5 — backend API + session (Sonnet)
 New `app/api/business_settings.py`, registered in `app/main.py` with step 4's router.

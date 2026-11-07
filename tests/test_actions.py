@@ -69,3 +69,10 @@ def test_unknown_tool_and_bad_arguments(logged):
     assert executor.execute(CTX, "test_book", "{not json").startswith("Error")
     assert executor.execute(CTX, "test_book", "[1]").startswith("Error")
     assert logged == []
+
+
+def test_read_only_tool_exception_becomes_error_result(logged):
+    """#261: a DB/embedding error in a read-only tool must not escape the executor."""
+    register(Tool(name="test_read_boom", description="x", parameters={}, side_effect=False,
+                  handler=lambda ctx, args: 1 / 0))
+    assert executor.execute(CTX, "test_read_boom", {}) == "Error: test_read_boom failed (ZeroDivisionError)."

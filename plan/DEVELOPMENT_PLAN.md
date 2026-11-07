@@ -21,7 +21,7 @@ decisions and open questions → [DECISIONS.md](DECISIONS.md) (DEC-27, DEC-28).
    makes each stage transition cheap.
 2. **Multi-tenant data model from day one, enforcement later** — every table has
    `business_id` and every query goes through `tenant_session(business_id)` from stage 1;
-   Row-Level Security policies are switched on in stage 3 (a migration, no code rewrite).
+   Row-Level Security policies are switched on in stage 2 (a migration, no code rewrite).
 3. **Only technology that exists locally and as a managed service** — nothing to throw
    away between stages.
 4. **Defer, don't pre-build** — each stage lists what is deliberately *not* done yet.

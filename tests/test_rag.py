@@ -362,3 +362,19 @@ def test_custom_reply_boost_only_applies_to_already_retrieved_chunks(business_id
     assert "scraped" in kinds
     # the irrelevant custom reply shouldn't be pulled in just by existing / being boostable
     assert not any(r.text.startswith("Q: completely unrelated") for r in results)
+
+
+def test_keyword_terms_strip_tsquery_syntax():
+    """#265: URLs, colons, quotes and operators must not reach to_tsquery."""
+    from app.rag.retrieve import keyword_terms
+    assert keyword_terms("see https://a.com/x?y=1 & 'foo':* !bar | (baz)") == [
+        "see", "https", "a", "com", "x", "y", "1", "foo", "bar", "baz"
+    ]
+    assert keyword_terms("???") == []
+
+
+def test_keyword_search_survives_urls_and_punctuation(business_id):
+    with tenant_session(business_id) as s:
+        _add_chunk(s, business_id, "We have saunas and pools.")
+        hits = keyword_search(s, business_id, "do you have saunas? see https://x.com/a:b 'q':*", top_k=10)
+    assert len(hits) >= 1

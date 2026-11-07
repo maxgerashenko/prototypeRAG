@@ -6,10 +6,9 @@
 - PUT /businesses/{id}/number         assign one of the Twilio account's numbers.
 
 The number endpoint reads and writes across tenants like app/api/businesses.py and needs
-the owner login / an RLS-exempt path in stage 3."""
+the owner login / an RLS-exempt path in stage 2."""
 
 import logging
-import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -17,11 +16,13 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import any_, func, select, update
 
+from app.api.businesses import lock_phone_number
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, Message, message_order
 from app.db.session import SessionLocal
 from app.insights import questions as insights
 from app.llm import embed
+from app.phone import is_e164
 from app.voice import greeting_cache, twilio_numbers
 
 log = logging.getLogger(__name__)
@@ -51,9 +52,6 @@ def _greeting_state(business_id: uuid.UUID) -> dict:
         "text": owner, "is_default": not owner, "cached": cached, "cached_at": cached_at,
         "max_length": greeting_cache.MAX_GREETING_LEN, "full_text": full,
     }
-
-
-E164 = re.compile(r"\+[1-9]\d{6,14}")
 
 
 @router.get("/businesses/{business_id}/greeting")
@@ -128,9 +126,15 @@ def put_number(business_id: uuid.UUID, body: NumberIn) -> dict:
     """Give the business one of the account's numbers (and only it). A dialled number must
     find exactly one business (app/voice/twilio_routes.py), so it is taken off every other
     business in the same transaction. Twilio is set up first (voice + status URLs when the
-    voice URL is empty), so a failure there leaves the database unchanged."""
+    voice URL is empty), so a failure there leaves the database unchanged.
+
+    Race-safe (issue #237): the database part is one transaction that first takes the
+    number's advisory lock (`lock_phone_number`, shared with the main-number endpoints), then
+    row-locks the target and the current holders (404 if the target was deleted during the
+    Twilio calls, instead of a 200 that changed nothing), then writes. Two concurrent assigns of one
+    number run one after the other, so the number always ends on exactly one business."""
     number = body.number.strip()
-    if not E164.fullmatch(number):
+    if not is_e164(number):
         raise HTTPException(status_code=422, detail="number must look like +15551234567")
     with SessionLocal() as session:
         if session.get(Business, business_id) is None:
@@ -150,9 +154,16 @@ def put_number(business_id: uuid.UUID, body: NumberIn) -> dict:
         log.warning("could not set up the Twilio number %s: %s", number, exc)
         raise HTTPException(status_code=503, detail=f"could not set up the number in Twilio ({twilio_numbers.safe_error(exc)})") from exc
     with SessionLocal() as session:
-        moved_from = list(session.scalars(
-            select(Business.id).where(Business.id != business_id, number == any_(Business.phone_numbers))
+        lock_phone_number(session, number)
+        # the target and every holder, row-locked in id order: two crossed moves (A takes B's
+        # number while B takes A's) lock the same rows in the same order instead of deadlocking
+        locked = list(session.scalars(
+            select(Business.id).where((Business.id == business_id) | (number == any_(Business.phone_numbers)))
+            .order_by(Business.id).with_for_update()
         ).all())
+        if business_id not in locked:
+            raise HTTPException(status_code=404, detail="business not found")
+        moved_from = [bid for bid in locked if bid != business_id]
         if moved_from:
             session.execute(
                 update(Business).where(Business.id.in_(moved_from))
