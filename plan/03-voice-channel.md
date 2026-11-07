@@ -375,6 +375,11 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   a `messages_for_owner` row with `recording_url`; (2) a normal goodbye still ends the call (Redirect → Hangup);
   (3) say "leave a message" in a call: the bot reads it back, a row without `recording_url` appears.
   Check that Twilio accepts relative `<Redirect>`/`action` URLs and that the stream closing really runs the Redirect
+- [ ] **Change of mind after a transfer started (#225, #262)**: with the transfer number set as above, ask for a
+  person and say yes. (1) Talk over "connecting you now" ("actually, never mind, when do you open?"): the bot stops,
+  answers, and does not hang up; then say goodbye: the call ends with no ring on the transfer number. (2) Ask again
+  and let the line play out: it rings. `SELECT tool, status, created_at FROM action_log WHERE conversation_id = '…'`
+  shows `transfer_to_human ok`, `transfer_cancelled ok`, `transfer_to_human ok` in that order
 - [ ] **Facts extraction (OPEN-20, V23)** on the crawled pilot: `uv run python -m app.ingest.run
   --url https://www.abathhouse.com/ --only facts --dry-run --force --model google/gemma-4-12b`,
   then again with `--model qwen/qwen3.6-35b-a3b` (`lms ps` first). Audit 5 pages: every
