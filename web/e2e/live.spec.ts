@@ -141,3 +141,23 @@ test("a phone call doesn't take over the user's own call", async ({ page }) => {
   await page.keyboard.press("Escape"); // hang up ours -> the phone call is shown
   await expect(phoneScreen(page)).toBeVisible();
 });
+
+// F3 (#207): a phone call must not unmount Settings and throw away an unsaved greeting draft
+test("a phone call starting in Settings leaves the screen and the draft alone; the pill is there", async ({ page }) => {
+  const feed = await openApp(page);
+  await page.getByTestId("biz-card").first().locator(".biz-pick").click();
+  await page.getByTestId("settings-row").click();
+  await expect(page.locator("[data-screen=settings]")).toBeVisible();
+  await page.getByTestId("greeting-read").click();
+  const box = page.getByRole("textbox", { name: "First greeting message" });
+  await box.fill("Unsaved draft");
+
+  feed.send([snapshot(false), { type: "call_started", call: call() }, ev({ type: "reply", text: greet })]);
+  await expect(page.getByTestId("phone-live")).toBeVisible();
+  await expect(page.locator("[data-screen=settings]")).toBeVisible();
+  await expect(box).toHaveValue("Unsaved draft");
+  await expect(phoneScreen(page)).toHaveCount(0);
+
+  await page.getByTestId("phone-live").click(); // the user can still go to the call
+  await expect(phoneScreen(page)).toBeVisible();
+});

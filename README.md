@@ -98,7 +98,7 @@ Cost rule (DEC-33): only free or pay-per-use services, no monthly fees. Secrets 
 |---|---|---|
 | Backend tests (about 40 files in `tests/`) | `uv run pytest -q` | Postgres; `tests/test_rag.py` also needs LM Studio |
 | Frontend type check and unit tests | `cd web && npm run typecheck && npm test` (Vitest) | Node |
-| Browser tests | `cd web && npm run e2e` (Playwright, mocked backend) | Node, `npx playwright install chromium` |
+| Browser tests | `cd web && npm run e2e` (Playwright, mocked backend) | Node, `npx playwright install chromium` (or `PW_CHROMIUM_PATH=<chromium binary>` to use an installed one) |
 | RAG eval | `uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml [--retrieval vector\|hybrid]` (default `hybrid` = vector + full-text by RRF, as in production; `vector` = baseline to measure what full-text adds) | DB, LM Studio, an indexed business |
 | Pilot flow | ingest `--url …` → `app.rag.index` → eval; hand questions in `questions/` | DB, LM Studio |
 | Voice stack comparison | `uv run python scripts/bench_voice.py --stt google faster-whisper:small --tts google` (`--list` shows candidates; `cmd:` adapters take any engine); harness unit test `tests/test_bench_voice.py` | Google ADC and/or faster-whisper, Piper etc. on the Mac; the unit test needs nothing |
@@ -256,6 +256,8 @@ npm run build -- --watch   # alternative: rebuild on save; with DEV_RELOAD=true 
 npm run typecheck   # type-check only
 npm test            # unit tests (Vitest): formatting + the call state machine
 npx playwright install chromium   # once per machine, for the browser tests
+# on a box whose Chromium build differs from the pinned Playwright (the cloud box):
+#   PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e   (unset = Playwright's own browser)
 npm run e2e         # browser tests (Playwright): builds, serves web/dist on :4173 and runs every
                     # screen of the voice app + both debug pages against a mocked backend
                     # (no DB, LM Studio or Google needed); `npx playwright show-report` for details
