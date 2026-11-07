@@ -98,7 +98,7 @@ Cost rule (DEC-33): only free or pay-per-use services, no monthly fees. Secrets 
 | Backend tests (about 40 files in `tests/`) | `uv run pytest -q` | Postgres; `tests/test_rag.py` also needs LM Studio |
 | Frontend type check and unit tests | `cd web && npm run typecheck && npm test` (Vitest) | Node |
 | Browser tests | `cd web && npm run e2e` (Playwright, mocked backend) | Node, `npx playwright install chromium` |
-| RAG eval | `uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml` | DB, LM Studio, an indexed business |
+| RAG eval | `uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml [--retrieval vector\|hybrid]` (default `hybrid` = vector + full-text by RRF, as in production; `vector` = baseline to measure what full-text adds) | DB, LM Studio, an indexed business |
 | Pilot flow | ingest `--url …` → `app.rag.index` → eval; hand questions in `questions/` | DB, LM Studio |
 | Live checks only the Mac can do | voice call, push-to-talk, Twilio call, Google Calendar sync | LM Studio, Google ADC, Twilio, ngrok; listed under "Test on Mac" in `plan/03-voice-channel.md` |
 

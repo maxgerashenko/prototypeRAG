@@ -25,7 +25,8 @@ class AnswerResult:
 
 
 def prepare_prompt(
-    business_id: uuid.UUID, question: str, history: list[dict] | None = None, top_n: int = 5
+    business_id: uuid.UUID, question: str, history: list[dict] | None = None, top_n: int = 5,
+    retrieval: str = "hybrid",
 ) -> tuple[BusinessProfile | None, list[RetrievedChunk], list[dict]]:
     """Retrieve and build the prompt, without calling the LLM.
 
@@ -37,7 +38,7 @@ def prepare_prompt(
         profile = session.get(BusinessProfile, business_id)
         summary = session.get(BusinessSummary, business_id)
         location_id = default_location_id(session, business_id)  # DEC-49
-        chunks = retrieve(session, business_id, question, top_n, location_id=location_id)
+        chunks = retrieve(session, business_id, question, top_n, location_id=location_id, mode=retrieval)
         messages = build_prompt(
             profile, chunks, history or [], question, summary,
             locations=format_locations(session, business_id, location_id), enabled_tools=enabled,
@@ -68,11 +69,11 @@ def _run_calls(business_id: uuid.UUID, conversation_id: uuid.UUID | None, calls:
 
 def answer_question(
     business_id: uuid.UUID, question: str, history: list[dict] | None = None, top_n: int = 5,
-    conversation_id: uuid.UUID | None = None,
+    conversation_id: uuid.UUID | None = None, retrieval: str = "hybrid",
 ) -> AnswerResult:
     """Non-streaming: retrieve, build the prompt, then LLM → tools → LLM until the model
-    answers in text (at most MAX_TOOL_ROUNDS rounds)."""
-    profile, chunks, messages = prepare_prompt(business_id, question, history, top_n)
+    answers in text (at most MAX_TOOL_ROUNDS rounds). `retrieval` is for the eval only."""
+    profile, chunks, messages = prepare_prompt(business_id, question, history, top_n, retrieval)
     prompt = list(messages)  # `messages` grows with tool turns; the debug view shows the prompt as sent first
     settings = get_settings()
     client = get_chat_client()
