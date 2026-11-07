@@ -107,6 +107,20 @@ def test_create_stores_utc_and_blocks_a_second_booking_in_the_slot(business_id):
     assert b.availability(business_id, _req(at="15:00"), NOW).ok  # back-to-back is fine
 
 
+def test_no_booking_rules_row_refuses_bookings_and_availability(business_id):
+    """#260: without hours a 3 a.m. booking on a closed day must not go through."""
+    with tenant_session(business_id) as s:
+        s.execute(delete(BookingRule).where(BookingRule.business_id == business_id))
+    b = InternalBackend()
+    req = _req(day="2026-11-02", at="03:00")  # a Monday, 3 a.m.
+    av = b.availability(business_id, req, NOW)
+    assert not av.ok and "opening hours" in av.reason
+    res = b.create(business_id, req, NOW)
+    assert not res.ok and "opening hours" in res.message
+    with tenant_session(business_id) as s:
+        assert s.scalar(select(Booking).where(Booking.business_id == business_id)) is None
+
+
 def test_concurrent_creates_for_one_slot_book_exactly_one(business_id):
     b, results = InternalBackend(), []
     threads = [threading.Thread(target=lambda n=n: results.append(b.create(business_id, _req(name=f"G{n}"), NOW)))

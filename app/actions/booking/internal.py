@@ -99,11 +99,17 @@ def _overlapping(existing: list[tuple[datetime, datetime]], start: datetime, end
     return sum(1 for a, b in existing if a < end and b > start)
 
 
+NO_HOURS = "Bookings are not available yet: this business has not set its opening hours."
+
+
 def _check(rules: R.Rules, req: BookingRequest, existing, now: datetime):
     """-> (start, end, reason, alternatives) for one request."""
     start = R.local_start(rules, req.day, req.at)
     length = timedelta(minutes=rules.duration(req.service))
     end = start + length
+    if rules.hours is None:
+        # #260: no hours configured (no booking_rules row, or hours NULL) -> refuse, don't book at 3 a.m.
+        return start, end, NO_HOURS, []
     reason = R.violation(rules, start, end, req.party_size, now, _overlapping(existing, start, end))
     alternatives: list[str] = []
     if reason:
