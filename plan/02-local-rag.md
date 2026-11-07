@@ -55,7 +55,7 @@ Models (via LM Studio, 64 GB Mac — DEC-29):
 CREATE EXTENSION IF NOT EXISTS vector;
 
 businesses       (id, name, website, timezone, phone_numbers, settings jsonb)
-business_profile (business_id, name, address, phone, opening_hours jsonb, place_id, ...)  -- from Part 1
+business_profile (business_id, name, address, phone, opening_hours text, place_id, ...)  -- from Part 1
 locations        (id, business_id, name, url, address, timezone, is_default, ...)  -- DEC-37
 facts            (id, business_id, location_id, type, statement, fact_key, status, ...)  -- DEC-38
 fact_sources     (id, business_id, fact_id, page_id, quote, page_hash, extracted_at)

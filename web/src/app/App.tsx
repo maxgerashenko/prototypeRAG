@@ -227,6 +227,9 @@ export function App() {
     if (!live || shownPhone.current.has(live.info.id)) return;
     if (stage === "connecting" || stage === "call" || stage === "phone") return;
     shownPhone.current.add(live.info.id);
+    // in Settings a switch would unmount the screen and lose an unsaved greeting draft: the green
+    // "live call" button stays for the user to tap
+    if (stage === "settings") return;
     watchPhone(live.info.id);
   }, [live, stage]);
 
@@ -262,6 +265,9 @@ export function App() {
     }
     // a bookings sheet is open: Space belongs to the page (select, buttons), not to the call shortcut
     if (e.key === " " && stage === "bookings" && (bookings.selected || bookings.selectedSession || bookings.draft)) return;
+    // a focused button (Business settings, a conversation, Back, ...) takes Space as its click;
+    // only the call buttons, the business card (Space re-selects it) and the call screen use it as the call shortcut
+    if (e.key === " " && stage !== "call" && el?.tagName === "BUTTON" && !el.matches(".call-btn, .btn-call, .biz-pick")) return;
     if (e.key === " ") {
       e.preventDefault();
       if (!down) {

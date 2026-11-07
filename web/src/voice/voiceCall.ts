@@ -13,6 +13,8 @@ import type { VoiceEvent } from "../api";
 export const RATE = 16000;
 const FRAME = RATE / 50; // 20 ms per message, same as Twilio frames
 
+const UNSUPPORTED = "This browser can’t capture audio at 16 kHz. Use Chrome, Edge or Safari.";
+
 export type LineKind = "user" | "assistant" | "meta";
 
 // runs on the audio thread: Float32 mic blocks (128 samples) -> 20 ms Int16 frames
@@ -74,7 +76,12 @@ export class VoiceCall {
   }
 
   async start(businessId: string): Promise<void> {
-    const ctx = new AudioContext({ sampleRate: RATE }); // the browser resamples the mic to 16 kHz
+    let ctx: AudioContext;
+    try {
+      ctx = new AudioContext({ sampleRate: RATE }); // the browser resamples the mic to 16 kHz
+    } catch {
+      throw new Error(UNSUPPORTED);
+    }
     this.ctx = ctx;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -92,7 +99,12 @@ export class VoiceCall {
     }
     if (this.ended) return;
     const capture = new AudioWorkletNode(ctx, "capture");
-    ctx.createMediaStreamSource(this.stream).connect(capture);
+    try {
+      ctx.createMediaStreamSource(this.stream).connect(capture);
+    } catch {
+      // Firefox throws here when the context rate differs from the mic's
+      throw new Error(UNSUPPORTED);
+    }
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const params = new URLSearchParams({ business_id: businessId });
@@ -100,14 +112,29 @@ export class VoiceCall {
     if (this.continueFrom) params.set("continue_from", this.continueFrom);
     const ws = new WebSocket(`${proto}://${location.host}/voice/browser?${params.toString().replace(/\+/g, "%20")}`);
     ws.binaryType = "arraybuffer";
-    ws.onmessage = (m: MessageEvent<string | ArrayBuffer>) =>
-      typeof m.data === "string" ? this.onEvent(JSON.parse(m.data) as VoiceEvent) : this.play(m.data);
+    ws.onmessage = (m: MessageEvent<string | ArrayBuffer>) => {
+      if (typeof m.data !== "string") return this.play(m.data);
+      let ev: VoiceEvent;
+      try {
+        ev = JSON.parse(m.data) as VoiceEvent;
+      } catch {
+        this.handlers.onLine?.("meta", "[ignored a malformed server message]");
+        return;
+      }
+      this.onEvent(ev);
+    };
     ws.onclose = (e) => {
       this.handlers.onLine?.("meta", `[closed ${e.code}${e.reason ? " " + e.reason : ""}]`);
       this.handlers.onClose?.(e.code, e.reason, this.ws === ws);
       this.stop();
     };
     this.ws = ws;
+    // start() settles once the socket is open or has closed (onClose/onEnded report a failure),
+    // so callers never show "in a call" while the connection may still fail
+    await new Promise<void>((resolve) => {
+      ws.addEventListener("open", () => resolve(), { once: true });
+      ws.addEventListener("close", () => resolve(), { once: true });
+    });
     capture.port.onmessage = (m: MessageEvent<ArrayBuffer>) => {
       if (this.transmitting && this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(m.data);
     };

@@ -219,7 +219,10 @@ existing row with the same key and value (one more source; crawl-origin rows get
 statement and the higher confidence) or insert a new row with `status='conflict'`; add a
 `fact_sources` row with the quote and `page_hash`; stamp the page's `extracted_hash`.
 
-**`settle_facts`** (once per run, after all pages): first `rekey_facts` recomputes keys (names
+**`settle_facts`** (once per run, after all pages; also when the facts step stops early, so pages
+already applied are settled, and in the same transaction as the crawl's page delete, because a
+deleted page's `fact_sources` go with it (cascade) and the facts step after it may fail or not run,
+#297; each settle is followed by `sync_fact_chunks`): first `rekey_facts` recomputes keys (names
 may have changed) and merges rows with the same key and value: owner fact wins, else the
 earliest `first_seen_at`; sources move to the winner. Then per key:
 
@@ -351,7 +354,6 @@ Seen in the code on `main`; none of these is a bug report against a decision.
 | No owner editing of facts on `main` | `origin='owner'` and `owner_confirmed_at` are honoured by merge but nothing writes them; `rejected` status and `valid_from`/`valid_until` are never set; default status `candidate` is never used (inserts use `conflict`) |
 | Profile reads only the first 12,000 chars of all pages joined | Facts on later pages don't reach `business_profile` (the facts library covers them) |
 | `business_profile.opening_hours` is JSONB but extracted as a string | Stored as a JSON string, not structured hours |
-| Facts are re-settled only by the facts step | If the facts step fails after pages were deleted, facts that lost their sources stay `active` (and in retrieval) until the next successful run |
 | Chunk size uses chars/4, no tokenizer | Sizes are approximate for non-English text |
 | `places.py` is not wired in | `place_id` is never filled by the crawl |
 

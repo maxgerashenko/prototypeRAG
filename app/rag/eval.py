@@ -10,6 +10,7 @@ import yaml
 
 from app.rag.answer import answer_question
 from app.rag.prompt import format_chunks
+from app.rag.retrieve import RETRIEVAL_MODES
 
 REFUSAL_PHRASES = [
     "don't know", "do not know", "not sure", "unable to find",
@@ -61,12 +62,12 @@ def check_context(context_text: str, entry: dict) -> tuple[bool, list[str]] | tu
     return not missing, missing
 
 
-def run_eval(business_id: uuid.UUID, eval_path: str) -> list[EvalResult]:
+def run_eval(business_id: uuid.UUID, eval_path: str, retrieval: str = "hybrid") -> list[EvalResult]:
     results = []
     for entry in load_eval_file(eval_path):
         question = entry["question"]
         manual = bool(entry.get("manual"))
-        answer_result = answer_question(business_id, question)
+        answer_result = answer_question(business_id, question, retrieval=retrieval)
         context_text = format_chunks(answer_result.chunks)
         passed, missing_facts = check_answer(answer_result.answer, entry)
         context_hit, missing_in_context = check_context(context_text, entry)
@@ -81,7 +82,7 @@ def run_eval(business_id: uuid.UUID, eval_path: str) -> list[EvalResult]:
     return results
 
 
-def print_report(results: list[EvalResult]) -> None:
+def print_report(results: list[EvalResult], retrieval: str = "hybrid") -> None:
     graded = [r for r in results if not r.manual]
     total = len(graded)
     passed = sum(r.passed for r in graded)
@@ -91,7 +92,7 @@ def print_report(results: list[EvalResult]) -> None:
     context_rate = (context_hits / len(context_checked) * 100) if context_checked else 0.0
     avg_chars = sum(r.tool_result_chars for r in results) / len(results) if results else 0.0
     print(
-        f"\n--- Eval Report ---\n"
+        f"\n--- Eval Report (retrieval: {retrieval}) ---\n"
         f"Total (graded): {total}  Passed: {passed}  Pass rate: {rate:.1f}%\n"
         f"Retrieval hit@k (expected_in_context): {context_hits}/{len(context_checked)} "
         f"({context_rate:.1f}%)\n"
@@ -114,8 +115,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the RAG eval against a business")
     parser.add_argument("--business-id", required=True, type=uuid.UUID)
     parser.add_argument("--file", required=True, help="Path to the YAML eval file")
+    parser.add_argument(
+        "--retrieval", choices=RETRIEVAL_MODES, default="hybrid",
+        help="hybrid = vector + full-text (RRF), as in production; vector = vector only, to measure the gain",
+    )
     args = parser.parse_args()
-    print_report(run_eval(args.business_id, args.file))
+    print_report(run_eval(args.business_id, args.file, args.retrieval), args.retrieval)
 
 
 if __name__ == "__main__":

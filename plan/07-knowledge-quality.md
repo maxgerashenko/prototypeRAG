@@ -423,9 +423,11 @@ touches `ingest/` and `rag/`, not the call loop), but must be done before step 5
     is fully covered by URL rules, and skipping the LLM call keeps this step
     deterministic and network-free for unit tests. Documented in `organize.py`'s module
     docstring; add an LLM fallback when a page type can't be resolved this way.
-  - `noindex` isn't a stored column — it's only known at crawl time from raw HTML, so it's
-    threaded through `organize_business(..., noindex_urls=...)` as a same-run parameter,
-    not persisted; a later `--only organize` re-run (no fresh fetch) can't re-derive it.
+  - `noindex` is only known at crawl time from raw HTML. First built as a same-run
+    parameter (`organize_business(..., noindex_urls=...)`); since #289 `run.py` stores it on
+    `pages.noindex` (migration 0017) after every fetch, and organize reads that column and
+    adds it to `organized_hash`, so a later run that doesn't re-fetch the page keeps it
+    non-retrievable and a change either way re-organizes the page.
   - Location detection reads the deduped site chrome (footer "Locations & HOURS" block
     for name+address, header nav for each location's own page path), never the crawl's
     start URL, per A1. Found and fixed two bugs against the real pilot data during this

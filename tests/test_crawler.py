@@ -33,7 +33,7 @@ from app.ingest.discover import (
     prioritize,
     same_domain,
 )
-from app.ingest.fetch import extract_pdf_text, fetch_document, fetch_sitemap, pdf_title
+from app.ingest.fetch import FetchedDocument, extract_pdf_text, fetch_document, fetch_sitemap, pdf_title
 from app.ingest.identity import domain_of, site_root
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 
@@ -101,7 +101,7 @@ def test_crawl_delay_from_robots_txt():
 
 def test_normalize_url():
     assert normalize_url("https://X.com/a/#frag") == "https://x.com/a"
-    assert normalize_url("https://x.com/?q=1") == "https://x.com/"
+    assert normalize_url("https://x.com/?utm_source=a&q=1") == "https://x.com/?q=1"  # #189: only tracking is dropped
 
 
 def test_discover_links_on_real_homepage(homepage_html: str):
@@ -250,7 +250,9 @@ def test_bfs_never_queues_robots_disallowed_links(monkeypatch):
     """Regression: disallowed links were skipped when fetching the frontier but still
     added to the crawl list, so crawl_business fetched them anyway (R10)."""
     html = '<a href="https://x.com/private">p</a><a href="https://x.com/ok">o</a>'
-    monkeypatch.setattr(run, "fetch_text", lambda url, client, timeout=15.0: html)
+    monkeypatch.setattr(
+        run, "fetch_document", lambda url, client, timeout=15.0, allow_final=None: FetchedDocument(html=html, url=url)
+    )
     monkeypatch.setattr(run.time, "sleep", lambda s: None)
     client = SimpleNamespace(_crawl_delay=0)
     urls, _ = run._expand_by_links("https://x.com/", client, RobotsChecker("User-agent: *\nDisallow: /private\n"), 10, 3)
@@ -1120,3 +1122,162 @@ def test_chunk_markdown_numbers_chunks_continuously_across_sections():
     drafts = chunk_markdown(md)
     assert [(d.section_heading, d.text, d.chunk_index) for d in drafts] == [
         ("A", "first body", 0), ("B", "second body", 1)]
+
+
+# --- #289: noindex is stored on the page, #192: owner-confirmed name -------------------
+
+
+def test_noindex_page_stays_non_retrievable_on_a_run_that_does_not_refetch_it():
+    url = "https://noindex-store.example.com/secret"
+    bid = run.resolve_business("https://noindex-store.example.com/", None)
+    try:
+        with tenant_session(bid) as s:
+            s.add(Page(business_id=bid, url=url, title="Secret", markdown="# Secret offer", content_hash="h1", noindex=True))
+        organize.organize_business(bid, url, "https://noindex-store.example.com/")
+        with tenant_session(bid) as s:
+            assert s.scalar(select(Page.retrievable).where(Page.business_id == bid, Page.url == url)) is False
+        # a second run with the stored flag only (nothing re-fetched) changes nothing
+        assert organize.organize_business(bid, url, "https://noindex-store.example.com/").organized_page_ids == []
+        # the page loses its noindex on a later fetch: it is organized again and becomes retrievable
+        with tenant_session(bid) as s:
+            s.scalars(select(Page).where(Page.business_id == bid, Page.url == url)).one().noindex = False
+        organize.organize_business(bid, url, "https://noindex-store.example.com/")
+        with tenant_session(bid) as s:
+            assert s.scalar(select(Page.retrievable).where(Page.business_id == bid, Page.url == url)) is True
+    finally:
+        _cleanup_business(bid)
+
+
+def test_recrawl_keeps_an_owner_confirmed_business_name(homepage_html: str, robots_txt: str, monkeypatch):
+    site = _fake_site(homepage_html, robots_txt)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=_sitemap(["williamsburg"]))
+        body = site.get(request.url.path)
+        return httpx.Response(200, text=body) if body is not None else httpx.Response(404)
+
+    def fake_client(delay_seconds: float = 0.5) -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+        client._crawl_delay = 0
+        return client
+
+    monkeypatch.setattr(run, "make_client", fake_client)
+    start_url = f"{E2E_ROOT}williamsburg"
+    bid = run.resolve_business(start_url, None)
+    try:
+        run.crawl_business(bid, start_url, extract_profile=False)
+        with tenant_session(bid) as s:
+            assert s.get(Business, bid).name == "Bathhouse"  # crawler-set from og:site_name
+            business = s.get(Business, bid)
+            business.name = "Bathhouse Brooklyn"
+            business.settings = {**business.settings, "name_confirmed": True}
+        run.crawl_business(bid, start_url, extract_profile=False)
+        with tenant_session(bid) as s:
+            assert s.get(Business, bid).name == "Bathhouse Brooklyn"
+    finally:
+        _cleanup_business(bid)
+
+
+# --- sitemap edge cases (#193) and per-host robots.txt (#194) ---
+
+import gzip  # noqa: E402
+
+_URLSET = '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://x.test/a</loc></url></urlset>'
+
+
+def _bytes_client(routes: dict[str, httpx.Response | bytes], seen: list[str]) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        r = routes.get(str(request.url))
+        if r is None:
+            return httpx.Response(404)
+        return r if isinstance(r, httpx.Response) else httpx.Response(200, content=r)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    client._crawl_delay = 0
+    return client
+
+
+def test_fetch_sitemap_retries_a_503(monkeypatch):
+    monkeypatch.setattr("app.ingest.fetch._sleep", lambda s: None)
+    replies = iter([httpx.Response(503), httpx.Response(200, content=_URLSET.encode())])
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: next(replies)))
+    client._crawl_delay = 0
+    assert fetch_sitemap("https://x.test", client) == _URLSET
+
+
+def test_fetch_sitemap_inflates_gzip_by_magic_bytes_not_name():
+    from app.ingest.fetch import fetch_child_sitemaps
+
+    gz = gzip.compress(_URLSET.encode())
+    client = _bytes_client({"https://x.test/sitemap.xml": gz}, [])  # gzip served under a plain name
+    assert fetch_sitemap("https://x.test", client) == _URLSET
+    # plain XML under a .gz name is read as is
+    client = _bytes_client({"https://x.test/c.xml.gz": _URLSET.encode()}, [])
+    assert fetch_child_sitemaps(["https://x.test/c.xml.gz"], client) == [_URLSET]
+    # a gzip bomb (inflates past the cap) is dropped, not parsed
+    client = _bytes_client({"https://x.test/sitemap.xml": gzip.compress(b"<urlset>" + b" " * 2000 + b"</urlset>")}, [])
+    import app.ingest.fetch as fetch_mod
+
+    original = fetch_mod.MAX_SITEMAP_BYTES
+    fetch_mod.MAX_SITEMAP_BYTES = 1000
+    try:
+        assert fetch_sitemap("https://x.test", client) is None
+    finally:
+        fetch_mod.MAX_SITEMAP_BYTES = original
+
+
+def test_fetch_sitemap_skips_a_declared_sitemap_that_is_not_xml():
+    seen: list[str] = []
+    client = _bytes_client(
+        {"https://x.test/soft404": b"<html><body>Not found</body></html>", "https://x.test/sitemap.xml": _URLSET.encode()},
+        seen,
+    )
+    assert fetch_sitemap("https://x.test", client, ["https://x.test/soft404"]) == _URLSET
+    assert seen == ["https://x.test/soft404", "https://x.test/sitemap.xml"]
+
+
+def test_fetch_child_sitemaps_follows_nested_indexes_with_bounds():
+    from app.ingest.fetch import MAX_CHILD_SITEMAPS, fetch_child_sitemaps
+
+    def index(*urls: str) -> bytes:
+        body = "".join(f"<sitemap><loc>{u}</loc></sitemap>" for u in urls)
+        return f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</sitemapindex>'.encode()
+
+    seen: list[str] = []
+    routes = {
+        "https://x.test/mid.xml": index("https://x.test/mid.xml", "https://x.test/leaf.xml", "https://x.test/deep.xml"),
+        "https://x.test/leaf.xml": _URLSET.encode(),
+        "https://x.test/deep.xml": index("https://x.test/too-deep.xml"),
+        "https://x.test/too-deep.xml": _URLSET.encode(),
+    }
+    bodies = fetch_child_sitemaps(["https://x.test/mid.xml"], _bytes_client(routes, seen), base_url="https://x.test")
+    assert bodies == [_URLSET]  # the self-listing index is no loop; the third level is not followed
+    assert seen == ["https://x.test/mid.xml", "https://x.test/leaf.xml", "https://x.test/deep.xml"]
+
+    many = [f"https://x.test/s{i}.xml" for i in range(MAX_CHILD_SITEMAPS + 10)]
+    seen = []
+    fetch_child_sitemaps(many, _bytes_client({u: _URLSET.encode() for u in many}, seen))
+    assert len(seen) == MAX_CHILD_SITEMAPS
+
+
+def test_host_robots_reads_each_host_own_rules_once():
+    from app.ingest.discover import HostRobots
+
+    loads: list[str] = []
+    rules = {"https://www.x.test": "User-agent: *\nDisallow: /private/\n", "https://down.x.test": None}
+
+    def load(base: str):
+        loads.append(base)
+        if base not in rules:
+            raise RuntimeError("unreadable")
+        return rules[base]
+
+    start = RobotsChecker("User-agent: *\nDisallow: /admin/\n")
+    robots = HostRobots("https://x.test/", start, load)
+    assert not robots.can_fetch("https://x.test/admin/a") and robots.can_fetch("https://x.test/private/a")
+    assert robots.can_fetch("https://www.x.test/admin/a") and not robots.can_fetch("https://www.x.test/private/a")
+    assert robots.can_fetch("https://www.x.test/menu") and robots.can_fetch("https://down.x.test/anything")  # no robots.txt
+    assert not robots.can_fetch("https://broken.x.test/menu")  # unreadable = disallowed
+    assert loads == ["https://www.x.test", "https://down.x.test", "https://broken.x.test"]

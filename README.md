@@ -98,8 +98,8 @@ Cost rule (DEC-33): only free or pay-per-use services, no monthly fees. Secrets 
 |---|---|---|
 | Backend tests (about 40 files in `tests/`) | `uv run pytest -q` | Postgres; `tests/test_rag.py` also needs LM Studio |
 | Frontend type check and unit tests | `cd web && npm run typecheck && npm test` (Vitest) | Node |
-| Browser tests | `cd web && npm run e2e` (Playwright, mocked backend) | Node, `npx playwright install chromium` |
-| RAG eval | `uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml` | DB, LM Studio, an indexed business |
+| Browser tests | `cd web && npm run e2e` (Playwright, mocked backend) | Node, `npx playwright install chromium` (or `PW_CHROMIUM_PATH=<chromium binary>` to use an installed one) |
+| RAG eval | `uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml [--retrieval vector\|hybrid]` (default `hybrid` = vector + full-text by RRF, as in production; `vector` = baseline to measure what full-text adds) | DB, LM Studio, an indexed business |
 | Pilot flow | ingest `--url …` → `app.rag.index` → eval; hand questions in `questions/` | DB, LM Studio |
 | Voice stack comparison | `uv run python scripts/bench_voice.py --stt google faster-whisper:small --tts google` (`--list` shows candidates; `cmd:` adapters take any engine); harness unit test `tests/test_bench_voice.py` | Google ADC and/or faster-whisper, Piper etc. on the Mac; the unit test needs nothing |
 | Live checks only the Mac can do | voice call, push-to-talk, Twilio call, Google Calendar sync | LM Studio, Google ADC, Twilio, ngrok; listed under "Test on Mac" in `plan/03-voice-channel.md` |
@@ -169,7 +169,7 @@ Then open a page:
 | Page | URL (uvicorn, built pages) | Needs |
 |---|---|---|
 | **Voice app** (DEC-42): pick a business, read past conversations, call with push-to-talk, continue an earlier call | http://localhost:8000/ (redirects to `/web/`; the old `/web/mic-test.html` does too) | DB; for calls also LM Studio, `gcloud auth application-default login`, Chrome or Safari |
-| Chat test (answers + retrieved sources; paste a `business_id`) | http://localhost:8000/web/chat.html | DB, LM Studio |
+| Chat test (answers + retrieved sources; paste a `business_id`) | http://localhost:8000/web/chat.html | DB, LM Studio; the prompt view and `/debug/*` need `DEBUG_ENDPOINTS=true` in `.env` (off by default, API review M1) |
 | Voice debug (hands-free: open mic + server VAD, raw event log; paste a `business_id`) | http://localhost:8000/web/voice-debug.html | as for calls, plus headphones |
 | Twilio call (mode B: Voice SDK → TwiML App → `/twilio/voice` → `/voice/ws`, billed per minute) | http://localhost:8000/web/call.html (localhost only) | as for calls, plus `TWILIO_*` + `PUBLIC_BASE_URL` in `.env` and ngrok — setup in [03-voice-channel.md](plan/03-voice-channel.md) |
 
@@ -235,7 +235,7 @@ Inside the containers Compose overrides `.env`'s `localhost` values:
 LM Studio on the Mac via `host.docker.internal:1234` (LM Studio stays native, R7). Google
 STT/TTS use the ADC file from `gcloud auth application-default login`, mounted read-only
 from `~/.config/gcloud`; without it the API starts and logs one warning, only calls fail.
-Don't run the native `uvicorn` at the same time (both use port 8000). The image listens on
+In the container the browser reaches the app from Docker's gateway address, so `/twilio/token` (loopback only) needs that range in `TWILIO_TOKEN_ALLOWED_CIDRS` (#241). Don't run the native `uvicorn` at the same time (both use port 8000). The image listens on
 `$PORT` (8000 here, 8080 on Cloud Run).
 
 ### Web pages (React + TypeScript, `web/`)
@@ -256,6 +256,8 @@ npm run build -- --watch   # alternative: rebuild on save; with DEV_RELOAD=true 
 npm run typecheck   # type-check only
 npm test            # unit tests (Vitest): formatting + the call state machine
 npx playwright install chromium   # once per machine, for the browser tests
+# on a box whose Chromium build differs from the pinned Playwright (the cloud box):
+#   PW_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e   (unset = Playwright's own browser)
 npm run e2e         # browser tests (Playwright): builds, serves web/dist on :4173 and runs every
                     # screen of the voice app + both debug pages against a mocked backend
                     # (no DB, LM Studio or Google needed); `npx playwright show-report` for details

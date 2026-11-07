@@ -221,6 +221,15 @@ test.describe("1 · pick a business", () => {
     await expect(card(page, "Corner Bakery")).toHaveClass(/\bon\b/); // selection kept
   });
 
+  test("Space on a focused button presses that button, it does not start a call (#210)", async ({ page }) => {
+    await openApp(page);
+    await pick(page, "Corner Bakery");
+    await page.getByTestId("settings-row").focus();
+    await page.keyboard.press(" ");
+    await expect(page.locator("[data-screen=settings]")).toBeVisible();
+    await expect(page.locator("[data-screen=call], [data-screen=connecting]")).toHaveCount(0);
+  });
+
   test("Space calls the selected business; Backspace outside a call does nothing", async ({ page }) => {
     await openApp(page);
     await page.keyboard.press(" ");
@@ -765,7 +774,7 @@ test.describe("5 · live call with push-to-talk", () => {
 });
 
 test.describe("6 · call ended", () => {
-  test("end call → summary → read it → back to the list with the call marked NEW", async ({ page }) => {
+  test("end call → summary → read it → back to the list, NEW mark cleared by reading", async ({ page }) => {
     const api = await openApp(page);
     await startCall(page, "Corner Bakery", { conversationId: "new-call", greeting: "Hello!" });
     voice.send({ type: "transcript", text: "Are you open?" });
@@ -791,12 +800,14 @@ test.describe("6 · call ended", () => {
 
     await page.keyboard.press("Escape"); // to the business's conversations
     await expect(page.locator("[data-screen=convos]")).toBeVisible();
-    await expect(page.locator(".convo-card.new")).toHaveCount(1);
-    await expect(page.locator(".convo-card.new")).toContainText("Are you openNEW");
+    // opening the conversation counted as seeing it: the NEW mark is gone (App.openConversation)
+    await expect(page.locator(".convo-card").first()).toContainText("Are you open");
+    await expect(page.locator(".convo-card.new")).toHaveCount(0);
     await page.keyboard.press("Escape");
     const bakery = card(page, "Corner Bakery");
     await expect(bakery).toContainText("cornerbakery.example · 4 chats");
-    await expect(bakery.locator(".recent-row").first()).toContainText("Are you openNEW");
+    await expect(bakery.locator(".recent-row").first()).toContainText("Are you open");
+    await expect(bakery.locator(".badge-new")).toHaveCount(0);
   });
 
   test("a call nobody spoke in: 'Nothing was said', not readable, not NEW", async ({ page }) => {
@@ -846,7 +857,7 @@ test.describe("7 · hands-free call on a mobile browser", () => {
 
   test("no push-to-talk button: End call only, status says to just talk", async ({ page }) => {
     await openApp(page);
-    await startCall(page);
+    await startCall(page, "Corner Bakery", { greeting: null }); // a greeting would show "Assistant is speaking" first
     await expect(ptt(page)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "End call" })).toBeVisible();
     // the End call pill takes the whole row, as Hold to talk does on desktop

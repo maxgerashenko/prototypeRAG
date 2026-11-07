@@ -8,7 +8,7 @@ fetching and drives the breadth-first expansion when no sitemap is available.
 import math
 import re
 import xml.etree.ElementTree as ET
-from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.parse import parse_qsl, urldefrag, urlencode, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from protego import Protego
@@ -78,14 +78,36 @@ def is_pdf_url(url: str) -> bool:
     return urlparse(url).path.lower().endswith(".pdf")
 
 
-def normalize_url(url: str) -> str:
-    """Drop fragment and query, lowercase the netloc, strip a trailing slash. For deduping."""
+# query parameters that only track where a visitor came from: the page is the same without them
+_TRACKING_PARAMS = frozenset({"fbclid", "gclid", "msclkid", "mc_cid", "mc_eid", "_ga", "igshid"})
+
+
+def _is_tracking_param(name: str) -> bool:
+    name = name.lower()
+    return name.startswith("utm_") or name in _TRACKING_PARAMS
+
+
+def normalize_url(url: str, base_url: str | None = None) -> str:
+    """One spelling per page, for deduping (#189). Drops the fragment and tracking query
+    parameters (utm_*, fbclid, ...), sorts the other parameters, lowercases the netloc and
+    strips a trailing slash (an empty path becomes "/", so "https://x.com" == "https://x.com/").
+    Other query strings are KEPT: `?location=williamsburg` can be a different page, and
+    merging it into its sibling would silently lose content. When `base_url` is given and
+    `url` is on the same domain, scheme and host are taken from `base_url`, so http/https
+    and www/bare spellings of the site's own links become one page without assuming
+    which of them the site really serves."""
     url, _ = urldefrag(url)
     parsed = urlparse(url)
+    scheme, netloc = parsed.scheme, parsed.netloc.lower()
+    if base_url and same_domain(url, base_url):
+        base = urlparse(base_url)
+        scheme, netloc = base.scheme, base.netloc.lower()
     path = parsed.path
     if path != "/" and path.endswith("/"):
         path = path[:-1]
-    return f"{parsed.scheme}://{parsed.netloc.lower()}{path}"
+    path = path or "/"
+    query = sorted((k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if not _is_tracking_param(k))
+    return f"{scheme}://{netloc}{path}" + (f"?{urlencode(query)}" if query else "")
 
 
 def _internal_links(html: str, base_url: str) -> list[str]:
@@ -97,7 +119,7 @@ def _internal_links(html: str, base_url: str) -> list[str]:
         absolute = urljoin(base_url, a["href"])
         if not same_domain(absolute, base_url) or is_skippable(absolute):
             continue
-        normalized = normalize_url(absolute)
+        normalized = normalize_url(absolute, base_url)
         if normalized not in seen:
             seen.add(normalized)
             urls.append(normalized)
@@ -114,6 +136,11 @@ def discover_pdf_links(html: str, base_url: str) -> list[str]:
     """Internal links to PDFs in `html`. Same-domain only, like every other link: a PDF
     on a CDN host (e.g. Squarespace's static1.squarespace.com) is not picked up yet."""
     return [u for u in _internal_links(html, base_url) if is_pdf_url(u)]
+
+
+def _path_depth(url: str) -> int:
+    """Number of path segments: 0 for the home page, 2 for /journal/post."""
+    return len([seg for seg in urlparse(url).path.split("/") if seg])
 
 
 def is_blog_path(url: str) -> bool:
@@ -154,8 +181,8 @@ def prioritize(urls: list[str], start_url: str, blog_cap: int = DEFAULT_BLOG_CAP
     organize.py, which runs after the crawl) -- depth-1 pages are a stand-in tier that
     catches them without needing that information up front.
     """
-    start_normalized = normalize_url(start_url)
-    rest = [u for u in urls if normalize_url(u) != start_normalized]
+    start_normalized = normalize_url(start_url, start_url)
+    rest = [u for u in urls if normalize_url(u, start_url) != start_normalized]
 
     depth1, deeper, blog = [], [], []
     for u in rest:
@@ -216,14 +243,52 @@ class RobotsChecker:
         return None
 
 
+class HostRobots:
+    """robots.txt rules per host (R10): `www.x.com` and `x.com` pass `same_domain` but each
+    answers to its own robots.txt. Same interface as RobotsChecker (`can_fetch`,
+    `crawl_delay`). `start` is the already-read rules of the start host (None = it has no
+    robots.txt = allow all); any other host's body is fetched once through `load(base_url)`
+    (-> body or None) on its first URL and cached. If `load` raises (robots.txt unreadable)
+    that host is treated as fully disallowed, RFC 9309."""
+
+    def __init__(self, start_url: str, start: "RobotsChecker | None", load):
+        self._start_host = urlparse(start_url).netloc.lower()
+        self._start = start
+        self._load = load
+        self._by_host: dict[str, RobotsChecker | None] = {}
+
+    def _checker(self, url: str) -> "RobotsChecker | None | bool":
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        if host == self._start_host:
+            return self._start
+        if host not in self._by_host:
+            try:
+                body = self._load(f"{parsed.scheme}://{parsed.netloc}")
+                self._by_host[host] = RobotsChecker(body) if body else None
+            except Exception:
+                self._by_host[host] = False  # type: ignore[assignment]
+        return self._by_host[host]  # type: ignore[return-value]
+
+    def can_fetch(self, url: str) -> bool:
+        checker = self._checker(url)
+        if checker is False:
+            return False
+        return checker is None or checker.can_fetch(url)
+
+    def crawl_delay(self) -> float | None:
+        return self._start.crawl_delay() if self._start else None
+
+
 def discover_pages(
     start_url: str,
     sitemap_xml: str | None,
     robots_txt: str | None,
     max_pages: int = 200,
-    max_depth: int = 3,  # noqa: ARG001 — BFS expansion (depth-aware) happens in run.py
+    max_depth: int = 3,
     blog_cap: int = DEFAULT_BLOG_CAP,
     child_sitemaps: list[str] | None = None,
+    can_fetch=None,
 ) -> list[str]:
     """The sitemap fast path: same-domain, non-skippable, robots-allowed URLs, priority-
     ordered (K1) and capped.
@@ -232,19 +297,25 @@ def discover_pages(
     then expands from there with `discover_links` page by page.
 
     `child_sitemaps` are the already-fetched bodies of the children of a sitemap index
-    (one level, `fetch.fetch_child_sitemaps`); their URLs are added to the main sitemap's.
+    (`fetch.fetch_child_sitemaps`); their URLs are added to the main sitemap's.
+    `can_fetch(url)` (e.g. `HostRobots.can_fetch`) replaces the check against `robots_txt`.
+
+    URLs are normalised like BFS links (`normalize_url` against `start_url`) so one page
+    listed twice is kept once (#189), and a URL whose path is deeper than `max_depth`
+    segments is dropped (#199: depth means link hops on the BFS path, path segments here).
     """
     urls = parse_sitemap(sitemap_xml) if sitemap_xml else []
     for child in child_sitemaps or []:
         urls.extend(parse_sitemap(child))
-    urls = list(dict.fromkeys(urls))
+    urls = list(dict.fromkeys(normalize_url(u, start_url) if same_domain(u, start_url) else u for u in urls))
     if not urls:
         return [start_url]
 
-    urls = [u for u in urls if same_domain(u, start_url) and not is_skippable(u)]
-    if robots_txt:
-        checker = RobotsChecker(robots_txt)
-        urls = [u for u in urls if checker.can_fetch(u)]
+    urls = [u for u in urls if same_domain(u, start_url) and not is_skippable(u) and _path_depth(u) <= max_depth]
+    if can_fetch is None and robots_txt:
+        can_fetch = RobotsChecker(robots_txt).can_fetch
+    if can_fetch is not None:
+        urls = [u for u in urls if can_fetch(u)]
 
     # priority order first (K1), *then* truncate to max_pages -- otherwise a generous
     # max_pages still lets an unbounded blog section crowd out location/service pages

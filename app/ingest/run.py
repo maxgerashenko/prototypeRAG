@@ -11,14 +11,16 @@ location (V22) -> facts (plan 07 §5: only pages whose text changed; merge decid
 winner per fact; then one `kind='fact'` chunk per active fact for retrieval) -> business summary (plan 07 §6, only when its source pages changed).
 `--only summary|facts` re-runs one step for an already-crawled site (`--only facts
 --dry-run [--model ID]` prints what a model extracts and writes nothing: the OPEN-20 audit);
-`--report conflicts` lists facts whose sources disagree. Indexing
-(embedding) is a separate step: `python -m app.rag.index`.
+`--report conflicts` lists facts whose sources disagree. A full crawl (with the profile
+step) ends by embedding the new chunks (#282); `python -m app.rag.index --business-id <id>`
+does the same by hand, e.g. after `--no-profile` or `--only facts`.
 """
 
 import argparse
 import sys
 import time
 import uuid
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -31,13 +33,14 @@ from app.db.models import Business, BusinessProfile, Location, Page
 from app.db.session import SessionLocal
 from app.ingest.chunk import chunk_markdown
 from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
-from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, parse_robots_sitemaps, parse_sitemap_index
+from app.ingest.discover import HostRobots, RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, normalize_url, parse_robots_sitemaps, parse_sitemap_index, same_domain
 from app.ingest.fetch import (
-    RobotsUnavailable, fetch_child_sitemaps, fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client,
+    RobotsUnavailable, fetch_child_sitemaps, FetchedDocument, fetch_document, fetch_robots_txt, fetch_sitemap, make_client,
 )
 from app.ingest.fact_chunks import sync_fact_chunks
 from app.ingest.facts import FactsBackend, extract_page_facts, facts_backend, pages_to_extract
 from app.ingest.identity import domain_of, site_root
+from app.ingest.lock import CrawlInProgress, crawl_lock
 from app.ingest.merge import MergeStats, apply_page_facts, conflicts_report, settle_facts
 from app.ingest.organize import (
     chrome_pseudo_url,
@@ -50,6 +53,7 @@ from app.ingest.organize import (
 from app.ingest.profile import (
     PENDING_NAME,
     extract_profile_from_text,
+    NAME_CONFIRMED,
     is_placeholder_name,
     merge_profile,
     name_from_title,
@@ -57,6 +61,7 @@ from app.ingest.profile import (
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 from app.ingest.summary import summarize_business
 from app.ingest.timezone import assign_timezones
+from app.rag.index import index_business
 from app.voice.greeting_cache import pregenerate as pregenerate_greeting
 
 
@@ -66,6 +71,10 @@ DEFAULT_PDF_CAP = 10
 
 # deletes run only when this crawl fetched at least this share of the stored pages
 MIN_CRAWLED_FRACTION = 0.5
+
+# Longest crawl we start: Crawl-delay x max_pages above this stops the crawl before any
+# page is fetched (#191). Honouring the delay stays the rule; only the wait is bounded.
+MAX_CRAWL_SECONDS = 7200.0
 
 _PROFILE_FIELDS = (
     "name", "address", "phone", "email",
@@ -115,13 +124,20 @@ def resolve_business(url: str, business_id: uuid.UUID | None) -> uuid.UUID:
 
 
 def _expand_by_links(
-    start_url: str, client, robots_checker: RobotsChecker | None, max_pages: int, max_depth: int
-) -> tuple[list[str], dict[str, str]]:
-    """BFS from `start_url` when there's no usable sitemap. One fetch per URL, cached for reuse."""
-    seen = {start_url}
+    start_url: str, client, robots_checker: RobotsChecker | HostRobots | None, max_pages: int, max_depth: int
+) -> tuple[list[str], dict[str, FetchedDocument | None]]:
+    """BFS from `start_url` when there's no usable sitemap. One fetch per URL, through
+    `fetch_document` (so a link serving a PDF is parsed as a PDF, #188), cached for reuse:
+    the value is the document, or None when the fetch failed -- the main loop then does
+    not request it again."""
+    start_key = normalize_url(start_url, start_url)
+    seen = {start_key}
     all_urls = [start_url]
-    fetched: dict[str, str] = {}
+    fetched: dict[str, FetchedDocument | None] = {}
     frontier = [start_url]
+
+    def allow_final(final_url: str) -> bool:
+        return same_domain(final_url, start_url) and (robots_checker is None or robots_checker.can_fetch(final_url))
 
     for _depth in range(max_depth):
         if len(all_urls) >= max_pages or not frontier:
@@ -133,15 +149,18 @@ def _expand_by_links(
             if robots_checker and not robots_checker.can_fetch(url):
                 continue
             try:
-                html = fetch_text(url, client)
+                document = fetch_document(url, client, allow_final=allow_final)
             except Exception as exc:
                 print(f"fetch failed, skipping: {url} ({exc})")
+                fetched[url] = None
                 continue
             finally:
                 # a failed request still hit the server -- the delay applies to it too
                 time.sleep(client._crawl_delay)
-            fetched[url] = html
-            for link in discover_links(html, url):
+            fetched[url] = document
+            if document.html is None:  # a PDF has no links
+                continue
+            for link in discover_links(document.html, document.url or url):
                 # robots check here too, not only before fetching the frontier: every URL in
                 # all_urls is fetched later by crawl_business, so a disallowed link added here
                 # would be fetched anyway (R10)
@@ -214,6 +233,7 @@ def extract_facts(
         pool.submit(extract_page_facts, page, name, locations, location_names.get(page.location_id), model=model, backend=backend): page
         for page in todo
     }
+    settled = False
     try:
         for future in as_completed(futures):
             page = futures[future]
@@ -237,19 +257,35 @@ def extract_facts(
                 if live is None or live.content_hash != page.content_hash:
                     continue  # re-crawled while the model ran; the next run extracts the new text
                 apply_page_facts(session, business_id, live, result.facts, stats)
+        if not dry_run:
+            chunks = _settle(business_id, stats)
+            settled = True
     finally:
         # Ctrl-C or a failed write: drop the queued pages instead of waiting for all of them
         pool.shutdown(wait=False, cancel_futures=True)
-    if not dry_run:
-        with tenant_session(business_id) as session:
-            settle_facts(session, business_id, stats)
-            chunks = sync_fact_chunks(session, business_id)
+        if not dry_run and not settled:
+            # #297: pages already applied above replaced their sources; without a settle
+            # here a fact that just lost its last source would stay active (and keep its
+            # retrievable fact chunk) until some later run. Best effort: the original
+            # error is the one to report, so a failing settle only prints.
+            try:
+                _settle(business_id, stats)
+            except Exception as exc:
+                print(f"facts settle after a failed facts step also failed: {exc}", flush=True)
     return {
         "pages_extracted": stats.pages if not dry_run else len(todo_ids) - failed,
         "facts_seen": stats.facts_seen, "facts_created": stats.created,
         "rejected": rejected, "failed": failed, "by_status": stats.by_status,
         "fact_chunks": None if dry_run else f"+{chunks.created} ~{chunks.updated} -{chunks.deleted}",
     }
+
+
+def _settle(business_id: uuid.UUID, stats: MergeStats | None = None):
+    """Re-decide every fact's status from its current sources and rebuild the fact chunks
+    to match, in one transaction (no LLM, cheap). Returns the fact-chunk stats."""
+    with tenant_session(business_id) as session:
+        settle_facts(session, business_id, stats)
+        return sync_fact_chunks(session, business_id)
 
 
 def _rechunk_page(session, business_id: uuid.UUID, page: Page, business_name: str) -> None:
@@ -283,7 +319,19 @@ def _rechunk_page(session, business_id: uuid.UUID, page: Page, business_name: st
     replace_chunks(session, business_id, page.id, drafts, location_id=page.location_id)
 
 
-def crawl_business(
+def crawl_business(business_id: uuid.UUID, start_url: str, **kwargs) -> dict:
+    """One full crawl (`_crawl_business`) under the business's crawl lock (#196): a second
+    crawl of the same business while one runs is refused with `{"aborted": ...}`, like an
+    unreadable robots.txt, and touches nothing."""
+    try:
+        with crawl_lock(business_id):
+            return _crawl_business(business_id, start_url, **kwargs)
+    except CrawlInProgress as exc:
+        print(f"crawl aborted: {exc}")
+        return {"aborted": str(exc)}
+
+
+def _crawl_business(
     business_id: uuid.UUID,
     start_url: str,
     max_pages: int = 200,
@@ -292,6 +340,7 @@ def crawl_business(
     extract_profile: bool = True,
     pdf_cap: int = DEFAULT_PDF_CAP,
     facts_choice: str | None = None,
+    max_crawl_seconds: float = MAX_CRAWL_SECONDS,
 ) -> dict:
     """One full crawl: discover -> fetch (pages, then up to `pdf_cap` linked PDFs) ->
     clean -> store every page -> organize
@@ -309,28 +358,53 @@ def crawl_business(
             # any stored page, so the business keeps what it had (legal and data safety)
             print(f"crawl aborted, stored data kept: {exc}")
             return {"aborted": str(exc)}
-        robots_checker = RobotsChecker(robots_txt) if robots_txt else None
-        robots_delay = robots_checker.crawl_delay() if robots_checker else None
+        start_checker = RobotsChecker(robots_txt) if robots_txt else None
+        robots_delay = start_checker.crawl_delay() if start_checker else None
         if robots_delay is not None and robots_delay > client._crawl_delay:
             # honour it in full, however long (correctness & legal first): only ever
             # raises our own delay, never lowers it below delay_seconds
             client._crawl_delay = robots_delay
             print(f"robots.txt Crawl-delay: {robots_delay:g} s between requests")
+        # #191: the delay is honoured in full, so a huge one means a crawl of days. Stop
+        # before the sitemap and page requests (each one waits the delay), stored data kept.
+        worst_case = client._crawl_delay * max_pages
+        if worst_case > max_crawl_seconds:
+            reason = (
+                f"robots.txt Crawl-delay {client._crawl_delay:g} s x {max_pages} pages = {worst_case / 3600:.1f} h, "
+                f"over the {max_crawl_seconds / 3600:g} h crawl budget; lower --max-pages, or add the content "
+                f"another way (owner upload)"
+            )
+            print(f"crawl aborted, stored data kept: {reason}")
+            return {"aborted": reason}
+
+
+        def load_host_robots(host_base: str) -> str | None:
+            # another host of the same domain (www vs bare, #194): its own robots.txt, once,
+            # after the crawl delay; an unreadable one raises and HostRobots disallows the host
+            time.sleep(client._crawl_delay)
+            body = fetch_robots_txt(host_base, client)
+            other = RobotsChecker(body).crawl_delay() if body else None
+            if other is not None and other > client._crawl_delay:
+                client._crawl_delay = other
+            return body
+
+        robots_checker = HostRobots(start_url, start_checker, load_host_robots)
         # robots.txt `Sitemap:` lines first, then /sitemap.xml (#136); after the delay is set
         sitemap_xml = fetch_sitemap(
             base_url, client, parse_robots_sitemaps(robots_txt),
-            robots_checker.can_fetch if robots_checker else lambda url: True,
+            robots_checker.can_fetch,
         )
         child_sitemaps: list[str] = []
         children = parse_sitemap_index(sitemap_xml) if sitemap_xml else []
         if children:  # sitemap index (Yoast/WordPress): follow it one level, same delay + robots
             child_sitemaps = fetch_child_sitemaps(
-                children, client, robots_checker.can_fetch if robots_checker else lambda url: True, base_url
+                children, client, robots_checker.can_fetch, base_url
             )
         time.sleep(client._crawl_delay)  # after the robots.txt + sitemap requests
 
         sitemap_urls = discover_pages(
-            start_url, sitemap_xml, robots_txt, max_pages, max_depth, child_sitemaps=child_sitemaps
+            start_url, sitemap_xml, robots_txt, max_pages, max_depth, child_sitemaps=child_sitemaps,
+            can_fetch=robots_checker.can_fetch,
         )
         if len(sitemap_urls) > 1:
             urls_to_crawl, fetched = sitemap_urls, {}
@@ -350,22 +424,32 @@ def crawl_business(
         pages_changed = 0
         all_markdown: list[str] = []
         brand_name: str | None = None  # first og:site_name seen (A3) -- site-wide, so one hit is enough
-        noindex_urls: set[str] = set()  # K1: honoured by organize_business as "not retrievable"
+        noindex_urls: set[str] = set()  # K1: stored on pages.noindex; organize_business makes them "not retrievable"
 
         pdf_urls_seen: set[str] = set()
+        redirected_to: set[str] = set()  # final urls of redirected fetches, kept by the delete step
+
+        def allow_final(final_url: str) -> bool:
+            return same_domain(final_url, start_url) and (robots_checker is None or robots_checker.can_fetch(final_url))
 
         # urls_to_crawl grows while this loop runs: PDFs linked from a page are appended
         # to it (so they're fetched here too, and kept by delete_pages_not_in below)
         for url in urls_to_crawl:
             try:
-                html = fetched.get(url)
-                document = None
-                if html is None:
+                if url in fetched:  # already fetched by the BFS (None = it failed there; not asked again)
+                    document = fetched[url]
+                    if document is None:
+                        continue
+                else:
                     try:
-                        document = fetch_document(url, client)
+                        document = fetch_document(url, client, allow_final=allow_final)
                     finally:
                         time.sleep(client._crawl_delay)
-                    html = document.html
+                html = document.html
+                if document.url and document.url != url:
+                    # stored under the final url (#188); the requested one stays in the keep list
+                    redirected_to.add(document.url)
+                    url = document.url
 
                 if html is None:
                     if not document.pdf_text:
@@ -376,7 +460,7 @@ def crawl_business(
                     title = document.pdf_title
                     cleaned = CleanedPage(main_markdown=document.pdf_text, chrome_markdown="", language=None)
                 else:
-                    if has_noindex(html) or (document is not None and document.noindex):
+                    if has_noindex(html) or document.noindex:
                         noindex_urls.add(url)
                     title = extract_title(html)
                     cleaned = clean_page(html)
@@ -398,6 +482,7 @@ def crawl_business(
                         session, business_id, url, title, cleaned.main_markdown, hash_,
                         chrome_markdown=cleaned.chrome_markdown, language=cleaned.language,
                     )
+                    page.noindex = url in noindex_urls  # #289: this fetch is the latest word
 
                 if changed:
                     pages_changed += 1
@@ -406,23 +491,27 @@ def crawl_business(
             except Exception as exc:
                 print(f"skipping {url}: {exc}")
 
-        # Brand name (A3): a site-wide signal (og:site_name), always kept in sync with
-        # it on every crawl -- unlike BusinessProfile fields, businesses.name has no
-        # owner-confirmation flag to protect, and this is specifically what lets a
-        # re-crawl fix a name set by the old pipeline (e.g. "Bathhouse Williamsburg",
+        # Brand name (A3): a site-wide signal (og:site_name), kept in sync with it on every
+        # crawl until the owner confirms a name (businesses.settings["name_confirmed"]) --
+        # this is what lets a re-crawl fix a name set by the old pipeline (e.g. "Bathhouse Williamsburg",
         # which conflated the brand with its default location) through the normal code
         # path instead of a hand-run SQL UPDATE.
         if brand_name:
             with tenant_session(business_id) as session:
                 business = session.get(Business, business_id)
-                if business is not None and business.name != brand_name:
+                # owner-confirmed is the source of truth (DEC-11, #192): a name the owner saved in
+                # Settings sets settings["name_confirmed"], and a re-crawl leaves it alone
+                if (
+                    business is not None and business.name != brand_name
+                    and not (business.settings or {}).get(NAME_CONFIRMED)
+                ):
                     business.name = brand_name
 
         # Organize (A1/A4, DEC-37/DEC-40): detect locations from site content (never from
         # start_url's path), assign page_type/location/retrievable per page. Must run
         # after every page this crawl touched is stored, and before chunking, since
         # chunking needs to know each page's resolved location.
-        organize_result = organize_business(business_id, start_url, root, frozenset(noindex_urls))
+        organize_result = organize_business(business_id, start_url, root)
 
         with tenant_session(business_id) as session:
             business = session.get(Business, business_id)
@@ -452,8 +541,16 @@ def crawl_business(
         else:
             with tenant_session(business_id) as session:
                 deleted_pages = delete_pages_not_in(
-                    session, business_id, keep_urls=[*urls_to_crawl, chrome_pseudo_url(root)]
+                    session, business_id, keep_urls=[*urls_to_crawl, *redirected_to, chrome_pseudo_url(root)]
                 )
+                if deleted_pages:
+                    # #297: deleting a page cascades to its fact_sources, so a fact only that
+                    # page stated is left with no source but still `active` (and retrieved)
+                    # until a settle. Settle in the same transaction as the delete, not only
+                    # at the end of the facts step: that step may fail (LLM down) or not run
+                    # at all (--no-profile), and then the gone page's facts would stay live.
+                    settle_facts(session, business_id)
+                    sync_fact_chunks(session, business_id)
 
         profile_extracted = False
         with tenant_session(business_id) as session:
@@ -507,6 +604,17 @@ def crawl_business(
             except Exception as exc:
                 print(f"facts failed: {exc}")
 
+        # #282: embed the new and changed page and fact chunks, so vector search finds them
+        # without a hand-run `python -m app.rag.index`. Needs the embedding model like the
+        # profile and facts do, hence the same extract_profile gate; a failure only costs
+        # vector search until the indexer is run again (keyword search works regardless).
+        indexing = None
+        if extract_profile:
+            try:
+                indexing = index_business(business_id)
+            except Exception as exc:
+                print(f"indexing failed (run python -m app.rag.index --business-id {business_id}): {exc}")
+
         # plan 07 §6: last, after organize stored the testimonials it reads
         summary_status = "skipped"
         if extract_profile:
@@ -536,6 +644,7 @@ def crawl_business(
             "profile_extracted": profile_extracted,
             "timezones_set": timezones_set,
             "facts": facts_summary,
+            "indexing": indexing,
             "summary": summary_status,
             "greeting_audio": greeting_status,
         }
@@ -565,15 +674,24 @@ def main() -> None:
             lines = conflicts_report(session, business_id)
         print("\n".join(lines) or "no conflicts")
         return
-    if args.only == "summary":
-        print(f"summary: {summarize_business(business_id, force=args.force)}")
-        return
-    if args.only == "facts":
-        for key, value in extract_facts(
-            business_id, force=args.force, model=args.model, dry_run=args.dry_run, verbose=True,
-            choice=args.facts_model,
-        ).items():
-            print(f"{key}: {value}")
+    if args.only:
+        # same lock as a crawl (#196): these steps write the facts/summary a crawl rewrites;
+        # a dry run writes nothing, so it may run beside a crawl
+        lock = nullcontext() if args.only == "facts" and args.dry_run else crawl_lock(business_id)
+        try:
+            with lock:
+                if args.only == "summary":
+                    print(f"summary: {summarize_business(business_id, force=args.force)}")
+                else:
+                    for key, value in extract_facts(
+                        business_id, force=args.force, model=args.model, dry_run=args.dry_run, verbose=True,
+                        choice=args.facts_model,
+                    ).items():
+                        print(f"{key}: {value}")
+                    if not args.dry_run:
+                        print(f"indexing: {index_business(business_id)}")
+        except CrawlInProgress as exc:
+            raise SystemExit(str(exc)) from None
         return
 
     summary = crawl_business(

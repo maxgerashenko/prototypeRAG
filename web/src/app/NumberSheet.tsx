@@ -36,7 +36,7 @@ export function NumberSheet({ bizId, currentNumber, numbers, assigning, error, o
         <div className="sheet-head">
           <div>
             <h2>Choose a number</h2>
-            <p>Numbers in your Twilio account</p>
+            <p>Numbers in your Twilio account. A business has one number: picking one replaces its current number.</p>
           </div>
         </div>
         <label className="sheet-filter">

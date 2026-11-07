@@ -9,7 +9,7 @@ from app.db.models import BusinessProfile, BusinessSummary
 from app.llm import get_chat_client
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import build_prompt
-from app.rag.retrieve import RetrievedChunk, retrieve
+from app.rag.retrieve import RetrievedChunk, embed_query, retrieve
 from app.voice.tools import enabled_tool_names, run_tool, tools_for
 
 MAX_TOOL_ROUNDS = 3  # LLM → tool → LLM ... before giving up on a turn (same cap as voice)
@@ -25,7 +25,8 @@ class AnswerResult:
 
 
 def prepare_prompt(
-    business_id: uuid.UUID, question: str, history: list[dict] | None = None, top_n: int = 5
+    business_id: uuid.UUID, question: str, history: list[dict] | None = None, top_n: int = 5,
+    retrieval: str = "hybrid",
 ) -> tuple[BusinessProfile | None, list[RetrievedChunk], list[dict]]:
     """Retrieve and build the prompt, without calling the LLM.
 
@@ -33,11 +34,15 @@ def prepare_prompt(
     model gets. The DB transaction closes here — it isn't held open during generation.
     """
     enabled = enabled_tool_names(business_id)
+    query_embedding = embed_query(question)  # before the session opens: no connection held while embedding
     with tenant_session(business_id) as session:
         profile = session.get(BusinessProfile, business_id)
         summary = session.get(BusinessSummary, business_id)
         location_id = default_location_id(session, business_id)  # DEC-49
-        chunks = retrieve(session, business_id, question, top_n, location_id=location_id)
+        chunks = retrieve(
+            session, business_id, question, top_n, location_id=location_id, query_embedding=query_embedding,
+            mode=retrieval,
+        )
         messages = build_prompt(
             profile, chunks, history or [], question, summary,
             locations=format_locations(session, business_id, location_id), enabled_tools=enabled,
@@ -68,25 +73,28 @@ def _run_calls(business_id: uuid.UUID, conversation_id: uuid.UUID | None, calls:
 
 def answer_question(
     business_id: uuid.UUID, question: str, history: list[dict] | None = None, top_n: int = 5,
-    conversation_id: uuid.UUID | None = None,
+    conversation_id: uuid.UUID | None = None, retrieval: str = "hybrid",
 ) -> AnswerResult:
     """Non-streaming: retrieve, build the prompt, then LLM → tools → LLM until the model
-    answers in text (at most MAX_TOOL_ROUNDS rounds)."""
-    profile, chunks, messages = prepare_prompt(business_id, question, history, top_n)
+    answers in text (at most MAX_TOOL_ROUNDS rounds). `retrieval` is for the eval only."""
+    profile, chunks, messages = prepare_prompt(business_id, question, history, top_n, retrieval)
     prompt = list(messages)  # `messages` grows with tool turns; the debug view shows the prompt as sent first
     settings = get_settings()
     client = get_chat_client()
     tools = tools_for(business_id)  # #151: bookings only for businesses that enabled them
     answer = GIVE_UP_ANSWER
-    for _ in range(MAX_TOOL_ROUNDS):
+    for round_no in range(MAX_TOOL_ROUNDS + 1):
+        # #234: the last round has no tools, so work done in earlier rounds still gets told
         response = client.chat.completions.create(
-            model=settings.llm_model, messages=messages, tools=tools,
+            model=settings.llm_model, messages=messages, **({} if round_no == MAX_TOOL_ROUNDS else {"tools": tools}),
             reasoning_effort=settings.chat_reasoning_effort,
         )
         message = response.choices[0].message
         if not message.tool_calls:
             answer = message.content or ""  # NOT NULL column downstream
             break
+        if round_no == MAX_TOOL_ROUNDS:
+            break  # no tools were offered; don't run calls the model made anyway
         calls = [
             {"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments}
             for tc in message.tool_calls
@@ -107,9 +115,10 @@ def stream_answer(
     settings = get_settings()
     client = get_chat_client()
     tools = tools_for(business_id)
-    for _ in range(MAX_TOOL_ROUNDS):
+    for round_no in range(MAX_TOOL_ROUNDS + 1):
         stream = client.chat.completions.create(
-            model=settings.llm_model, messages=messages, tools=tools, stream=True,
+            model=settings.llm_model, messages=messages, stream=True,
+            **({} if round_no == MAX_TOOL_ROUNDS else {"tools": tools}),
             reasoning_effort=settings.chat_reasoning_effort,
         )
         text = ""
@@ -131,6 +140,8 @@ def stream_answer(
                 yield delta.content
         if not calls:
             return
+        if round_no == MAX_TOOL_ROUNDS:
+            break
         ordered = [calls[i] for i in sorted(calls)]
         messages.append(_tool_call_message(text, ordered))
         messages.extend(_run_calls(business_id, conversation_id, ordered))
