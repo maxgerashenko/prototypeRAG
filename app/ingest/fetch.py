@@ -6,6 +6,8 @@ import io
 import math
 import re
 import time
+import xml.etree.ElementTree as ET
+import zlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from collections.abc import Callable, Iterator
@@ -16,7 +18,7 @@ import httpx
 from pypdf import PdfReader
 
 from app.config import get_settings
-from app.ingest.discover import BOT_TOKEN, same_domain
+from app.ingest.discover import BOT_TOKEN, parse_sitemap_index, same_domain
 
 USER_AGENT = f"{BOT_TOKEN}/0.1 (+{get_settings().crawler_contact_url}; learning project, see robots.txt)"
 # httpx's default `Accept: */*` gets a 403 from some bot rules (bhbarbershop.com, #121); send
@@ -165,34 +167,75 @@ def fetch_robots_txt(base_url: str, client: httpx.Client) -> str | None:
         raise RobotsUnavailable(f"robots.txt {type(exc).__name__}") from exc
 
 
+# the sitemap protocol's own limit per file; also the cap on what a .gz may inflate to
+MAX_SITEMAP_BYTES = 50_000_000
+_SITEMAP_ROOTS = ("urlset", "sitemapindex")
+
+
+def _gunzip_capped(body: bytes) -> bytes | None:
+    """Inflate a gzip body, None when it is corrupt or inflates past MAX_SITEMAP_BYTES
+    (a small .gz can expand enormously)."""
+    decoder = zlib.decompressobj(wbits=31)
+    try:
+        out = decoder.decompress(body, MAX_SITEMAP_BYTES + 1)
+    except zlib.error:
+        return None
+    return None if len(out) > MAX_SITEMAP_BYTES else out
+
+
+def _fetch_sitemap_body(url: str, client: httpx.Client) -> str | None:
+    """One sitemap's XML text, or None when the request fails, is not 200, or the body is
+    not a sitemap (`<urlset>` / `<sitemapindex>`; a soft-404 HTML page or login wall is not).
+    Gzip is detected by its magic bytes, not the `.gz` name or Content-Type: a server may
+    already have inflated a .xml.gz (Content-Encoding) or serve plain XML under that name."""
+    try:
+        with _get(url, client, 15.0) as response:
+            if response.status_code != 200:
+                return None
+            body = response.read()
+    except httpx.HTTPError:
+        return None
+    if body[:2] == b"\x1f\x8b":
+        body = _gunzip_capped(body)
+        if body is None:
+            return None
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return None
+    if root.tag.rsplit("}", 1)[-1] not in _SITEMAP_ROOTS:
+        return None
+    return body.decode("utf-8", errors="replace")
+
+
 def fetch_sitemap(
     base_url: str,
     client: httpx.Client,
     declared_urls: list[str] | None = None,
     can_fetch: Callable[[str], bool] = lambda url: True,
 ) -> str | None:
-    """The first sitemap that answers 200: the `Sitemap:` URLs declared in robots.txt
-    (`declared_urls`; same domain as `base_url` and allowed by `can_fetch` only, each
-    request preceded by the crawl delay), then `<scheme>://<netloc>/sitemap.xml`.
-    None when none works -- never raises."""
+    """The first valid sitemap: the `Sitemap:` URLs declared in robots.txt (`declared_urls`;
+    same domain as `base_url` and allowed by `can_fetch` only, each request preceded by the
+    crawl delay), then `<scheme>://<netloc>/sitemap.xml`. Requests retry like pages do; a
+    candidate that is not a sitemap (HTML, junk) is passed over for the next one. The text
+    is returned decoded (gzip inflated). None when none works -- never raises."""
     parsed = urlparse(base_url)
     default = f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
     candidates = [u for u in (declared_urls or []) if u != default and same_domain(u, base_url) and can_fetch(u)]
     for i, url in enumerate(candidates + [default]):
         if i:
             time.sleep(client._crawl_delay)
-        try:
-            response = client.get(url, headers=REQUEST_HEADERS)
-        except httpx.HTTPError:
-            continue
-        if response.status_code == 200:
-            return response.text
+        body = _fetch_sitemap_body(url, client)
+        if body is not None:
+            return body
     return None
 
 
-# a big WordPress site lists a dozen or so child sitemaps; more than this is not a small
-# business's site and would cost a crawl-delay each
+# a big WordPress site lists a dozen or so child sitemaps; more than this in total (over all
+# nesting levels) is not a small business's site and would cost a crawl-delay each
 MAX_CHILD_SITEMAPS = 20
+# the top-level index is depth 0; its children 1, theirs 2 -- deeper indexes are not followed
+MAX_SITEMAP_DEPTH = 2
 
 
 def fetch_child_sitemaps(
@@ -201,21 +244,34 @@ def fetch_child_sitemaps(
     can_fetch: Callable[[str], bool] = lambda url: True,
     base_url: str | None = None,
 ) -> list[str]:
-    """Bodies of the child sitemaps of a sitemap index, one level only (a child that is
-    itself an index is not followed). Each fetch waits the crawl delay first and skips
-    URLs robots.txt disallows (`can_fetch`) or, when `base_url` is given, on another
-    domain. A failed child is skipped -- never raises."""
+    """Bodies of the URL sitemaps under a sitemap index. A child that is itself an index is
+    followed down to MAX_SITEMAP_DEPTH levels; at most MAX_CHILD_SITEMAPS sitemaps are
+    fetched in all, each URL once (an index listing itself is no loop). Each fetch waits the
+    crawl delay first and skips URLs robots.txt disallows (`can_fetch`) or, when `base_url`
+    is given, on another domain. A failed or non-sitemap child is skipped -- never raises."""
     bodies: list[str] = []
-    for url in child_urls[:MAX_CHILD_SITEMAPS]:
-        if not can_fetch(url) or (base_url and not same_domain(url, base_url)):
-            continue
-        time.sleep(client._crawl_delay)
-        try:
-            response = client.get(url, headers=REQUEST_HEADERS)
-        except httpx.HTTPError:
-            continue
-        if response.status_code == 200:
-            bodies.append(response.text)
+    visited: set[str] = set()
+    fetched = 0
+    level = list(child_urls)
+    for _depth in range(MAX_SITEMAP_DEPTH):
+        next_level: list[str] = []
+        for url in level:
+            if fetched >= MAX_CHILD_SITEMAPS:
+                return bodies
+            if url in visited or not can_fetch(url) or (base_url and not same_domain(url, base_url)):
+                continue
+            visited.add(url)
+            time.sleep(client._crawl_delay)
+            fetched += 1
+            body = _fetch_sitemap_body(url, client)
+            if body is None:
+                continue
+            nested = parse_sitemap_index(body)
+            if nested:
+                next_level.extend(nested)
+            else:
+                bodies.append(body)
+        level = next_level
     return bodies
 
 
