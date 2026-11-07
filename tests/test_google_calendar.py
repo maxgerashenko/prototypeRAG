@@ -7,18 +7,24 @@ check with a real service account is on the "Test on Mac" list (plan/03-voice-ch
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import delete, select
+from sqlalchemy.exc import OperationalError
 
+from app.actions.booking import google_calendar as GC
 from app.actions.booking import rules as R
+from app.actions.booking import session_events as G
+from app.actions.booking import sessions as S
 from app.actions.booking.google_calendar import GoogleCalendarBackend, event_id_for
 from app.actions.booking.google_client import CalendarError, EventExists, GoogleCalendarClient
 from app.actions.booking.internal import BookingRequest
 from app.actions.booking.mirror import BusyEvent
 from app.db import tenant_session
-from app.db.models import Booking, BookingRule, Business, Conversation
+from app.config import get_settings
+from app.db.models import Booking, BookingRule, Business, Conversation, GroupSession
 
 NOW = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
 NY = "America/New_York"
@@ -33,6 +39,8 @@ class FakeCalendar:
         self.fail: set[str] = set()
         self.calls: list[str] = []
         self.timeout_after_insert = 0  # inserts that reach Google but whose answer is lost
+        self.timeout_after_delete = 0  # deletes that reach Google but whose answer is lost
+        self.insert_delay = 0.0  # widens a check-then-insert window so a missing lock shows
 
     def _check(self, op):
         self.calls.append(op)
@@ -49,6 +57,7 @@ class FakeCalendar:
         self._check("insert")
         assert calendar_id == CAL
         eid = body.get("id") or f"ev{len(self.events) + 1}"
+        time.sleep(self.insert_delay)
         if eid in self.events:
             raise EventExists(f"{eid} exists")  # Google's 409
         self.events[eid] = body
@@ -59,7 +68,10 @@ class FakeCalendar:
 
     def delete_event(self, calendar_id, event_id):
         self._check("delete")
-        self.events.pop(event_id, None)
+        self.events.pop(event_id, None)  # like Google: an event that is already gone is fine (404/410)
+        if self.timeout_after_delete:
+            self.timeout_after_delete -= 1
+            raise CalendarError("delete timed out")
 
 
 class FakeMirror:
@@ -324,7 +336,77 @@ def test_cancel_keeps_the_booking_if_google_cannot_delete(backend, cal, business
     ref = backend.create(business_id, _req(), NOW).reference
     cal.fail = {"delete"}
     assert backend.cancel(business_id, ref, "+15550100100", NOW).startswith("Error")
-    assert _row(business_id).status == "confirmed" and len(cal.events) == 1
+    # the cancel was committed first, then reopened when both delete tries failed (#266)
+    assert cal.calls.count("delete") == 2
+    row = _row(business_id)
+    assert row.status == "confirmed" and row.cancelled_at is None and len(cal.events) == 1
+    cal.fail = set()
+    assert backend.cancel(business_id, ref, "+15550100100", NOW).startswith("Cancelled")  # can be retried
+
+
+def test_cancel_whose_commit_fails_never_touches_google(backend, cal, business_id, monkeypatch):
+    """#266: the old order deleted the event, then the commit failed -> confirmed booking, no event."""
+    ref = backend.create(business_id, _req(), NOW).reference
+    real = GC.tenant_session
+
+    @contextmanager
+    def commit_fails(bid):
+        with real(bid) as s:
+            yield s
+            if any(isinstance(o, Booking) for o in s.dirty):  # only the cancel's own transaction
+                raise OperationalError("COMMIT", {}, Exception("connection lost"))  # rolls back
+
+    monkeypatch.setattr(GC, "tenant_session", commit_fails)
+    with pytest.raises(OperationalError):
+        backend.cancel(business_id, ref, "+15550100100", NOW)
+    assert "delete" not in cal.calls and len(cal.events) == 1
+    assert _row(business_id).status == "confirmed"  # still confirmed, and its event is still there
+
+
+def test_cancel_retry_after_a_lost_delete_answer(backend, cal, business_id):
+    ref = backend.create(business_id, _req(), NOW).reference
+    cal.timeout_after_delete = 1  # Google deleted it, the answer was lost; the retry sees "gone" (404/410)
+    assert backend.cancel(business_id, ref, "+15550100100", NOW).startswith("Cancelled")
+    assert cal.calls.count("delete") == 2 and cal.events == {} and _row(business_id).status == "cancelled"
+
+
+def test_session_and_booking_for_one_hour_share_the_calendar_lock(cal, business_id, monkeypatch):
+    """#271: in Google mode a session and a 1:1 booking for the same hour queue on one lock, so
+    only one of them is made (before, sessions locked per business and both could pass)."""
+    G.set_client(cal)
+    monkeypatch.setattr(get_settings(), "google_calendar_id", CAL)
+    try:
+        assert S.booking_lock_key(business_id) == CAL
+        mirror = FakeMirror(cal)
+        mirror.delay = 0.1  # the booking's busy check goes stale
+        cal.insert_delay = 0.1  # and so does the session's overlap check
+        backend = GoogleCalendarBackend(cal, CAL, mirror)
+        go = threading.Barrier(2)
+        out = {}
+
+        def book():
+            go.wait()
+            out["booking"] = backend.create(business_id, _req(), NOW).ok
+
+        def session():
+            go.wait()
+            try:
+                S.create_session(business_id, "2026-11-05", 14, "Yoga", 4, now=NOW)
+                out["session"] = True
+            except S.SessionError as exc:
+                assert exc.status == 409
+                out["session"] = False
+
+        threads = [threading.Thread(target=book), threading.Thread(target=session)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        assert sorted(out.values()) == [False, True] and len(cal.events) == 1
+        with tenant_session(business_id) as s:
+            sessions = s.scalars(select(GroupSession).where(GroupSession.business_id == business_id)).all()
+            bookings = s.scalars(select(Booking).where(Booking.business_id == business_id)).all()
+        assert len(sessions) + len(bookings) == 1
+    finally:
+        G.set_client(None)
 
 
 # ---- wire format of the real client (fake HTTP session) --------------------------------
