@@ -11,8 +11,9 @@ location (V22) -> facts (plan 07 §5: only pages whose text changed; merge decid
 winner per fact; then one `kind='fact'` chunk per active fact for retrieval) -> business summary (plan 07 §6, only when its source pages changed).
 `--only summary|facts` re-runs one step for an already-crawled site (`--only facts
 --dry-run [--model ID]` prints what a model extracts and writes nothing: the OPEN-20 audit);
-`--report conflicts` lists facts whose sources disagree. Indexing
-(embedding) is a separate step: `python -m app.rag.index`.
+`--report conflicts` lists facts whose sources disagree. A full crawl (with the profile
+step) ends by embedding the new chunks (#282); `python -m app.rag.index --business-id <id>`
+does the same by hand, e.g. after `--no-profile` or `--only facts`.
 """
 
 import argparse
@@ -52,6 +53,7 @@ from app.ingest.organize import (
 from app.ingest.profile import (
     PENDING_NAME,
     extract_profile_from_text,
+    NAME_CONFIRMED,
     is_placeholder_name,
     merge_profile,
     name_from_title,
@@ -59,6 +61,7 @@ from app.ingest.profile import (
 from app.ingest.store import delete_pages_not_in, replace_chunks, upsert_page
 from app.ingest.summary import summarize_business
 from app.ingest.timezone import assign_timezones
+from app.rag.index import index_business
 from app.voice.greeting_cache import pregenerate as pregenerate_greeting
 
 
@@ -421,7 +424,7 @@ def _crawl_business(
         pages_changed = 0
         all_markdown: list[str] = []
         brand_name: str | None = None  # first og:site_name seen (A3) -- site-wide, so one hit is enough
-        noindex_urls: set[str] = set()  # K1: honoured by organize_business as "not retrievable"
+        noindex_urls: set[str] = set()  # K1: stored on pages.noindex; organize_business makes them "not retrievable"
 
         pdf_urls_seen: set[str] = set()
         redirected_to: set[str] = set()  # final urls of redirected fetches, kept by the delete step
@@ -479,6 +482,7 @@ def _crawl_business(
                         session, business_id, url, title, cleaned.main_markdown, hash_,
                         chrome_markdown=cleaned.chrome_markdown, language=cleaned.language,
                     )
+                    page.noindex = url in noindex_urls  # #289: this fetch is the latest word
 
                 if changed:
                     pages_changed += 1
@@ -487,23 +491,27 @@ def _crawl_business(
             except Exception as exc:
                 print(f"skipping {url}: {exc}")
 
-        # Brand name (A3): a site-wide signal (og:site_name), always kept in sync with
-        # it on every crawl -- unlike BusinessProfile fields, businesses.name has no
-        # owner-confirmation flag to protect, and this is specifically what lets a
-        # re-crawl fix a name set by the old pipeline (e.g. "Bathhouse Williamsburg",
+        # Brand name (A3): a site-wide signal (og:site_name), kept in sync with it on every
+        # crawl until the owner confirms a name (businesses.settings["name_confirmed"]) --
+        # this is what lets a re-crawl fix a name set by the old pipeline (e.g. "Bathhouse Williamsburg",
         # which conflated the brand with its default location) through the normal code
         # path instead of a hand-run SQL UPDATE.
         if brand_name:
             with tenant_session(business_id) as session:
                 business = session.get(Business, business_id)
-                if business is not None and business.name != brand_name:
+                # owner-confirmed is the source of truth (DEC-11, #192): a name the owner saved in
+                # Settings sets settings["name_confirmed"], and a re-crawl leaves it alone
+                if (
+                    business is not None and business.name != brand_name
+                    and not (business.settings or {}).get(NAME_CONFIRMED)
+                ):
                     business.name = brand_name
 
         # Organize (A1/A4, DEC-37/DEC-40): detect locations from site content (never from
         # start_url's path), assign page_type/location/retrievable per page. Must run
         # after every page this crawl touched is stored, and before chunking, since
         # chunking needs to know each page's resolved location.
-        organize_result = organize_business(business_id, start_url, root, frozenset(noindex_urls))
+        organize_result = organize_business(business_id, start_url, root)
 
         with tenant_session(business_id) as session:
             business = session.get(Business, business_id)
@@ -596,6 +604,17 @@ def _crawl_business(
             except Exception as exc:
                 print(f"facts failed: {exc}")
 
+        # #282: embed the new and changed page and fact chunks, so vector search finds them
+        # without a hand-run `python -m app.rag.index`. Needs the embedding model like the
+        # profile and facts do, hence the same extract_profile gate; a failure only costs
+        # vector search until the indexer is run again (keyword search works regardless).
+        indexing = None
+        if extract_profile:
+            try:
+                indexing = index_business(business_id)
+            except Exception as exc:
+                print(f"indexing failed (run python -m app.rag.index --business-id {business_id}): {exc}")
+
         # plan 07 §6: last, after organize stored the testimonials it reads
         summary_status = "skipped"
         if extract_profile:
@@ -625,6 +644,7 @@ def _crawl_business(
             "profile_extracted": profile_extracted,
             "timezones_set": timezones_set,
             "facts": facts_summary,
+            "indexing": indexing,
             "summary": summary_status,
             "greeting_audio": greeting_status,
         }
@@ -668,6 +688,8 @@ def main() -> None:
                         choice=args.facts_model,
                     ).items():
                         print(f"{key}: {value}")
+                    if not args.dry_run:
+                        print(f"indexing: {index_business(business_id)}")
         except CrawlInProgress as exc:
             raise SystemExit(str(exc)) from None
         return

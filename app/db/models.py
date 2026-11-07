@@ -90,7 +90,9 @@ class BusinessProfile(Base):
     address: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
     email: Mapped[str | None] = mapped_column(Text)
-    opening_hours: Mapped[dict | None] = mapped_column(JSONB)
+    # free text as the website states it (#295): the LLM extraction yields a string, the prompt
+    # prints it as is, and booking rules never read it -- nothing needs it structured
+    opening_hours: Mapped[str | None] = mapped_column(Text)
     booking_policy: Mapped[str | None] = mapped_column(Text)
     price_range: Mapped[str | None] = mapped_column(Text)
     languages: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
@@ -168,6 +170,9 @@ class Page(Base):
     retrievable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     duplicate_of: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # robots noindex seen on the last fetch (#289). Stored so organize can keep the page
+    # non-retrievable on runs that don't re-fetch it.
+    noindex: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     organized_hash: Mapped[str | None] = mapped_column(Text)
     extracted_hash: Mapped[str | None] = mapped_column(Text)
     extractor_version: Mapped[str | None] = mapped_column(Text)

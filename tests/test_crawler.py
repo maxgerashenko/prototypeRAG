@@ -1124,6 +1124,61 @@ def test_chunk_markdown_numbers_chunks_continuously_across_sections():
         ("A", "first body", 0), ("B", "second body", 1)]
 
 
+# --- #289: noindex is stored on the page, #192: owner-confirmed name -------------------
+
+
+def test_noindex_page_stays_non_retrievable_on_a_run_that_does_not_refetch_it():
+    url = "https://noindex-store.example.com/secret"
+    bid = run.resolve_business("https://noindex-store.example.com/", None)
+    try:
+        with tenant_session(bid) as s:
+            s.add(Page(business_id=bid, url=url, title="Secret", markdown="# Secret offer", content_hash="h1", noindex=True))
+        organize.organize_business(bid, url, "https://noindex-store.example.com/")
+        with tenant_session(bid) as s:
+            assert s.scalar(select(Page.retrievable).where(Page.business_id == bid, Page.url == url)) is False
+        # a second run with the stored flag only (nothing re-fetched) changes nothing
+        assert organize.organize_business(bid, url, "https://noindex-store.example.com/").organized_page_ids == []
+        # the page loses its noindex on a later fetch: it is organized again and becomes retrievable
+        with tenant_session(bid) as s:
+            s.scalars(select(Page).where(Page.business_id == bid, Page.url == url)).one().noindex = False
+        organize.organize_business(bid, url, "https://noindex-store.example.com/")
+        with tenant_session(bid) as s:
+            assert s.scalar(select(Page.retrievable).where(Page.business_id == bid, Page.url == url)) is True
+    finally:
+        _cleanup_business(bid)
+
+
+def test_recrawl_keeps_an_owner_confirmed_business_name(homepage_html: str, robots_txt: str, monkeypatch):
+    site = _fake_site(homepage_html, robots_txt)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=_sitemap(["williamsburg"]))
+        body = site.get(request.url.path)
+        return httpx.Response(200, text=body) if body is not None else httpx.Response(404)
+
+    def fake_client(delay_seconds: float = 0.5) -> httpx.Client:
+        client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+        client._crawl_delay = 0
+        return client
+
+    monkeypatch.setattr(run, "make_client", fake_client)
+    start_url = f"{E2E_ROOT}williamsburg"
+    bid = run.resolve_business(start_url, None)
+    try:
+        run.crawl_business(bid, start_url, extract_profile=False)
+        with tenant_session(bid) as s:
+            assert s.get(Business, bid).name == "Bathhouse"  # crawler-set from og:site_name
+            business = s.get(Business, bid)
+            business.name = "Bathhouse Brooklyn"
+            business.settings = {**business.settings, "name_confirmed": True}
+        run.crawl_business(bid, start_url, extract_profile=False)
+        with tenant_session(bid) as s:
+            assert s.get(Business, bid).name == "Bathhouse Brooklyn"
+    finally:
+        _cleanup_business(bid)
+
+
 # --- sitemap edge cases (#193) and per-host robots.txt (#194) ---
 
 import gzip  # noqa: E402
