@@ -111,7 +111,7 @@ def safe_error(exc: Exception) -> str:
 @router.get("/twilio/numbers")
 def list_numbers() -> dict:
     """The account's numbers with the business holding each. Reads across tenants like
-    app/api/businesses.py (needs an RLS-exempt path in stage 3). Twilio errors come back
+    app/api/businesses.py (needs an RLS-exempt path in stage 2). Twilio errors come back
     as `error` so the picker can show them."""
     try:
         numbers = account_numbers()

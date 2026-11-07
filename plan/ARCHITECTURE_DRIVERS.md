@@ -236,7 +236,7 @@ Status: **Accepted** = deviation is in the plan · **Watch** = acceptable now, r
   - Tests assert that business A can never read business B's rows.
 - Breaks: D4 slightly (roles + policies), but removes a whole class of data-leak bugs.
 - Status: **Accepted** — `business_id` + `tenant_session` from stage 1; RLS enforced in
-  stage 3 before the second business.
+  stage 2 before the second business.
 
 **R19 — Cloud Run limits for calls**
 - Why unavoidable: max request timeout 60 min; each call holds a WebSocket; with

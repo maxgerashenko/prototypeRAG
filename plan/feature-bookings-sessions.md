@@ -60,7 +60,7 @@ moving a session's time in edit.
 
 - `sessions`: `id, business_id, starts_at, ends_at` (timestamptz UTC), `name`, `max_attendees`, `status` (`active|cancelled`), `created_at, updated_at, cancelled_at`; checks: `ends_at = starts_at + 1 hour`, name 1–60 chars, max 1–50; `UNIQUE(business_id, id)`; partial unique `(business_id, starts_at) WHERE status='active'`.
 - `bookings.session_id` NULL + composite FK `(business_id, session_id)` (NO ACTION); type check adds `'session'`.
-- No RLS yet (stage 3), every query via `tenant_session`. Write routes are unauthenticated like the others (OPEN-19).
+- No RLS yet (stage 2), every query via `tenant_session`. Write routes are unauthenticated like the others (OPEN-19).
 - Server validates: request carries local `date` + `hour`; DST gap → 422; create needs `starts_at > now`; edit/delete/remove need `ends_at > now`; same hour → 409; overlapping 1:1 booking → 409; max below booked → 422. Create takes the same advisory lock as `InternalBackend.create`.
 - Delete = soft (`status='cancelled'`), cancels the session's confirmed bookings in the same transaction, returns the count; then texts each affected caller with a phone. Remove attendee = cancel that booking + text that caller.
 - `sessions[]` in the GET: `{id,date,start_min,end_min,name,max_attendees,booked,attendees:[{id,name,phone,by_assistant}]}`.

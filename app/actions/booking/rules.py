@@ -9,10 +9,13 @@ wall-clock times in the business timezone; they are stored in UTC (plan/04-actio
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MAX_ALTERNATIVES = 3
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -35,7 +38,9 @@ def local_start(rules: Rules, day: str, at: str) -> datetime:
     try:
         tz = ZoneInfo(rules.timezone)
     except (ZoneInfoNotFoundError, ValueError):
-        tz = ZoneInfo("UTC")
+        # #273: booking at UTC would shift the time by hours -- refuse instead
+        log.error("bad business timezone %r: refusing to book", rules.timezone)
+        raise ValueError("this business's timezone is not set up correctly, so bookings are unavailable") from None
     try:
         d = date.fromisoformat(day.strip())
     except (ValueError, AttributeError):

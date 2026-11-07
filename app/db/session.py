@@ -1,7 +1,7 @@
 """Engine and the `tenant_session` helper — every tenant query runs through it.
 
-Stage 1–2: one DB role, isolation by `WHERE business_id = ...` in queries.
-Stage 3: RLS policies read `app.business_id`, so the same code becomes DB-enforced.
+Stage 1: one DB role, isolation by `WHERE business_id = ...` in queries.
+Stage 2: RLS policies read `app.business_id`, so the same code becomes DB-enforced.
 """
 
 import uuid

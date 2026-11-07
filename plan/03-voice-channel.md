@@ -349,6 +349,13 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **Voice stack comparison (`scripts/bench_voice.py`)**: `uv run python scripts/bench_voice.py --list`, then e.g.
+  `--stt google faster-whisper:small --tts google` (needs ADC; `uv pip install faster-whisper`). Add Parakeet TDT, Qwen3-TTS,
+  Piper or Fish Audio as `cmd:` templates (see the script header). Record real phone audio from a Twilio test call as
+  `tests/fixtures/voice_bench/<name>.wav` + `<name>.txt` (reference words) — the committed fixture has no reference text, so it is timed only.
+  Compare WER, p50/max seconds, RTF and approx. cost; TTS first-audio latency while streaming needs a live call. Write the result under V27 and OPEN-08
+- [ ] **Voice SDK token refresh (#213)**: open `/web/call.html` on localhost, press Call and hang up, then leave the page open for over an hour (the token TTL is 3600 s). The log shows "Voice token refreshed." around the 59-minute mark; press Call again — it connects with no "Device error" (20104). For a quick check, temporarily set a short TTL in the `/twilio/token` route.
+
 - [ ] **Pre-generated greeting (V6, #74)**: `uv run alembic upgrade head`, then `uv run python -m app.voice.greeting_cache
   --business-id <pilot id>` (prints `generated: 2`; again → `0`). Call from `/web/` and the phone: the greeting
   starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
@@ -381,6 +388,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
 - [ ] **No audio after `clear` (V15, #240)**: on a real phone call and in `voice-debug.html` (VAD), barge in
   many times quickly, including during the working-sound ticks of a search: playback stops at once every time,
   no word or tick of the cut reply is heard after it stops, and the next answer still plays in full
+- [ ] **Race-safe number moves (#237)**: the cloud box ran the new tests against a throwaway Postgres 16 that
+  had only the non-vector tables. On the Mac, with the real dev DB, run `uv run pytest -q tests/test_business_settings.py -k number`
+  (all pass, no deadlock error). Then in Settings move a number between two businesses a few times quickly and
+  check `SELECT id, phone_numbers FROM businesses WHERE '+1…' = ANY(phone_numbers)` returns exactly one row
 - [ ] **Twilio playback marks (#76, V11/V26)**: on a real call (Voice SDK or phone), interrupt the bot
   right as a sentence ends and again just after it stops — no false barge-in, first word not swallowed
 - [ ] **Tests that need LM Studio's embedding model (coverage audit 2026-11-01)**: the cloud box has no

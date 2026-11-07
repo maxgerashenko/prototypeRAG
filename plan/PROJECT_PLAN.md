@@ -72,7 +72,7 @@ Pipeline:
    per-page atomic **facts** with source quotes, and a short business summary from
    testimonials/marketing — [07-knowledge-quality.md](07-knowledge-quality.md).
 6. **Store + embed** — pages, profile and chunks in Postgres with `business_id`
-   (isolation by `tenant_session` now, Row-Level Security from stage 3); the indexer embeds chunks into pgvector.
+   (isolation by `tenant_session` now, Row-Level Security from stage 2); the indexer embeds chunks into pgvector.
 7. **Refresh** — re-crawl on a schedule; replace changed chunks.
 
 Deliverable: `ingest <url>` command that produces a populated knowledge base for one business.

@@ -56,6 +56,9 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 businesses       (id, name, website, timezone, phone_numbers, settings jsonb)
 business_profile (business_id, name, address, phone, opening_hours jsonb, place_id, ...)  -- from Part 1
+locations        (id, business_id, name, url, address, timezone, is_default, ...)  -- DEC-37
+facts            (id, business_id, location_id, type, statement, fact_key, status, ...)  -- DEC-38
+fact_sources     (id, business_id, fact_id, page_id, quote, page_hash, extracted_at)
 pages            (id, business_id, url, title, markdown, content_hash, scraped_at)
 chunks           (id, business_id, page_id, custom_reply_id, kind, chunk_index, section_heading, text,
                   embedding vector(768), embed_model, tsv tsvector GENERATED, content_hash)
@@ -64,24 +67,24 @@ conversations    (id, business_id, channel, started_at, ...)
 messages         (id, business_id, conversation_id, role, content, created_at)
 ```
 
-- `kind`: `scraped | custom_reply` (no reviews — Places terms, R9). Planned: `fact` —
-  one row per active fact from the facts library (DEC-38), retrieved in the same hybrid
-  search with a boost between custom replies and scraped chunks; chunks and facts get an
-  optional `location_id` (DEC-37) — [07-knowledge-quality.md](07-knowledge-quality.md) §5.
+- `kind`: `scraped | custom_reply | fact` (no reviews — Places terms, R9). `fact` is one
+  row per active fact from the facts library (DEC-38, built: `app/ingest/fact_chunks.py`),
+  retrieved in the same hybrid search with a boost between custom replies and scraped
+  chunks; chunks and facts carry an optional `location_id` (DEC-37) — [07-knowledge-quality.md](07-knowledge-quality.md) §5.
 - Child rows reference parents by `(business_id, id)` composite foreign keys, so a chunk
   or message can never point at another business's row (DB-enforced already in stage 1).
 - `tsv` uses the `simple` text-search config (no stemming): sites and callers may use any
   language. Revisit if keyword recall is weak for one language.
 - Every table has `business_id`; isolation will be enforced by Postgres Row-Level Security
-  from stage 3 (see [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) R18).
+  from stage 2 (see [ARCHITECTURE_DRIVERS.md](ARCHITECTURE_DRIVERS.md) R18).
 - Every query filters by `business_id`. A business has hundreds to a few thousand chunks,
   so exact vector search within one business is fast — no ANN index needed at first.
   Add an HNSW index later if data grows.
 - `tsv` (generated full-text column + GIN index) enables keyword search for hybrid retrieval.
 - `embed_model` records which model produced the vector, so a re-index is detectable.
-- Stages 1–2: one DB role; every query still runs through `tenant_session(business_id)`,
+- Stage 1: one DB role; every query still runs through `tenant_session(business_id)`,
   which sets `SET LOCAL app.business_id`.
-- Stage 3 (before the 2nd business): RLS policies switched on; migrations run as the table
+- Stage 2 (before the 2nd business): RLS policies switched on; migrations run as the table
   owner (`ADMIN_DATABASE_URL`); the app connects as `app_user` (`DATABASE_URL`).
   A single `tenant_session(business_id)` helper in `app/db/` opens the transaction and
   sets it — no query runs without it. Only `SET LOCAL`, never `SET` (pooler, R20).
@@ -164,7 +167,7 @@ docker-compose.yml, Dockerfile, .env.example
 - [x] Config + `llm.py` (OpenAI-compatible client, built in step 2; `chat`/`chat_json`/`embed`)
 - [x] Schema + Alembic migrations (`vector` extension, `business_id` everywhere, `tsv` column + GIN index)
 - [x] `tenant_session(business_id)` helper — all queries go through it
-- (stage 3: RLS policies, `app_user` role, isolation tests — [06-scale.md](06-scale.md))
+- (stage 2: RLS policies, `app_user` role, isolation tests — [06-scale.md](06-scale.md))
 - [x] Indexer: embed chunks missing an embedding or with a different `embed_model` — `rag/index.py`
 - [x] Retrieval: vector search → add keyword search → rank fusion — `rag/retrieve.py`
 - [x] Prompt builder + answer pipeline with streaming — `rag/prompt.py`, `rag/answer.py`
