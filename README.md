@@ -169,7 +169,7 @@ Then open a page:
 | Page | URL (uvicorn, built pages) | Needs |
 |---|---|---|
 | **Voice app** (DEC-42): pick a business, read past conversations, call with push-to-talk, continue an earlier call | http://localhost:8000/ (redirects to `/web/`; the old `/web/mic-test.html` does too) | DB; for calls also LM Studio, `gcloud auth application-default login`, Chrome or Safari |
-| Chat test (answers + retrieved sources; paste a `business_id`) | http://localhost:8000/web/chat.html | DB, LM Studio |
+| Chat test (answers + retrieved sources; paste a `business_id`) | http://localhost:8000/web/chat.html | DB, LM Studio; the prompt view and `/debug/*` need `DEBUG_ENDPOINTS=true` in `.env` (off by default, API review M1) |
 | Voice debug (hands-free: open mic + server VAD, raw event log; paste a `business_id`) | http://localhost:8000/web/voice-debug.html | as for calls, plus headphones |
 | Twilio call (mode B: Voice SDK → TwiML App → `/twilio/voice` → `/voice/ws`, billed per minute) | http://localhost:8000/web/call.html (localhost only) | as for calls, plus `TWILIO_*` + `PUBLIC_BASE_URL` in `.env` and ngrok — setup in [03-voice-channel.md](plan/03-voice-channel.md) |
 
@@ -235,7 +235,7 @@ Inside the containers Compose overrides `.env`'s `localhost` values:
 LM Studio on the Mac via `host.docker.internal:1234` (LM Studio stays native, R7). Google
 STT/TTS use the ADC file from `gcloud auth application-default login`, mounted read-only
 from `~/.config/gcloud`; without it the API starts and logs one warning, only calls fail.
-Don't run the native `uvicorn` at the same time (both use port 8000). The image listens on
+In the container the browser reaches the app from Docker's gateway address, so `/twilio/token` (loopback only) needs that range in `TWILIO_TOKEN_ALLOWED_CIDRS` (#241). Don't run the native `uvicorn` at the same time (both use port 8000). The image listens on
 `$PORT` (8000 here, 8080 on Cloud Run).
 
 ### Web pages (React + TypeScript, `web/`)

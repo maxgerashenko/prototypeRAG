@@ -348,6 +348,8 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   Compare WER, p50/max seconds, RTF and approx. cost; TTS first-audio latency while streaming needs a live call. Write the result under V27 and OPEN-08
 - [ ] **Voice SDK token refresh (#213)**: open `/web/call.html` on localhost, press Call and hang up, then leave the page open for over an hour (the token TTL is 3600 s). The log shows "Voice token refreshed." around the 59-minute mark; press Call again — it connects with no "Device error" (20104). For a quick check, temporarily set a short TTL in the `/twilio/token` route.
 
+- [ ] **API review fixes, batch A (#230/#231/#233/#241/#242/#243)**: (1) in the Docker image open `/web/call.html` from the Mac: if `GET /twilio/token` answers 403, read the client address from the log line / `docker compose logs api` and set `TWILIO_TOKEN_ALLOWED_CIDRS` to its range (#241); (2) `/web/chat.html` shows the prompt only with `DEBUG_ENDPOINTS=true` (#230); (3) stop LM Studio, ask in chat: 503 from `/chat`, an `error` event then `[DONE]` from `/chat/stream`, and no empty conversation in the list (#231/#233); (4) a live phone call and a `/web/` call still connect (stream token now carries a timestamp, `/voice/browser` checks Origin; `npm run dev` on :5173 may need `WS_ALLOWED_ORIGINS=http://localhost:5173`) (#243)
+
 - [ ] **Pre-generated greeting (V6, #74)**: `uv run alembic upgrade head`, then `uv run python -m app.voice.greeting_cache
   --business-id <pilot id>` (prints `generated: 2`; again → `0`). Call from `/web/` and the phone: the greeting
   starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
