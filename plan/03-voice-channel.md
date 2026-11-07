@@ -341,6 +341,8 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **Voice SDK token refresh (#213)**: open `/web/call.html` on localhost, press Call and hang up, then leave the page open for over an hour (the token TTL is 3600 s). The log shows "Voice token refreshed." around the 59-minute mark; press Call again — it connects with no "Device error" (20104). For a quick check, temporarily set a short TTL in the `/twilio/token` route.
+
 - [ ] **Pre-generated greeting (V6, #74)**: `uv run alembic upgrade head`, then `uv run python -m app.voice.greeting_cache
   --business-id <pilot id>` (prints `generated: 2`; again → `0`). Call from `/web/` and the phone: the greeting
   starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
