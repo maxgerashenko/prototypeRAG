@@ -34,7 +34,7 @@ from app.actions.booking import rules as R
 from app.actions.booking.google_client import CalendarClient, CalendarError, EventExists
 from app.actions.booking.mirror import CalendarMirror, DbMirror
 from app.actions.booking.internal import (
-    MIN_REF, REF_LEN, Availability, BookingRequest, BookingResult, _check, _load_rules,
+    REF_LEN, Availability, BookingRequest, BookingResult, _check, _load_rules, parse_reference,
 )
 from app.config import get_settings
 from app.db import tenant_session
@@ -207,8 +207,8 @@ class GoogleCalendarBackend:
 
     def cancel(self, business_id: uuid.UUID, reference: str, phone: str | None, now: datetime | None = None) -> str:
         """Cancel by reference; the phone must match the booking's (as in the internal backend)."""
-        ref = (reference or "").strip().lower()
-        if len(ref) < MIN_REF or not phone:
+        ref = parse_reference(reference)
+        if ref is None or not phone:
             return "Error: a booking reference and the caller's phone number are needed."
         now = now or datetime.now(timezone.utc)
         calendar_id = self._calendar(business_id)
