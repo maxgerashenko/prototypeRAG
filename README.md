@@ -101,6 +101,7 @@ Cost rule (DEC-33): only free or pay-per-use services, no monthly fees. Secrets 
 | Browser tests | `cd web && npm run e2e` (Playwright, mocked backend) | Node, `npx playwright install chromium` |
 | RAG eval | `uv run python -m app.rag.eval --business-id <id> --file tests/eval/bathhouse.yaml` | DB, LM Studio, an indexed business |
 | Pilot flow | ingest `--url …` → `app.rag.index` → eval; hand questions in `questions/` | DB, LM Studio |
+| Voice stack comparison | `uv run python scripts/bench_voice.py --stt google faster-whisper:small --tts google` (`--list` shows candidates; `cmd:` adapters take any engine); harness unit test `tests/test_bench_voice.py` | Google ADC and/or faster-whisper, Piper etc. on the Mac; the unit test needs nothing |
 | Live checks only the Mac can do | voice call, push-to-talk, Twilio call, Google Calendar sync | LM Studio, Google ADC, Twilio, ngrok; listed under "Test on Mac" in `plan/03-voice-channel.md` |
 
 There is no CI. Cloud sessions have no LM Studio, Google credentials or Twilio, so checks
