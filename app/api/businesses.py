@@ -5,7 +5,8 @@ the owner login (and RLS-aware admin access) in stage 2."""
 import uuid
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import any_, func, select, update
+from sqlalchemy import any_, func, select, text, update
+from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.session import SessionLocal
 from app.db.models import Business, BusinessProfile, Location, Message
@@ -64,6 +65,16 @@ def list_businesses() -> list[BusinessOut]:
         return results
 
 
+def lock_phone_number(session: Session, number: str) -> None:
+    """Serialize every move of one phone number (issue #237). A transaction-scoped advisory
+    lock keyed on the number, not a row lock: when nobody holds the number yet there is no
+    row to lock, and two concurrent assigns to different businesses would both see "free"
+    and both write it, leaving one number on two businesses (find_business then silently
+    picks one). Take it first in the transaction; the holder query after it runs on a fresh
+    READ COMMITTED snapshot, so it sees the move the previous lock owner committed."""
+    session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": f"phone-number:{number}"})
+
+
 def _main_number() -> str:
     number = get_settings().twilio_phone_number
     if not number:
@@ -77,6 +88,7 @@ def assign_main_number(business_id: uuid.UUID) -> dict:
     business (app/voice/twilio_routes.py), so it is taken off every other business first."""
     number = _main_number()
     with SessionLocal() as session:
+        lock_phone_number(session, number)
         if session.get(Business, business_id) is None:
             raise HTTPException(status_code=404, detail="business not found")
         session.execute(
@@ -96,6 +108,7 @@ def unassign_main_number(business_id: uuid.UUID) -> dict:
     """Take the main number off this business; calls to it then hear "not in service"."""
     number = _main_number()
     with SessionLocal() as session:
+        lock_phone_number(session, number)
         session.execute(
             update(Business).where(Business.id == business_id)
             .values(phone_numbers=func.array_remove(Business.phone_numbers, number))
