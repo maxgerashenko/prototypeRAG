@@ -9,7 +9,7 @@ from app.db.models import BusinessProfile, BusinessSummary
 from app.llm import get_chat_client
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import build_prompt
-from app.rag.retrieve import RetrievedChunk, retrieve
+from app.rag.retrieve import RetrievedChunk, embed_query, retrieve
 from app.voice.tools import enabled_tool_names, run_tool, tools_for
 
 MAX_TOOL_ROUNDS = 3  # LLM → tool → LLM ... before giving up on a turn (same cap as voice)
@@ -34,11 +34,15 @@ def prepare_prompt(
     model gets. The DB transaction closes here — it isn't held open during generation.
     """
     enabled = enabled_tool_names(business_id)
+    query_embedding = embed_query(question)  # before the session opens: no connection held while embedding
     with tenant_session(business_id) as session:
         profile = session.get(BusinessProfile, business_id)
         summary = session.get(BusinessSummary, business_id)
         location_id = default_location_id(session, business_id)  # DEC-49
-        chunks = retrieve(session, business_id, question, top_n, location_id=location_id, mode=retrieval)
+        chunks = retrieve(
+            session, business_id, question, top_n, location_id=location_id, query_embedding=query_embedding,
+            mode=retrieval,
+        )
         messages = build_prompt(
             profile, chunks, history or [], question, summary,
             locations=format_locations(session, business_id, location_id), enabled_tools=enabled,

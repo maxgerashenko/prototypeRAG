@@ -4,7 +4,8 @@ Rules enforced here in code, not only in the prompt (plan/04-actions.md):
 - unknown tool / bad arguments → an error string the model can see, never an exception;
 - a side-effect tool runs only with `confirmed=true`, otherwise the model is told to read
   the details back and ask for an explicit yes;
-- every side-effect call (also refused and failed ones) is written to `action_log`.
+- every side-effect call (also refused and failed ones) is written to `action_log`; for a
+  `log_required` tool (transfer) a failed write turns an `ok` result into an error.
 Read-only tools (search) are not logged: one DB write per search would add latency to the
 caller's turn, and their calls already show in the voice-turn timing log.
 """
@@ -19,7 +20,8 @@ from app.db.models import ActionLog
 log = logging.getLogger(__name__)
 
 
-def _log_action(ctx: ActionContext, tool: str, arguments: dict, result: str, status: str) -> None:
+def _log_action(ctx: ActionContext, tool: str, arguments: dict, result: str, status: str) -> bool:
+    """Write one action_log row; False if the write failed (logged, never raised)."""
     try:
         with tenant_session(ctx.business_id) as session:
             session.add(ActionLog(
@@ -28,6 +30,8 @@ def _log_action(ctx: ActionContext, tool: str, arguments: dict, result: str, sta
             ))
     except Exception:  # an audit-log failure must not break the call, but must be visible
         log.exception("action_log write failed for %s", tool)
+        return False
+    return True
 
 
 def execute(ctx: ActionContext, name: str, arguments: str | dict) -> str:
@@ -68,5 +72,6 @@ def execute(ctx: ActionContext, name: str, arguments: str | dict) -> str:
         _log_action(ctx, name, arguments, result, "error")
         return result
     status = "error" if result.startswith("Error") else "ok"
-    _log_action(ctx, name, arguments, result, status)
+    if not _log_action(ctx, name, arguments, result, status) and status == "ok" and tool.log_required:
+        return f"Error: {name} could not be recorded, so it did not happen. Offer to take a message instead."
     return result
