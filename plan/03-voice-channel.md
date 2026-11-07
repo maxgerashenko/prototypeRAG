@@ -341,6 +341,11 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 Checks that need the 64 GB Mac (LM Studio, Google ADC, a real mic and browsers). The
 cloud sessions can only run unit tests with fakes. Record results under "Known problems".
 
+- [ ] **Voice stack comparison (`scripts/bench_voice.py`)**: `uv run python scripts/bench_voice.py --list`, then e.g.
+  `--stt google faster-whisper:small --tts google` (needs ADC; `uv pip install faster-whisper`). Add Parakeet TDT, Qwen3-TTS,
+  Piper or Fish Audio as `cmd:` templates (see the script header). Record real phone audio from a Twilio test call as
+  `tests/fixtures/voice_bench/<name>.wav` + `<name>.txt` (reference words) — the committed fixture has no reference text, so it is timed only.
+  Compare WER, p50/max seconds, RTF and approx. cost; TTS first-audio latency while streaming needs a live call. Write the result under V27 and OPEN-08
 - [ ] **Pre-generated greeting (V6, #74)**: `uv run alembic upgrade head`, then `uv run python -m app.voice.greeting_cache
   --business-id <pilot id>` (prints `generated: 2`; again → `0`). Call from `/web/` and the phone: the greeting
   starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
