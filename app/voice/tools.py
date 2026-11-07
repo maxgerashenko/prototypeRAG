@@ -17,7 +17,7 @@ from app.actions.registry import TOOLS, ActionContext, Tool, enabled_tool_names,
 from app.db import tenant_session
 from app.rag.location import default_location_id
 from app.rag.prompt import format_chunks
-from app.rag.retrieve import retrieve
+from app.rag.retrieve import embed_query, retrieve
 
 # T1b (V16) chose 3: the LLM's post-search time grows with the tool result's length
 # (~3.7 s measured with 5). V28 (#108): 5 so "Till what time are you working?" finds the
@@ -28,9 +28,11 @@ SEARCH_TOP_N = 5
 
 def search_business_info(business_id: uuid.UUID, query: str) -> str:
     """Hybrid retrieval (DEC-12) for one business, formatted like the chat prompt's chunks."""
+    query_embedding = embed_query(query)  # before the session opens: no connection held while embedding
     with tenant_session(business_id) as session:
         chunks = retrieve(
-            session, business_id, query, SEARCH_TOP_N, location_id=default_location_id(session, business_id)
+            session, business_id, query, SEARCH_TOP_N,
+            location_id=default_location_id(session, business_id), query_embedding=query_embedding,
         )  # DEC-49
     return format_chunks(chunks)
 
