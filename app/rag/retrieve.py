@@ -104,16 +104,41 @@ def reciprocal_rank_fusion(
     return scores
 
 
+def embed_query(question: str) -> list[float]:
+    """Embed a search question. Call it *before* opening `tenant_session`, so no pooled DB
+    connection is held during the embedding HTTP round trip, and pass the result to `retrieve`."""
+    return embed([f"search_query: {question}"])[0]
+
+
+RETRIEVAL_MODES = ("hybrid", "vector")
+
+
 def retrieve(
-    session, business_id: uuid.UUID, question: str, top_n: int = 5, location_id: uuid.UUID | None = None
+    session,
+    business_id: uuid.UUID,
+    question: str,
+    top_n: int = 5,
+    location_id: uuid.UUID | None = None,
+    query_embedding: list[float] | None = None,
+    mode: str = "hybrid",
 ) -> list[RetrievedChunk]:
     """Embed -> vector + keyword search -> fuse -> boost custom replies (x2) and facts
     (x1.5) -> drop page chunks that repeat a returned fact (DEC-47) -> top_n chunks.
-    With `location_id`, only business-wide chunks and that location's are searched."""
-    query_embedding = embed([f"search_query: {question}"])[0]
+    With `location_id`, only business-wide chunks and that location's are searched.
+    Pass `query_embedding` (from `embed_query`, computed outside the session) to avoid
+    embedding inside the open transaction; without it, the question is embedded here.
+    `mode="vector"` skips the keyword search (RRF over the vector ranking alone keeps its
+    order); only the eval uses it, to measure what full-text search adds."""
+    if mode not in RETRIEVAL_MODES:
+        raise ValueError(f"unknown retrieval mode {mode!r}, expected one of {RETRIEVAL_MODES}")
+    if query_embedding is None:
+        query_embedding = embed_query(question)
 
     vector_ranks = vector_search(session, business_id, query_embedding, top_k=10, location_id=location_id)
-    keyword_ranks = keyword_search(session, business_id, question, top_k=10, location_id=location_id)
+    keyword_ranks = (
+        keyword_search(session, business_id, question, top_k=10, location_id=location_id)
+        if mode == "hybrid" else []
+    )
     fused = reciprocal_rank_fusion(vector_ranks, keyword_ranks)
     if not fused:
         return []

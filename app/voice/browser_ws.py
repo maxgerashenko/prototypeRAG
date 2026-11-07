@@ -20,9 +20,12 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import func, select
 
+from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Conversation, Message
 from app.db.session import SessionLocal
@@ -60,6 +63,16 @@ def end_orphaned_browser_conversations() -> int:
     return len(rows)
 
 
+def origin_allowed(origin: str | None, host: str | None) -> bool:
+    """Browsers always send Origin on a WebSocket, and any page can open one to us, so the
+    page must be ours: same host as the request, or listed in WS_ALLOWED_ORIGINS. No Origin
+    means a non-browser client (a script, the tests), which this check is not meant to stop."""
+    if not origin:
+        return True
+    allowed = [o.strip().rstrip("/") for o in get_settings().ws_allowed_origins.split(",") if o.strip()]
+    return origin.rstrip("/") in allowed or urlsplit(origin).netloc == (host or "")
+
+
 @router.websocket("/voice/browser")
 async def browser_voice(
     ws: WebSocket,
@@ -67,6 +80,10 @@ async def browser_voice(
     mode: Literal["vad", "ptt"] = "vad",
     continue_from: uuid.UUID | None = None,
 ) -> None:
+    if not origin_allowed(ws.headers.get("origin"), ws.headers.get("host")):
+        log.warning("browser voice: refused Origin %r", ws.headers.get("origin"))
+        await ws.close(code=4403, reason="origin not allowed")  # closing before accept answers 403
+        return
     await ws.accept()
 
     async def send_audio(pcm: bytes) -> None:

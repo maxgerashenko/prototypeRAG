@@ -164,10 +164,10 @@ def test_answer_gives_up_after_max_tool_rounds(fake_llm):
     from app.rag import answer
 
     install, tool_calls = fake_llm
-    llm = install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS)])
+    llm = install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS + 1)])
     result = answer.answer_question(uuid.uuid4(), "loop?")
     assert result.answer == answer.GIVE_UP_ANSWER
-    assert len(llm.requests) == len(tool_calls) == answer.MAX_TOOL_ROUNDS
+    assert len(llm.requests) == len(tool_calls) + 1 == answer.MAX_TOOL_ROUNDS + 1
 
 
 def test_stream_answer_runs_tool_calls_in_a_loop(fake_llm):
@@ -192,7 +192,7 @@ def test_stream_answer_gives_up_after_max_tool_rounds(fake_llm):
     from app.rag import answer
 
     install, _ = fake_llm
-    install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS)])
+    install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS + 1)])
     assert list(answer.stream_answer(uuid.uuid4(), "loop?")) == [answer.GIVE_UP_ANSWER]
 
 
@@ -200,11 +200,20 @@ def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
     """The debug view's prompt is the exact prompt sent to the LLM: system (rules +
     profile + chunks) + history + question. /debug/prompt builds it without the LLM
     and without creating a conversation."""
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    from app.api import chat as chat_api
+    from app.config import get_settings
     from app.db.models import Conversation, Message
-    from app.main import app
     from app.rag import answer
+
+    # /debug/* and the `prompt` field exist only with DEBUG_ENDPOINTS (review M1): mount the
+    # debug router in this test's own app and switch the flag on.
+    monkeypatch.setattr(chat_api, "get_settings", lambda: get_settings().model_copy(update={"debug_endpoints": True}))
+    app = FastAPI()
+    app.include_router(chat_api.router)
+    app.include_router(chat_api.debug_router)
 
     chunk = RetrievedChunk(chunk_id=uuid.uuid4(), text="We open at 9.", section_heading="Hours",
                            kind="scraped", score=0.9, source="both")
@@ -218,13 +227,17 @@ def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
     r = client.post("/chat", json={"business_id": str(business_id), "question": "When do you open?"}).json()
     assert r["prompt"] == llm.requests[0]["messages"]
     system = r["prompt"][0]
-    assert system["role"] == "system" and "Name: Cafe Uno" in system["content"] and "[1] Hours\nWe open at 9." in system["content"]
-    assert r["prompt"][-1] == {"role": "user", "content": "When do you open?"}
+    assert system["role"] == "system" and "Name: Cafe Uno" in system["content"]
+    assert "We open at 9." not in system["content"]  # #232: crawled text is not in the system message
+    last = r["prompt"][-1]
+    assert last["role"] == "user" and "[1] Hours\nWe open at 9." in last["content"]
+    assert last["content"].endswith("Question: When do you open?")
 
     d = client.get("/debug/prompt", params={"business_id": str(business_id), "q": "And close?",
                                             "conversation_id": r["conversation_id"]}).json()
-    assert [(m["role"], m["content"]) for m in d["messages"][1:]] == [
-        ("user", "When do you open?"), ("assistant", "At 9."), ("user", "And close?")]
+    assert [(m["role"], m["content"]) for m in d["messages"][1:-1]] == [
+        ("user", "When do you open?"), ("assistant", "At 9.")]
+    assert d["messages"][-1]["role"] == "user" and d["messages"][-1]["content"].endswith("Question: And close?")
     assert d["messages"][0] == system
     assert len(llm.requests) == 1  # no LLM call
 
@@ -284,7 +297,7 @@ def test_format_chunks_numbers_and_handles_empty():
 def test_build_prompt_order_system_history_question():
     messages = build_prompt(None, [], [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}], "q?")
     assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
-    assert messages[-1]["content"] == "q?"
+    assert messages[-1]["content"].endswith("Question: q?")
 
 
 def test_sse_frame_keeps_multiline_answers():
@@ -378,3 +391,24 @@ def test_keyword_search_survives_urls_and_punctuation(business_id):
         _add_chunk(s, business_id, "We have saunas and pools.")
         hits = keyword_search(s, business_id, "do you have saunas? see https://x.com/a:b 'q':*", top_k=10)
     assert len(hits) >= 1
+
+
+# --- retrieve(mode=...): vector-only baseline for the eval's --retrieval flag ---------
+
+
+def test_retrieve_vector_mode_skips_keyword_search(monkeypatch):
+    import app.rag.retrieve as r
+
+    monkeypatch.setattr(r, "embed", lambda texts: [[0.0]])
+    monkeypatch.setattr(r, "vector_search", lambda *a, **k: [])
+    called = []
+    monkeypatch.setattr(r, "keyword_search", lambda *a, **k: called.append(1) or [])
+    assert retrieve(None, uuid.uuid4(), "sauna hours", mode="vector") == []
+    assert called == []
+    assert retrieve(None, uuid.uuid4(), "sauna hours") == []  # default stays hybrid
+    assert called == [1]
+
+
+def test_retrieve_rejects_unknown_mode():
+    with pytest.raises(ValueError):
+        retrieve(None, uuid.uuid4(), "q", mode="keyword")

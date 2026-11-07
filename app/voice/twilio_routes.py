@@ -32,6 +32,7 @@ import hashlib
 import hmac
 import ipaddress
 import logging
+import time
 import uuid
 from datetime import datetime
 
@@ -61,6 +62,7 @@ TRANSFER_RING_S = 25
 VOICEMAIL_MAX_S = 120
 TOKEN_IDENTITY = "web-tester"
 TOKEN_TTL_S = 3600
+STREAM_TOKEN_TTL_S = 600  # a stream token is used right after /twilio/voice answered; older ones are refused
 
 
 # --- helpers ------------------------------------------------------------------------
@@ -82,17 +84,30 @@ def stream_url(request: Request) -> str:
     return f"{'wss' if scheme == 'https' else 'ws'}://{host}/voice/ws"
 
 
-def stream_token(business_id: uuid.UUID, call_sid: str) -> str:
+def _stream_mac(business_id: uuid.UUID, call_sid: str, issued_at: str) -> str:
     key = get_settings().twilio_auth_token.encode()
-    return hmac.new(key, f"{business_id}|{call_sid}".encode(), hashlib.sha256).hexdigest()
+    return hmac.new(key, f"{business_id}|{call_sid}|{issued_at}".encode(), hashlib.sha256).hexdigest()
 
 
-def check_stream_token(business_id: uuid.UUID, call_sid: str, token: str) -> bool:
+def stream_token(business_id: uuid.UUID, call_sid: str, now: float | None = None) -> str:
+    """`<unix time>.<HMAC of business + CallSid + time>`: the time lets `check_stream_token`
+    refuse a token that leaked and is replayed later (review L5)."""
+    issued_at = str(int(time.time() if now is None else now))
+    return f"{issued_at}.{_stream_mac(business_id, call_sid, issued_at)}"
+
+
+def check_stream_token(business_id: uuid.UUID, call_sid: str, token: str, now: float | None = None) -> bool:
     if not get_settings().twilio_validate_signature:
         return True
     if not get_settings().twilio_auth_token:
         return False
-    return hmac.compare_digest(stream_token(business_id, call_sid), token or "")
+    issued_at, _, mac = (token or "").partition(".")
+    if not issued_at.isdigit():
+        return False
+    age = (time.time() if now is None else now) - int(issued_at)
+    if age > STREAM_TOKEN_TTL_S or age < -STREAM_TOKEN_TTL_S:
+        return False
+    return hmac.compare_digest(_stream_mac(business_id, call_sid, issued_at), mac)
 
 
 async def twilio_form(request: Request) -> dict[str, str]:
@@ -140,7 +155,8 @@ def find_business(form: dict[str, str]) -> uuid.UUID | None:
 async def twilio_voice(request: Request) -> Response:
     form = await twilio_form(request)
     call_sid = form.get("CallSid", "")
-    business_id = find_business(form)
+    # sync SQLAlchemy off the event loop: the live calls' media WebSockets share it (a cold DB must not freeze their audio)
+    business_id = await run_in_threadpool(find_business, form)
     response = VoiceResponse()
     if business_id is None or not call_sid:
         log.warning("twilio call %s: no business for To=%r business_id=%r",
@@ -206,6 +222,14 @@ async def twilio_transfer_result(request: Request) -> Response:
     return twiml(response)
 
 
+def _save_voicemail(business_id: uuid.UUID, conversation_id: uuid.UUID, caller: str | None, seconds: str, url: str) -> None:
+    with tenant_session(business_id) as session:
+        session.add(MessageForOwner(
+            business_id=business_id, conversation_id=conversation_id, caller_phone=caller,
+            text=f"Voicemail ({seconds} s) left after a transfer nobody answered.", recording_url=url,
+        ))
+
+
 @router.post("/twilio/voicemail")
 async def twilio_voicemail(request: Request) -> Response:
     form = await twilio_form(request)
@@ -214,15 +238,27 @@ async def twilio_voicemail(request: Request) -> Response:
     if found is not None and url:
         business_id, conversation_id = found
         seconds = form.get("RecordingDuration", "?")
-        with tenant_session(business_id) as session:
-            session.add(MessageForOwner(
-                business_id=business_id, conversation_id=conversation_id, caller_phone=form.get("From") or None,
-                text=f"Voicemail ({seconds} s) left after a transfer nobody answered.", recording_url=url,
-            ))
+        await run_in_threadpool(
+            _save_voicemail, business_id, conversation_id, form.get("From") or None, seconds, url
+        )
     response = VoiceResponse()
     response.say("Thank you. Goodbye.")
     response.hangup()
     return twiml(response)
+
+
+def _mark_call_ended(call_sid: str) -> tuple[uuid.UUID, uuid.UUID] | None:
+    """Set `ended_at` on the call's conversation (if the WebSocket didn't) and return
+    (business_id, conversation_id), or None for an unknown call. Sync DB work: call it via run_in_threadpool."""
+    found = find_call(call_sid)
+    if found is None:
+        return None
+    business_id, conversation_id = found
+    with tenant_session(business_id) as session:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is not None and conversation.ended_at is None:
+            conversation.ended_at = datetime.now().astimezone()
+    return found
 
 
 @router.post("/twilio/status")
@@ -231,18 +267,11 @@ async def twilio_status(request: Request) -> Response:
     call_sid, status = form.get("CallSid", ""), form.get("CallStatus", "")
     log.info("twilio call %s status %s (duration %s s)", call_sid, status, form.get("CallDuration"))
     if call_sid and status in FINAL_STATUSES:
-        with SessionLocal() as session:
-            row = session.execute(
-                select(Conversation.id, Conversation.business_id).where(Conversation.call_sid == call_sid)
-            ).first()
-        if row is not None:
-            with tenant_session(row.business_id) as session:
-                conversation = session.get(Conversation, row.id)
-                if conversation is not None and conversation.ended_at is None:
-                    conversation.ended_at = datetime.now().astimezone()
+        found = await run_in_threadpool(_mark_call_ended, call_sid)
+        if found is not None:
             # DEC-24: summarize inside the request (CPU is throttled after the response, R19);
             # blocking LLM call, so off the event loop. Failures are logged, never raised.
-            await run_in_threadpool(summarize_conversation, row.business_id, row.id)
+            await run_in_threadpool(summarize_conversation, *found)
     return Response(status_code=204)
 
 
@@ -251,18 +280,34 @@ def twilio_number() -> dict:
     return {"number": get_settings().twilio_phone_number or None}
 
 
+def _token_client_allowed(request: Request) -> bool:
+    """Loopback, or an address in TWILIO_TOKEN_ALLOWED_CIDRS; never a proxied request.
+
+    In the Docker image a browser on the Mac reaches the app from Docker's gateway address
+    (e.g. 192.168.65.1 or 172.17.0.1), not 127.0.0.1 -- list that range in the setting."""
+    if "x-forwarded-for" in request.headers:
+        return False
+    client = request.client.host if request.client else ""
+    try:
+        address = ipaddress.ip_address(client)
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return True
+    for cidr in get_settings().twilio_token_allowed_cidrs.split(","):
+        cidr = cidr.strip()
+        if cidr and address in ipaddress.ip_network(cidr, strict=False):
+            return True
+    return False
+
+
 @router.get("/twilio/token")
 def twilio_token(request: Request) -> dict:
     """Access token for the Voice SDK page (mode B). Each token can start billed calls,
     so it's only handed out to the developer's own browser: a loopback client with no
     proxy header — requests through ngrok also come from loopback but carry
     X-Forwarded-For. Real access control comes with OPEN-19 (stage 3, cloud)."""
-    client = request.client.host if request.client else ""
-    try:
-        loopback = ipaddress.ip_address(client).is_loopback
-    except ValueError:
-        loopback = False
-    if not loopback or "x-forwarded-for" in request.headers:
+    if not _token_client_allowed(request):
         raise HTTPException(403, "the call token is only served to localhost")
     s = get_settings()
     missing = [name for name, value in (

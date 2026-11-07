@@ -6,10 +6,11 @@ since it's a short Q&A, not a long document.
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 
+from app.api.deps import require_business, upstream_unavailable
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Chunk, CustomReply
@@ -19,14 +20,19 @@ from app.llm import embed
 router = APIRouter()
 
 
+# Both texts are embedded and pasted into prompts: bound them (review L1).
+MAX_QUESTION_LEN = 500
+MAX_ANSWER_LEN = 4000
+
+
 class CustomReplyCreate(BaseModel):
-    question: str
-    answer: str
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_LEN)
+    answer: str = Field(min_length=1, max_length=MAX_ANSWER_LEN)
 
 
 class CustomReplyUpdate(BaseModel):
-    question: str
-    answer: str
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_LEN)
+    answer: str = Field(min_length=1, max_length=MAX_ANSWER_LEN)
 
 
 class CustomReplyOut(BaseModel):
@@ -62,13 +68,14 @@ def _reindex_custom_reply(session, business_id: uuid.UUID, reply: CustomReply) -
     session.flush()
 
 
-@router.post("/businesses/{business_id}/custom-replies", response_model=CustomReplyOut)
+@router.post("/businesses/{business_id}/custom-replies", response_model=CustomReplyOut,
+             dependencies=[Depends(require_business)])
 def create_custom_reply(business_id: uuid.UUID, payload: CustomReplyCreate) -> CustomReply:
     """Plain `def`: this blocks on a sync DB session + a sync embed() call, same
     reasoning as app/api/chat.py -- no real `await` here, so `async def` would only
     block FastAPI's event loop for no benefit.
     """
-    with tenant_session(business_id) as session:
+    with upstream_unavailable("embedding server"), tenant_session(business_id) as session:
         reply = CustomReply(business_id=business_id, question=payload.question, answer=payload.answer)
         session.add(reply)
         session.flush()
@@ -96,7 +103,7 @@ def _get_or_404(session, business_id: uuid.UUID, reply_id: uuid.UUID) -> CustomR
 
 @router.put("/businesses/{business_id}/custom-replies/{reply_id}", response_model=CustomReplyOut)
 def update_custom_reply(business_id: uuid.UUID, reply_id: uuid.UUID, payload: CustomReplyUpdate) -> CustomReply:
-    with tenant_session(business_id) as session:
+    with upstream_unavailable("embedding server"), tenant_session(business_id) as session:
         reply = _get_or_404(session, business_id, reply_id)
         reply.question = payload.question
         reply.answer = payload.answer

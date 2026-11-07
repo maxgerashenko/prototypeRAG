@@ -110,6 +110,16 @@ class Settings(BaseSettings):
     # business using the calendar. Demo rule: every session is open to every business anyway.
     google_calendar_owner_business_id: str = ""
 
+    # GET /twilio/token is served to loopback clients only. Extra client networks (comma-separated CIDRs),
+    # e.g. Docker's gateway "172.16.0.0/12,192.168.65.0/24" when the app runs in the container (review M7).
+    # Requests carrying X-Forwarded-For are still refused.
+    twilio_token_allowed_cidrs: str = ""
+    # Extra Origins (comma-separated, e.g. "http://localhost:5173") allowed to open /voice/browser;
+    # the page's own origin (Origin host == Host header) and clients sending no Origin always are.
+    ws_allowed_origins: str = ""
+    # Developer views: /debug/retrieve, /debug/prompt and the `prompt` field of POST /chat (the system
+    # prompt, business profile and retrieved chunks). Off by default -- /chat is the public route (OPEN-19).
+    debug_endpoints: bool = False
     dev_reload: bool = False  # live reload of the built web/dist pages (app/api/dev_reload.py); local only
 
 
