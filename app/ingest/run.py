@@ -31,9 +31,9 @@ from app.db.models import Business, BusinessProfile, Location, Page
 from app.db.session import SessionLocal
 from app.ingest.chunk import chunk_markdown
 from app.ingest.clean import CleanedPage, clean_page, content_hash, extract_og_site_name, extract_title
-from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, parse_robots_sitemaps, parse_sitemap_index
+from app.ingest.discover import RobotsChecker, discover_links, discover_pages, discover_pdf_links, has_noindex, normalize_url, parse_robots_sitemaps, parse_sitemap_index, same_domain
 from app.ingest.fetch import (
-    RobotsUnavailable, fetch_child_sitemaps, fetch_document, fetch_robots_txt, fetch_sitemap, fetch_text, make_client,
+    RobotsUnavailable, fetch_child_sitemaps, FetchedDocument, fetch_document, fetch_robots_txt, fetch_sitemap, make_client,
 )
 from app.ingest.fact_chunks import sync_fact_chunks
 from app.ingest.facts import FactsBackend, extract_page_facts, facts_backend, pages_to_extract
@@ -66,6 +66,10 @@ DEFAULT_PDF_CAP = 10
 
 # deletes run only when this crawl fetched at least this share of the stored pages
 MIN_CRAWLED_FRACTION = 0.5
+
+# Longest crawl we start: Crawl-delay x max_pages above this stops the crawl before any
+# page is fetched (#191). Honouring the delay stays the rule; only the wait is bounded.
+MAX_CRAWL_SECONDS = 7200.0
 
 _PROFILE_FIELDS = (
     "name", "address", "phone", "email",
@@ -116,12 +120,19 @@ def resolve_business(url: str, business_id: uuid.UUID | None) -> uuid.UUID:
 
 def _expand_by_links(
     start_url: str, client, robots_checker: RobotsChecker | None, max_pages: int, max_depth: int
-) -> tuple[list[str], dict[str, str]]:
-    """BFS from `start_url` when there's no usable sitemap. One fetch per URL, cached for reuse."""
-    seen = {start_url}
+) -> tuple[list[str], dict[str, FetchedDocument | None]]:
+    """BFS from `start_url` when there's no usable sitemap. One fetch per URL, through
+    `fetch_document` (so a link serving a PDF is parsed as a PDF, #188), cached for reuse:
+    the value is the document, or None when the fetch failed -- the main loop then does
+    not request it again."""
+    start_key = normalize_url(start_url, start_url)
+    seen = {start_key}
     all_urls = [start_url]
-    fetched: dict[str, str] = {}
+    fetched: dict[str, FetchedDocument | None] = {}
     frontier = [start_url]
+
+    def allow_final(final_url: str) -> bool:
+        return same_domain(final_url, start_url) and (robots_checker is None or robots_checker.can_fetch(final_url))
 
     for _depth in range(max_depth):
         if len(all_urls) >= max_pages or not frontier:
@@ -133,15 +144,18 @@ def _expand_by_links(
             if robots_checker and not robots_checker.can_fetch(url):
                 continue
             try:
-                html = fetch_text(url, client)
+                document = fetch_document(url, client, allow_final=allow_final)
             except Exception as exc:
                 print(f"fetch failed, skipping: {url} ({exc})")
+                fetched[url] = None
                 continue
             finally:
                 # a failed request still hit the server -- the delay applies to it too
                 time.sleep(client._crawl_delay)
-            fetched[url] = html
-            for link in discover_links(html, url):
+            fetched[url] = document
+            if document.html is None:  # a PDF has no links
+                continue
+            for link in discover_links(document.html, document.url or url):
                 # robots check here too, not only before fetching the frontier: every URL in
                 # all_urls is fetched later by crawl_business, so a disallowed link added here
                 # would be fetched anyway (R10)
@@ -292,6 +306,7 @@ def crawl_business(
     extract_profile: bool = True,
     pdf_cap: int = DEFAULT_PDF_CAP,
     facts_choice: str | None = None,
+    max_crawl_seconds: float = MAX_CRAWL_SECONDS,
 ) -> dict:
     """One full crawl: discover -> fetch (pages, then up to `pdf_cap` linked PDFs) ->
     clean -> store every page -> organize
@@ -316,6 +331,17 @@ def crawl_business(
             # raises our own delay, never lowers it below delay_seconds
             client._crawl_delay = robots_delay
             print(f"robots.txt Crawl-delay: {robots_delay:g} s between requests")
+        # #191: the delay is honoured in full, so a huge one means a crawl of days. Stop
+        # before the sitemap and page requests (each one waits the delay), stored data kept.
+        worst_case = client._crawl_delay * max_pages
+        if worst_case > max_crawl_seconds:
+            reason = (
+                f"robots.txt Crawl-delay {client._crawl_delay:g} s x {max_pages} pages = {worst_case / 3600:.1f} h, "
+                f"over the {max_crawl_seconds / 3600:g} h crawl budget; lower --max-pages, or add the content "
+                f"another way (owner upload)"
+            )
+            print(f"crawl aborted, stored data kept: {reason}")
+            return {"aborted": reason}
         # robots.txt `Sitemap:` lines first, then /sitemap.xml (#136); after the delay is set
         sitemap_xml = fetch_sitemap(
             base_url, client, parse_robots_sitemaps(robots_txt),
@@ -353,19 +379,29 @@ def crawl_business(
         noindex_urls: set[str] = set()  # K1: honoured by organize_business as "not retrievable"
 
         pdf_urls_seen: set[str] = set()
+        redirected_to: set[str] = set()  # final urls of redirected fetches, kept by the delete step
+
+        def allow_final(final_url: str) -> bool:
+            return same_domain(final_url, start_url) and (robots_checker is None or robots_checker.can_fetch(final_url))
 
         # urls_to_crawl grows while this loop runs: PDFs linked from a page are appended
         # to it (so they're fetched here too, and kept by delete_pages_not_in below)
         for url in urls_to_crawl:
             try:
-                html = fetched.get(url)
-                document = None
-                if html is None:
+                if url in fetched:  # already fetched by the BFS (None = it failed there; not asked again)
+                    document = fetched[url]
+                    if document is None:
+                        continue
+                else:
                     try:
-                        document = fetch_document(url, client)
+                        document = fetch_document(url, client, allow_final=allow_final)
                     finally:
                         time.sleep(client._crawl_delay)
-                    html = document.html
+                html = document.html
+                if document.url and document.url != url:
+                    # stored under the final url (#188); the requested one stays in the keep list
+                    redirected_to.add(document.url)
+                    url = document.url
 
                 if html is None:
                     if not document.pdf_text:
@@ -376,7 +412,7 @@ def crawl_business(
                     title = document.pdf_title
                     cleaned = CleanedPage(main_markdown=document.pdf_text, chrome_markdown="", language=None)
                 else:
-                    if has_noindex(html) or (document is not None and document.noindex):
+                    if has_noindex(html) or document.noindex:
                         noindex_urls.add(url)
                     title = extract_title(html)
                     cleaned = clean_page(html)
@@ -452,7 +488,7 @@ def crawl_business(
         else:
             with tenant_session(business_id) as session:
                 deleted_pages = delete_pages_not_in(
-                    session, business_id, keep_urls=[*urls_to_crawl, chrome_pseudo_url(root)]
+                    session, business_id, keep_urls=[*urls_to_crawl, *redirected_to, chrome_pseudo_url(root)]
                 )
 
         profile_extracted = False
