@@ -382,3 +382,24 @@ def test_keyword_search_survives_urls_and_punctuation(business_id):
         _add_chunk(s, business_id, "We have saunas and pools.")
         hits = keyword_search(s, business_id, "do you have saunas? see https://x.com/a:b 'q':*", top_k=10)
     assert len(hits) >= 1
+
+
+# --- retrieve(mode=...): vector-only baseline for the eval's --retrieval flag ---------
+
+
+def test_retrieve_vector_mode_skips_keyword_search(monkeypatch):
+    import app.rag.retrieve as r
+
+    monkeypatch.setattr(r, "embed", lambda texts: [[0.0]])
+    monkeypatch.setattr(r, "vector_search", lambda *a, **k: [])
+    called = []
+    monkeypatch.setattr(r, "keyword_search", lambda *a, **k: called.append(1) or [])
+    assert retrieve(None, uuid.uuid4(), "sauna hours", mode="vector") == []
+    assert called == []
+    assert retrieve(None, uuid.uuid4(), "sauna hours") == []  # default stays hybrid
+    assert called == [1]
+
+
+def test_retrieve_rejects_unknown_mode():
+    with pytest.raises(ValueError):
+        retrieve(None, uuid.uuid4(), "q", mode="keyword")

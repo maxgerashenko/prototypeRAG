@@ -361,6 +361,10 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   starts at once; compare connect-to-first-audio with a business that has no stored row (before: ≈ 250–700 ms
   TTS). Restart the app and call again — still instant. Change `TTS_VOICE` → one slow call, then instant.
 
+- [ ] **Hybrid vs vector-only retrieval (2026-11-07)**: on the pilot, run
+  `uv run python -m app.rag.eval --business-id <pilot id> --file tests/eval/bathhouse.yaml --retrieval vector`, then the same with
+  `--retrieval hybrid`. Compare "Pass rate" and "Retrieval hit@k" between the two reports and note the gain from full-text search
+  (and which questions flip) under "Known problems" / `02-local-rag.md`.
 - [ ] **Tool loop in text chat (#51)**: with `google/gemma-4-12b` loaded, `POST /chat` and `GET /chat/stream` on the pilot with a question that makes the model call `search_business_info` (e.g. "Do you have parking?"): the answer arrives, no error, `llm chat` log lines show `tool_calls=1` then a text round. Then a plain greeting (no tool call) still answers. Repeat in the voice app (`/web/`) to confirm the voice loop still works after the shared-tool change.
 - [ ] **Sessions questions on a call (2026-11-01)**: with `BOOKING_BACKEND=google_calendar` (business without `enabled_tools` now gets all optional tools; `SESSION_PROMPT` tells the model to call `list_sessions`), ask "What sessions do you have today?" / "any specials?" on a call and in `/web/chat.html`. Expect the sessions read aloud, or "no open sessions" when the calendar is empty; then book one via `join_session`.
 - [ ] **Embedding outside the DB transaction (#276, #227)**: with the DB and LM Studio up, run `uv run pytest -q tests/test_rag.py tests/test_fact_chunks.py tests/test_location_scope.py tests/test_voice.py tests/test_voice_session.py` (they need Postgres and LM Studio embeddings; the cloud box had no pgvector), then ask a question in `/web/chat.html` and on a call: answers still carry the retrieved facts and `GET /debug/retrieve` still returns chunks.
