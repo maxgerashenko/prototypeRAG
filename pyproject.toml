@@ -35,3 +35,16 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "scenario: LLM-driven booking scenarios (need LM Studio with the chat and caller models; see tests/scenarios/README.md)",
+    "P2: scenario guards false \"booked\" / repeated read-back",
+    "P3: scenario guards garbled name -> one yes/no proposal",
+    "P5: scenario guards brevity / no re-listing",
+    "P6: scenario guards context memory (name once, yes books the chosen session)",
+    "P8: scenario guards the real date in read-backs",
+    "P12: scenario guards the right session when the model passes only a name",
+    "P13: scenario guards against a made-up session (name, time or seats)",
+    "P16: scenario guards against a vague failure (a blamed code or a technical problem)",
+    "P19: scenario guards against a read-back of a session that does not exist",
+    "P22: scenario guards against calling a session with free seats full",
+]

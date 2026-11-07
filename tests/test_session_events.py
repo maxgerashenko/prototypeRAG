@@ -91,6 +91,20 @@ def biz():
         s.execute(delete(Business).where(Business.id == bid))
 
 
+@pytest.fixture
+def own_sessions_only(monkeypatch):
+    """`list_open` shows every business's sessions (demo rule #300) and the dev DB holds hundreds from old runs:
+    keep only the sessions of the business the test made."""
+    orig = S.list_open
+
+    def scoped(business_id, day=None, now=None, limit=10, seats=True):
+        with tenant_session(business_id) as s:
+            mine = {S.session_ref(i) for i in s.scalars(select(GroupSession.id).where(GroupSession.business_id == business_id))}
+        return [r for r in orig(business_id, day, now, 5000, seats) if r["ref"] in mine][:limit]
+
+    monkeypatch.setattr(S, "list_open", scoped)
+
+
 def _conv(biz):
     cid = uuid.uuid4()
     with tenant_session(biz) as s:
@@ -213,7 +227,7 @@ def test_typed_event_becomes_a_joinable_session(cal, biz, monkeypatch):
     # the title we wrote comes back through the sync: nothing changes, nothing is re-patched
     n = cal.n
     assert G.reconcile_events(CAL, [_ev(summary=cal.events["g1"]["summary"], hours=2)], now=NOW) == {
-        "created": 0, "moved": 0, "renamed": 0, "cancelled": 0}
+        "created": 0, "moved": 0, "renamed": 0, "cancelled": 0, "unbooked": 0}
     assert cal.n == n
     r = S.join_session(biz, rows[0]["ref"], _conv(biz), "Ann", now=NOW)
     assert r["booked"] == 1
@@ -227,6 +241,7 @@ def test_imported_session_item_has_its_real_length(cal, biz, monkeypatch):
     from zoneinfo import ZoneInfo
     with tenant_session(biz) as s:
         items = S.sessions_in_range(s, biz, start - timedelta(hours=1), start + timedelta(hours=1), ZoneInfo(NY))
+    items = [i for i in items if i["business_id"] == str(biz)]  # the range shows other businesses' sessions too
     assert (items[0]["start_min"], items[0]["end_min"], items[0]["source"]) == (17 * 60, 19 * 60, "google")
 
 
@@ -239,11 +254,11 @@ def test_event_moved_and_deleted_in_google(cal, biz, monkeypatch):
     later = NOW + timedelta(days=3)
     assert G.reconcile_events(CAL, [_ev(summary="Yoga", start=later)], now=NOW)["moved"] == 1
     with tenant_session(biz) as s:
-        assert s.scalar(select(Booking.starts_at).where(Booking.status == "confirmed")) == later
+        assert s.scalar(select(Booking.starts_at).where(Booking.business_id == biz, Booking.status == "confirmed")) == later
     assert G.reconcile_events(CAL, [_ev(summary="Yoga", start=later, status="cancelled")], now=NOW)["cancelled"] == 1
     with tenant_session(biz) as s:
-        assert s.scalar(select(GroupSession.status)) == "cancelled"
-        assert s.scalar(select(Booking.status)) == "cancelled"
+        assert s.scalar(select(GroupSession.status).where(GroupSession.business_id == biz)) == "cancelled"
+        assert s.scalar(select(Booking.status).where(Booking.business_id == biz)) == "cancelled"
     assert S.list_open(biz, now=NOW) == []
 
 
@@ -266,32 +281,181 @@ def test_base_name_and_title():
     assert G.title("Sauna", 3, 3) == "Sauna · 3/3 attendees · FULL"
 
 
-def test_tools(cal, biz):
+def test_tools(cal, biz, own_sessions_only):
     sid, _ = _make(biz, seats=1)
     ctx = ActionContext(business_id=biz, conversation_id=None)
     out = T.list_sessions(ctx, {"date": DAY})
-    assert S.session_ref(sid) in out and "1 of 1 seats left" in out
-    assert "Booked Ann" in T.join_session(ctx, {"session": S.session_ref(sid), "name": "Ann"})
-    assert "full" in T.join_session(ctx, {"session": S.session_ref(sid), "name": "Bob"}).lower()
+    assert S.session_ref(sid) in out and "the 1 seat is free" in out
+    assert "Booked Ann" in T.join_session(ctx, {"session": S.session_ref(sid), "first_name": "Ann", "last_name": "Lee"})
+    assert "full" in T.join_session(ctx, {"session": S.session_ref(sid), "first_name": "Bob", "last_name": "Ray"}).lower()
     assert "FULL" in T.list_sessions(ctx, {"date": DAY})
     assert T.join_session(ctx, {"session": S.session_ref(sid)}).startswith("Error")
 
 
-def test_sync_pass_turns_a_typed_event_into_a_session_and_deleting_cancels_it(cal, biz, monkeypatch):
+def test_sync_pass_turns_a_typed_event_into_a_session_and_deleting_cancels_it(cal, biz, monkeypatch, own_sessions_only):
     _owner(biz, monkeypatch)
     start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=2)
-    typed = {"id": "typed1", "etag": "t1", "status": "confirmed", "summary": "Evening Sauna",
+    eid = f"typed-{uuid.uuid4().hex}"  # events are matched across businesses by id: a fixed id met the row of an earlier run
+    typed = {"id": eid, "etag": "t1", "status": "confirmed", "summary": "Evening Sauna",
              "start": {"dateTime": start.isoformat()}, "end": {"dateTime": (start + timedelta(hours=2)).isoformat()},
              "updated": start.isoformat()}
-    cal.events["typed1"] = dict(typed)
+    cal.events[eid] = dict(typed)
     cal.listed = [typed]
     calendar_sync.sync_now(CAL, cal)
     rows = S.list_open(biz)
     assert [r["name"] for r in rows] == ["Evening Sauna"]
-    assert cal.events["typed1"]["summary"].startswith("Evening Sauna · 0/")
+    assert cal.events[eid]["summary"].startswith("Evening Sauna · 0/")
     S.join_session(biz, rows[0]["ref"], _conv(biz), "Ann")
     cal.listed = [{**typed, "status": "cancelled"}]
     calendar_sync.sync_now(CAL, cal)
     assert S.list_open(biz) == []
     with tenant_session(biz) as s:
         assert s.scalar(select(Booking.status).where(Booking.name == "Ann")) == "cancelled"
+
+
+# --- guests as attendees ---------------------------------------------------------------------------
+
+def test_guests_are_written_as_attendees_and_removed_with_the_seat(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=3)
+    code = S.session_ref(sid)
+    S.join_session(biz, code, _conv(biz), "Zoë", "+19294892284", now=NOW, last_name="Łukasiewicz")
+    S.join_session(biz, code, _conv(biz), "Ann", now=NOW, last_name="Lee")
+    ev = cal.events[ref]
+    assert ev["attendees"] == [
+        {"email": "ann_lee@guest.invalid", "displayName": "Ann Lee", "responseStatus": "accepted"},
+        {"email": "zoe_lukasiewicz@guest.invalid", "displayName": "Zoë Łukasiewicz", "responseStatus": "accepted"},
+    ]
+    assert (ev["guestsCanSeeOtherGuests"], ev["guestsCanInviteOthers"], ev["guestsCanModify"]) == (False,) * 3
+    with tenant_session(biz) as s:
+        bid = s.scalar(select(Booking.id).where(Booking.session_id == sid, Booking.name == "Ann Lee"))
+    S.remove_attendee(biz, sid, bid, now=NOW)
+    assert [a["email"] for a in cal.events[ref]["attendees"]] == ["zoe_lukasiewicz@guest.invalid"]
+
+
+def test_an_owner_added_real_attendee_is_kept(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=3)
+    cal.events[ref]["attendees"] = [{"email": "owner@example.com"}]
+    S.join_session(biz, S.session_ref(sid), _conv(biz), "Ann", now=NOW, last_name="Lee")
+    assert [a["email"] for a in cal.events[ref]["attendees"]] == ["owner@example.com", "ann_lee@guest.invalid"]
+
+
+def test_no_attendees_without_the_oauth_token(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "")
+    sid, ref = _make(biz)
+    S.join_session(biz, S.session_ref(sid), _conv(biz), "Ann", now=NOW, last_name="Lee")
+    assert "attendees" not in cal.events[ref]
+
+
+def _session_row(ref, ev, attendees):
+    return G.EventRow(ref, ev["summary"], NOW + timedelta(days=1), NOW + timedelta(days=1, hours=1), "confirmed",
+                      kind="session", attendees=attendees)
+
+
+def _statuses(biz, sid):
+    with tenant_session(biz) as s:
+        return {b.name: (b.status, b.attendee_seen_at is not None)
+                for b in s.scalars(select(Booking).where(Booking.session_id == sid))}
+
+
+def test_sync_marks_attendees_seen_and_cancels_a_guest_removed_or_declined_in_google(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=4)
+    code = S.session_ref(sid)
+    for first in ("Ann", "Bob", "Cy"):
+        S.join_session(biz, code, _conv(biz), first, now=NOW, last_name="Lee")
+    ev = cal.events[ref]
+    G.reconcile_events(CAL, [_session_row(ref, ev, ev["attendees"])], now=NOW)
+    assert all(seen for _, seen in _statuses(biz, sid).values())  # first pass: all three seen
+    attendees = [a for a in ev["attendees"] if a["email"] != "bob_lee@guest.invalid"]  # owner removes Bob
+    for a in attendees:
+        if a["email"] == "cy_lee@guest.invalid":
+            a["responseStatus"] = "declined"  # and Cy declines
+    counts = G.reconcile_events(CAL, [_session_row(ref, ev, attendees)], now=NOW)
+    assert counts["unbooked"] == 2
+    assert {n: st for n, (st, _) in _statuses(biz, sid).items()} == {
+        "Ann Lee": "confirmed", "Bob Lee": "cancelled", "Cy Lee": "cancelled"}
+    assert cal.events[ref]["summary"].endswith("1/4 attendees")  # title follows, no text message sent
+
+
+def test_a_guest_not_seen_yet_is_pushed_again_not_cancelled(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=3)
+    cal.fail.add("patch")
+    S.join_session(biz, S.session_ref(sid), _conv(biz), "Ann", now=NOW, last_name="Lee")
+    assert "attendees" not in cal.events[ref]
+    cal.fail.clear()
+    counts = G.reconcile_events(CAL, [_session_row(ref, cal.events[ref], [])], now=NOW)
+    assert counts["unbooked"] == 0 and _statuses(biz, sid)["Ann Lee"][0] == "confirmed"
+    assert [a["email"] for a in cal.events[ref]["attendees"]] == ["ann_lee@guest.invalid"]
+
+
+def test_a_guest_added_in_google_books_nothing(cal, biz, monkeypatch):
+    monkeypatch.setattr(get_settings(), "google_calendar_token_file", "token.json")
+    sid, ref = _make(biz, seats=3)
+    ev = cal.events[ref]
+    extra = [{"email": "eve_x@guest.invalid", "displayName": "Eve X", "responseStatus": "accepted"}]
+    G.reconcile_events(CAL, [_session_row(ref, ev, extra)], now=NOW)
+    assert _statuses(biz, sid) == {}
+    assert "eve_x" not in str(cal.events[ref].get("attendees"))  # and the stray fake attendee is removed
+
+
+# --- private flag <-> event visibility ---------------------------------------------------------------
+
+def test_private_flag_is_written_as_event_visibility(cal, biz):
+    sid, ref = _make(biz, private=True)
+    assert cal.events[ref]["visibility"] == "private"
+    S.update_session(biz, sid, private=False, now=NOW)
+    assert cal.events[ref]["visibility"] == "default"
+    S.update_session(biz, sid, private=True, now=NOW)
+    assert cal.events[ref]["visibility"] == "private"
+    item = S.create_session(biz, DAY, 19, "Open", 2, now=NOW)
+    with tenant_session(biz) as s:
+        assert cal.events[s.get(GroupSession, uuid.UUID(item["id"])).external_ref]["visibility"] == "default"
+
+
+def test_visibility_changed_in_google_flips_private(cal, biz):
+    sid, ref = _make(biz)
+
+    def private():
+        with tenant_session(biz) as s:
+            return s.get(GroupSession, sid).private
+
+    def row(**kw):
+        with tenant_session(biz) as s:
+            r = s.get(GroupSession, sid)
+            return G.EventRow(ref, cal.events[ref]["summary"], r.starts_at, r.ends_at, "confirmed", **kw)
+
+    assert G.reconcile_events(CAL, [row(visibility="private")], now=NOW)["renamed"] == 0
+    assert private() is True
+    assert G.reconcile_events(CAL, [row()], now=NOW) and private() is True  # not read: left alone
+    G.reconcile_events(CAL, [row(visibility="default")], now=NOW)
+    assert private() is False
+
+
+def test_stale_mirror_does_not_undo_a_fresh_app_change_but_newer_google_does(cal, biz):
+    sid, ref = _make(biz)
+    S.update_session(biz, sid, private=True, now=NOW)
+    with tenant_session(biz) as s:
+        r = s.get(GroupSession, sid)
+        app_updated, args = r.updated_at, (ref, cal.events[ref]["summary"], r.starts_at, r.ends_at, "confirmed")
+
+    def private():
+        with tenant_session(biz) as s:
+            return s.get(GroupSession, sid).private
+
+    stale = G.EventRow(*args, visibility="default", google_updated=app_updated - timedelta(minutes=5))
+    G.reconcile_events(CAL, [stale], now=NOW)
+    assert private() is True  # the app's change stays
+    newer = G.EventRow(*args, visibility="default", google_updated=app_updated + timedelta(minutes=5))
+    G.reconcile_events(CAL, [newer], now=NOW)
+    assert private() is False
+
+
+def test_sync_mirror_keeps_visibility():
+    r = calendar_sync.parse_event({"id": "x", "visibility": "private", "start": {"dateTime": "2030-01-01T10:00:00Z"},
+                                   "end": {"dateTime": "2030-01-01T11:00:00Z"}})
+    assert r["visibility"] == "private"
+    assert calendar_sync.parse_event({"id": "y", "start": {"dateTime": "2030-01-01T10:00:00Z"},
+                                      "end": {"dateTime": "2030-01-01T11:00:00Z"}})["visibility"] == "default"

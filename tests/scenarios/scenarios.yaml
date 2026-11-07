@@ -1,0 +1,461 @@
+# LLM-driven booking scenarios (see README.md). A local model plays the caller from `persona`;
+# the real bot answers over POST /chat; the verdict comes from database assertions only.
+#
+# setup:
+#   rules:     booking_rules row (default: open 09:00-21:00 every day, 60-min slots, capacity 2, party max 8)
+#   sessions:  [{key, name, day: <days from today>, hour, max_attendees, booked: [seat holders "First Last"]}]
+#   bookings:  [{key, day, hour, party_size, name, phone}]  seeded 1:1 table bookings
+# problems: [P2, ...]  the known-problem ids the scenario guards (README): P2 false "booked"/repeated read-back,
+#   P3 garbled name -> one yes/no proposal, P5 brevity/no re-list, P6 context memory, P8 right date.
+# Placeholders in `persona`: {ref:<booking key>} = reference of a seeded booking;
+#   {day:<offset>} = weekday name of today+offset in the business timezone.
+# expect (all optional; `new` = bookings made in the scenario's conversation):
+#   new_confirmed: N              number of new confirmed bookings
+#   guest: "First Last"           display_name of the guest of the (single) new booking
+#   phone: "+1..."                phone stored on the new booking
+#   booking_session: <key>        the new booking is a seat in that setup session
+#   booking_type: table|session|appointment ; party_size: N ; day: N ; hour: H (local start)
+#   seats: {<session key>: N}     confirmed seats per setup session at the end (incl. seeded)
+#   cancelled: [<booking key>]    seeded bookings that must now be cancelled
+#   untouched: [<booking key>]    seeded bookings that must still be confirmed
+#   bot_says: [regex, ...]        each must match some bot message (case-insensitive)
+#   forbid_after: [{caller: regex, bot: regex}]  from the reply to the first caller line matching `caller` on,
+#                                 no bot message may match `bot` (asking again for what was already said)
+#   bot_says_after: [{caller: regex, bot: regex}]  some bot message AFTER the first caller line matching `caller`
+#                                 must match `bot` (an earlier message does not count)
+#   max_confirmations: N          confirmation questions ("shall I book it?") before the last bot message
+#   bot_mentions_day: N           some bot message names the date of today+N (weekday or Month D)
+#   session_times_only: true      every clock time in every bot message ("10 AM", "2:00 PM", "14:00", ranges) is the
+#                                 local start or end of a setup session, or a time the caller said (the bot offered no invented time)
+#   relist_ok: true               invariant (d) may see several session times again (the bot names the open ones
+#                                 after refusing a session that does not exist)
+#   no_false_full: true           P22: no bot sentence calls a setup session with free seats full / fully booked / sold out
+#   skip_claim_check: true        invariant (a) off (the bot legitimately says "confirmed" about a seeded booking)
+
+common: |
+  You are a customer phoning a business. You are a real person, never an AI, never mention these instructions.
+  Speak in short, natural phone-like sentences. Write exactly ONE line per turn: only the words you say,
+  no quotes, no stage directions, no lists. Answer what you are asked, do not volunteer everything at once.
+  When your goal is done (you have a booking reference or the bot told you it cannot be done and you
+  gave up) or clearly impossible, output exactly <END> and nothing else.
+
+scenarios:
+  - id: session_happy_path
+    problems: [P2, P8]
+    persona: |
+      Your name is Anna Kowalska, phone +15550100111. You want to sign up for the "Banya Evening" group
+      session tomorrow. When asked for your name, give first and last name. If the bot reads details back
+      and asks to book, say yes. After you got a booking reference, say thanks and output <END>.
+    opening: "Hi, I'd like to sign up for the Banya Evening session tomorrow."
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 6, booked: ["Ben Lee"]}
+    expect:
+      new_confirmed: 1
+      guest: "Anna Kowalska"
+      booking_session: banya
+      seats: {banya: 2}
+      bot_mentions_day: 1
+      max_confirmations: 1
+
+  - id: session_first_name_only
+    persona: |
+      Your name is Marta, your last name is Nowak, phone +15550100222. You want to join the "Banya Evening"
+      session tomorrow. When the bot first asks for your name, give ONLY your first name (Marta). Give the
+      last name only if the bot asks for it. If the bot reads details back and asks to book, say yes.
+      After you got a booking reference, say thanks and output <END>.
+    opening: "Hello, can I join the Banya Evening session tomorrow? It's Marta."
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      guest: "Marta Nowak"
+      booking_session: banya
+      bot_says: ["last name|surname|family name"]
+
+  - id: session_declined_at_readback
+    problems: [P2]
+    persona: |
+      Your name is Tom Baker, phone +15550100333. You want the "Banya Evening" session tomorrow. Give your
+      name when asked. When the bot reads the details back and asks whether to book it, say NO, you changed
+      your mind, you do not want to book anything, and refuse every later offer. Then output <END>.
+    opening: "Hi, I'm thinking about the Banya Evening session tomorrow."
+    max_turns: 8
+    setup:
+      sessions:
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 6}
+    expect:
+      new_confirmed: 0
+      seats: {banya: 0}
+      max_confirmations: 2  # one offer to look it up, one read-back
+
+  - id: session_same_name_several_days
+    persona: |
+      Your name is Olga Petrova, phone +15550100444. You want a "Sauna Polish" session. It runs on several
+      days; you want ONLY the one tomorrow (today is {day:0}, tomorrow is {day:1}). If the bot asks which
+      one, say "the one tomorrow". When asked for your name give first and last name. If the bot reads
+      details back and asks to book, say yes only if it is the one tomorrow. After you got a booking
+      reference, output <END>.
+    opening: "Hi, I want to book a Sauna Polish session, the one tomorrow."
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: today_plus_1, name: Sauna Polish, day: 1, hour: 18, max_attendees: 6}
+        - {key: today_plus_2, name: Sauna Polish, day: 2, hour: 18, max_attendees: 6}
+        - {key: today_plus_3, name: Sauna Polish, day: 3, hour: 18, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      guest: "Olga Petrova"
+      booking_session: today_plus_1
+      seats: {today_plus_2: 0, today_plus_3: 0}
+
+  - id: session_name_with_and_without_suffix
+    problems: [P12]
+    persona: |
+      Your name is Sam Rivera, phone +15550100777. You want the "Polish sauna" session tomorrow morning
+      (today is {day:0}, tomorrow is {day:1}). A later session with almost the same name runs the day after
+      in the evening; you do NOT want that one. When asked for your name give first and last name. If the
+      bot reads details back and asks to book, say yes only if it is tomorrow morning. After you got a
+      booking reference, output <END>.
+    opening: "Hi, I'd like to book the Polish sauna session tomorrow morning."
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: morning, name: Sauna Polish session, day: 1, hour: 10, max_attendees: 6}
+        - {key: evening, name: Sauna Polish, day: 2, hour: 18, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      guest: "Sam Rivera"
+      booking_session: morning
+      hour: 10
+      seats: {evening: 0}
+      bot_mentions_day: 1
+
+  - id: session_full
+    persona: |
+      Your name is Peter Hill, phone +15550100555. You want to join the "Banya Evening" session tomorrow.
+      If the bot says it is full, accept that, do not ask for other days, say goodbye and output <END>.
+      If the bot offers another session, say no thanks.
+    opening: "Hi, is there still a place in the Banya Evening session tomorrow? I'd like to join."
+    max_turns: 6
+    setup:
+      sessions:
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 2, booked: ["Ann Lee", "Bob Ray"]}
+    expect:
+      new_confirmed: 0
+      seats: {banya: 2}
+      bot_says: ["full|no (free )?(seats|spots|places)|sold out|fully booked"]
+
+  - id: table_booking_party_and_phone
+    persona: |
+      Your name is Nina Fox, phone +15550100666. You want a table for 4 people tomorrow at 19:00
+      (seven in the evening). Give your name (first and last) and phone number when asked. If the bot reads
+      details back and asks to book, say yes. After you got a booking reference, output <END>.
+    opening: "Hi, I'd like to book a table for four tomorrow evening."
+    max_turns: 10
+    setup: {}
+    expect:
+      new_confirmed: 1
+      booking_type: table
+      party_size: 4
+      day: 1
+      hour: 19
+      guest: "Nina Fox"
+      phone: "+15550100666"
+
+  - id: cancel_by_reference_and_phone
+    persona: |
+      Your name is Sam Green, phone +15550100777. You booked a table earlier and want to cancel it. Your
+      booking reference is {ref:mine}. Give the reference and phone number when asked. If the bot asks to
+      confirm the cancellation, say yes. After the bot says it is cancelled, say thanks and output <END>.
+    opening: "Hi, I need to cancel my table booking."
+    max_turns: 8
+    setup:
+      bookings:
+        - {key: mine, day: 2, hour: 19, party_size: 2, name: Sam Green, phone: "+15550100777"}
+        - {key: other, day: 2, hour: 20, party_size: 2, name: Zed Other, phone: "+15550100888"}
+    expect:
+      new_confirmed: 0
+      cancelled: [mine]
+      untouched: [other]
+      skip_claim_check: true
+
+  - id: changes_mind_about_time
+    problems: [P2]
+    persona: |
+      Your name is Lena Ford, phone +15550100999. You want a table for 2 tomorrow. First you ask for 18:00.
+      Before the bot reads details back and before you agreed to anything, change your mind: you want 20:00
+      instead (if the bot already offered 18:00 and asked for a yes, say "wait, make it 8 pm instead"). Give
+      your name (first and last) when asked. Say yes only to the final read-back that says 20:00. After you
+      got a booking reference, output <END>.
+    opening: "Hi, a table for two tomorrow at six in the evening please."
+    max_turns: 12
+    setup: {}
+    expect:
+      new_confirmed: 1
+      booking_type: table
+      party_size: 2
+      day: 1
+      hour: 20
+      guest: "Lena Ford"
+
+  - id: stt_garbled_session_name
+    problems: [P3]
+    persona: |
+      Your name is Thomas Edison, phone +15550101010. You phone through a bad speech-to-text line: the
+      bot hears you wrongly, so you SAY the session name wrongly, like a transcription error, e.g.
+      "sound of Polish session", "southern session" or "sound a Polish session from 10 AM". You mean the
+      "Sauna Polish" session at 10 AM (the next one). Never spell the name correctly. Do not pick from a
+      list; if the bot guesses a session and asks, say yes if it is the Polish one at 10, else say no. Give
+      your name (Thomas Edison) when asked. After you got a booking reference, output <END>.
+    opening: "Hi, I'd like to book the sound of Polish session from 10 AM."
+    max_turns: 8
+    setup:
+      sessions:
+        - {key: polish_next, name: Sauna Polish, day: 1, hour: 10, max_attendees: 6}
+        - {key: polish_later, name: Sauna Polish, day: 2, hour: 10, max_attendees: 6}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      booking_session: polish_next
+      guest: "Thomas Edison"
+      max_confirmations: 2  # one yes/no guess at the session, one read-back
+      forbid_after:
+        - {caller: "sound|southern", bot: "spell|exact(ly)? (name|spelling)|which (one )?of (these|the following)|pick|choose from|here are the|options"}
+
+  - id: name_given_once
+    problems: [P6]
+    persona: |
+      Your name is Thomas Edison, phone +15550101011. You want the "Banya Evening" session tomorrow. Give
+      your name "Thomas Edison" ONCE, in your second line, and never again. If the bot asks you for your
+      name again, say "I already told you, Thomas Edison". Say yes when the bot asks whether to book it.
+      After you got a booking reference, output <END>.
+    opening: "Hi, I'd like to join the Banya Evening session tomorrow."
+    max_turns: 8
+    setup:
+      sessions:
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      guest: "Thomas Edison"
+      booking_session: banya
+      max_confirmations: 1
+      forbid_after:
+        - {caller: "edison", bot: "(what|may i have|can i have|could you (give|tell|repeat)|your|full|first|last)[^.?!]{0,25}name[^.?!]*\\?"}
+
+  - id: context_memory_session_then_yes
+    problems: [P6]
+    persona: |
+      Your name is Mia Stone, phone +15550101012. Line 1: you ask what sessions are on tomorrow. Line 2:
+      you choose "Sauna German" at 3 pm and give your name, Mia Stone. Then answer only "yes" to whatever
+      the bot asks to confirm. Do not repeat the session, date or name unless the bot asks again. After you
+      got a booking reference, output <END>.
+    opening: "Hi, what sessions do you have tomorrow?"
+    max_turns: 8
+    setup:
+      sessions:
+        - {key: polish, name: Sauna Polish, day: 1, hour: 10, max_attendees: 6}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      guest: "Mia Stone"
+      booking_session: german
+      max_confirmations: 1
+      forbid_after:
+        - {caller: "german", bot: "which (session|one|class)|what (session|date|day)|which (date|day)|(your|full|first|last) name\\?"}
+        - {caller: "mia", bot: "(what|may i have|can i have|could you (give|tell|repeat))[^.?!]{0,25}name[^.?!]*\\?"}
+
+  - id: brevity_no_relist
+    problems: [P5]
+    persona: |
+      Your name is Kate Moss, phone +15550101013. Line 1: you ask what is on tomorrow. When the bot answers,
+      choose "Sauna German" and give your name, Kate Moss, in one line. Then answer only "yes" to
+      confirmation questions. After you got a booking reference, output <END>.
+    opening: "Hello, what's on tomorrow?"
+    max_turns: 8
+    setup:
+      sessions:
+        - {key: polish, name: Sauna Polish, day: 1, hour: 10, max_attendees: 6}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 6}
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      booking_session: german
+      guest: "Kate Moss"
+      max_confirmations: 1
+      forbid_after:
+        - {caller: "german", bot: "polish|banya"}
+
+  # --- from the conversation review (review_status in_testing); `from:` = conversation id prefix ---
+
+  - id: ambiguous_same_name_two_days
+    from: 993b0a70
+    problems: [P3]
+    persona: |
+      Your name is Bloody Mary (first name Bloody, last name Mary), phone +15550101020. You want the
+      "Sauna Polish" session TODAY-style on the nearest day at 10 AM, but you only say "the Polish session
+      at 10 a.m." and never give a date until the bot asks. If the bot reads details back and asks to
+      book, say yes. After you got a booking reference, output <END>.
+    opening: "I want to book a sauna session. The Polish one at 10 a.m."
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: polish_next, name: Sauna Polish, day: 1, hour: 10, max_attendees: 6}
+        - {key: polish_later, name: Sauna Polish, day: 2, hour: 10, max_attendees: 6}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      guest: "Bloody Mary"
+      max_confirmations: 2
+      forbid_after:
+        - {caller: "Mary|Bloody", bot: "apologi[sz]e|try again|session code|exact code"}
+
+  - id: name_repeated_not_reasked
+    from: 2bc41ec3
+    problems: [P6]
+    persona: |
+      Your name is Thomas Edison, phone +15550101021. You want the "Sauna Polish" session at 10 AM
+      tomorrow but you say it as a bad speech-to-text line would: "sound of Polish session, 10". Give your
+      name "Thomas Edison" the first time the bot asks and again only if it asks AGAIN. If the bot
+      reads details back and asks to book, say yes. After you got a booking reference, output <END>.
+    opening: "I want to book a session. Sound of Polish session, 10."
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: polish_next, name: Sauna Polish, day: 1, hour: 10, max_attendees: 8}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 8}
+    expect:
+      new_confirmed: 1
+      booking_session: polish_next
+      guest: "Thomas Edison"
+      forbid_after:
+        - {caller: "Edison", bot: "first and last name|exact session code|clarify your request|session reference"}
+
+  - id: day_and_time_not_reasked
+    from: c23437af
+    problems: [P6]
+    persona: |
+      Your name is John Second, phone +15550101022. First ask what kind of sessions they have. Then say you
+      want to book the one at 10 a.m. tomorrow. Give your name when asked. If asked to confirm, say yes.
+      If the bot asks you the date or time again, repeat "tomorrow at 10". After you got a booking
+      reference, output <END>.
+    opening: "What kind of sessions do you have?"
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: polish_next, name: Sauna Polish, day: 1, hour: 10, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      booking_session: polish_next
+      forbid_after:
+        - {caller: "10 a\\.?m|10 AM|book", bot: "confirm the date|date and time|which day|what time"}
+
+  - id: sessions_question_uses_tool
+    from: 3dcf2588
+    persona: |
+      You are a first-time caller. Ask what specials they have, then ask about the sauna sessions, then ask
+      if you can book. Do NOT book anything now and never give a name or say yes to a booking: after the bot told you
+      about the sessions, say thanks, you will call back later, and output <END>.
+    opening: "What specials do you have for tomorrow?"
+    max_turns: 6
+    setup:
+      sessions:
+        - {key: polish_next, name: Sauna Polish, day: 1, hour: 10, max_attendees: 6}
+    expect:
+      new_confirmed: 0
+      bot_says: ["Sauna Polish"]
+      forbid_after:
+        - {caller: "sauna|session|book", bot: "don.t have (any )?information|how to make a booking"}
+
+  - id: booking_reference_is_read
+    from: bd1aa7b8
+    problems: [P2]
+    persona: |
+      Your name is John Big, phone +15550101023. You want to sign up for the "Sauna Polish" session at 10 AM
+      tomorrow. Give your name when asked (first name John, last name Big). If asked to book, say yes.
+      After the bot gave you a booking reference, say thanks and output <END>.
+    opening: "Sign me up for the Polish sauna session at 10 tomorrow."
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: polish_next, name: Sauna Polish, day: 1, hour: 10, max_attendees: 6}
+    expect:
+      new_confirmed: 1
+      guest: "John Big"
+      bot_says: ["\\b[0-9A-F]{8}\\b"]
+      forbid_after:
+        - {caller: "yes|John", bot: "couldn.t find that"}
+
+  - id: yes_to_readback_books_not_asks_again
+    from: 127094d5
+    problems: [P2, P6]
+    persona: |
+      Your name is Abraham Lincoln, phone +15550101023. First ask "what sessions?". Then say you want to
+      sign up for the Polish session, but say it as a bad speech-to-text line would: "sign me up to police
+      station". Give your name "Abraham Lincoln" when asked (again only if asked AGAIN). Every time the bot
+      asks "shall I book it?" or similar, answer just "Yes". After you got a booking reference, output <END>.
+    opening: "Hello, what sessions?"
+    max_turns: 10
+    setup:
+      sessions:
+        - {key: polish_next, name: Sauna Polish, day: 1, hour: 10, max_attendees: 8}
+        - {key: polish_later, name: Sauna Polish, day: 2, hour: 10, max_attendees: 8}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 8}
+    expect:
+      new_confirmed: 1
+      booking_session: polish_next
+      guest: "Abraham Lincoln"
+      max_confirmations: 2
+      forbid_after:
+        - {caller: "Lincoln", bot: "first and last name"}
+
+  - id: nonexistent_session_not_offered
+    from: 0f303aa9
+    problems: [P13, P16, P19]
+    persona: |
+      Your name is Dana Reyes, phone +15550101555. First ask what is on tomorrow. Then ask "any other
+      sessions tomorrow?". Then say you would like to book "the Steam Bath session at 2 PM". If the bot
+      tells you there is no such session and names others, say no thanks, you do not want those, and
+      output <END>. If it asks you to confirm anything, say yes.
+    opening: "Hi, what sessions do you have tomorrow?"
+    max_turns: 8
+    setup:
+      sessions:
+        - {key: polish, name: Sauna Polish, day: 1, hour: 10, max_attendees: 8}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 8}
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 8}
+    expect:
+      new_confirmed: 0
+      session_times_only: true
+      relist_ok: true
+      bot_says_after:  # the refusal must come after the caller asked for it (an earlier "no other sessions" does not count)
+        - caller: "steam"
+          bot: "not (on|in) (the|our) (schedule|list)|no such|there(.s| is| isn.t| are| is not) no |there isn.t (a|an|any)|(don.t|do not|cannot|can.t) (have|see|find|confirm)|isn.t (a|an|on|available|scheduled|listed|in)|not available|not (one of|among|there|listed|scheduled)"
+        - caller: "steam"  # and it names the real sessions (the refusal sentence is built in code)
+          bot: "Polish|German|Banya"
+      forbid_after:
+        - caller: "steam"
+          bot: "steam[^.?!]*(shall i book|book it)|(shall i book|book it)[^.?!]*steam|steam[^.?!]*seats"
+        - caller: "steam"  # an affirmative answer (the caller's own "2 PM" is allowed in a refusal, so check the words)
+          bot: "\\byes\\b[^.?!]*steam|steam[^.?!]*(is available|is open|we have|is on the schedule|can book)"
+
+  - id: empty_session_not_called_full
+    from: 1b422ce8
+    problems: [P22]
+    persona: |
+      Your name is Lena Hart, phone +15550101777. Ask what is on tomorrow. Then ask whether there are
+      still places in the Sauna Polish session. After the bot answered, if it offers to book say no thanks, you only wanted to know; then output <END>.
+    opening: "Hi, what sessions are on tomorrow?"
+    max_turns: 6
+    setup:
+      sessions:
+        - {key: polish, name: Sauna Polish, day: 1, hour: 10, max_attendees: 8}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 6, booked: ["Ann Lee"]}
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 2, booked: ["Ann Lee", "Bob Ray"]}
+    expect:
+      new_confirmed: 0
+      no_false_full: true
+      bot_says: ["Polish[^.?!]*(seats|places|spots|room|available)|(seats|places|spots|room|available)[^.?!]*Polish"]

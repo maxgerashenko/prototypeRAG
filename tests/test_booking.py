@@ -15,7 +15,7 @@ from app.actions.booking import tools as booking_tools  # registers the tools
 from app.actions.booking.internal import BookingRequest, InternalBackend
 from app.actions.registry import ActionContext
 from app.db import tenant_session
-from app.db.models import Booking, BookingRule, Business, Conversation
+from app.db.models import Booking, BookingRule, Business, Conversation, Message
 
 NOW = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
 OPEN_9_21 = {d: [["09:00", "21:00"]] for d in R.DAYS if d != "mon"}  # closed Mondays
@@ -97,13 +97,13 @@ def _req(**kw):
 def test_create_stores_utc_and_blocks_a_second_booking_in_the_slot(business_id):
     b = InternalBackend()
     first = b.create(business_id, _req(), NOW)
-    assert first.ok and len(first.reference) == 8 and first.when == "Thu 05 Nov, 14:00"
+    assert first.ok and len(first.reference) == 8 and first.when == "Thu 05 Nov, 2:00 PM"
     with tenant_session(business_id) as s:
-        row = s.scalar(select(Booking))
+        row = s.scalar(select(Booking).where(Booking.business_id == business_id))
         assert row.starts_at == datetime(2026, 11, 5, 19, 0, tzinfo=timezone.utc) and row.type == "table"
     second = b.create(business_id, _req(name="Bob", at="14:30"), NOW)
     assert not second.ok and "fully booked" in second.message
-    assert second.alternatives[:2] == ["15:00", "13:00"] or "15:00" in second.alternatives
+    assert second.alternatives[:2] == ["3:00 PM", "1:00 PM"]
     assert b.availability(business_id, _req(at="15:00"), NOW).ok  # back-to-back is fine
 
 
@@ -120,7 +120,7 @@ def test_service_makes_an_appointment_with_its_duration(business_id):
     b = InternalBackend()
     assert b.create(business_id, _req(service="Massage", party_size=None), NOW).ok
     with tenant_session(business_id) as s:
-        row = s.scalar(select(Booking))
+        row = s.scalar(select(Booking).where(Booking.business_id == business_id))
         assert row.type == "appointment" and (row.ends_at - row.starts_at).total_seconds() == 90 * 60
     assert not b.availability(business_id, _req(at="15:00"), NOW).ok  # inside the 90 minutes
 
@@ -141,6 +141,9 @@ def _ctx(bid, caller=None):
             c = Conversation(business_id=bid, channel="voice", caller=caller)
             s.add(c)
             s.flush()
+            # a booking is made only after a read-back: the bot's last message asked the caller to confirm
+            s.add(Message(business_id=bid, conversation_id=c.id, role="assistant",
+                          content="Table for 2 on Thursday at 2:00 PM, name Anna. Shall I book it?"))
             cid = c.id
     return ActionContext(bid, cid)
 
@@ -150,9 +153,9 @@ def test_tool_booking_needs_confirmation_then_books(business_id):
     args = {"date": "2099-11-05", "time": "14:00", "party_size": 2, "name": "Anna"}
     assert executor.execute(ctx, "create_booking", dict(args)).startswith("Not done")
     out = executor.execute(ctx, "create_booking", {**args, "confirmed": True})
-    assert out.startswith("Booked table for 2") and "Reference " in out and "Thu 05 Nov, 14:00" in out
+    assert out.startswith("Booked table for 2") and "Reference " in out and "Thu 05 Nov, 2:00 PM" in out
     with tenant_session(business_id) as s:
-        booking = s.scalar(select(Booking))
+        booking = s.scalar(select(Booking).where(Booking.business_id == business_id))
         assert booking.phone == "+15550100100" and booking.conversation_id == ctx.conversation_id
 
 
@@ -161,7 +164,7 @@ def test_tool_ignores_model_phone_when_caller_id_is_known(business_id):
     executor.execute(ctx, "create_booking", {"date": "2099-11-05", "time": "14:00", "name": "A",
                                              "phone": "+19998887777", "confirmed": True})
     with tenant_session(business_id) as s:
-        assert s.scalar(select(Booking.phone)) == "+15550100100"
+        assert s.scalar(select(Booking.phone).where(Booking.business_id == business_id)) == "+15550100100"
 
 
 def test_tool_without_caller_id_needs_a_valid_number(business_id):
@@ -177,7 +180,7 @@ def test_tool_reports_rule_violations_with_alternatives(business_id):
     out = executor.execute(ctx, "create_booking", {"date": "2099-11-05", "time": "22:00", "name": "A", "confirmed": True})
     assert out.startswith("Error: not booked") and "opening hours" in out and "Free times" in out
     with tenant_session(business_id) as s:
-        assert s.scalar(select(Booking.id)) is None
+        assert s.scalar(select(Booking.id).where(Booking.business_id == business_id)) is None
     assert "Not available" in executor.execute(ctx, "check_availability", {"date": "2099-11-05", "time": "07:00"})
     assert executor.execute(ctx, "check_availability", {"date": "nope", "time": "07:00"}).startswith("Not available: date")
     assert executor.execute(ctx, "check_availability", {"time": "07:00"}).startswith("Error")
@@ -189,7 +192,7 @@ def test_tool_cancel_uses_caller_id(business_id):
     ref = out.split("Reference ")[1].split(".")[0]
     assert executor.execute(_ctx(business_id, "+15550777777"), "cancel_booking", {"reference": ref, "confirmed": True}).startswith("No upcoming")
     with tenant_session(business_id) as s:
-        assert s.scalar(select(Booking.id)) is not None  # the stranger's attempt changed nothing
+        assert s.scalar(select(Booking.id).where(Booking.business_id == business_id)) is not None  # the stranger's attempt changed nothing
     assert executor.execute(ctx, "cancel_booking", {"reference": ref, "confirmed": True}).startswith("Cancelled")
 
 

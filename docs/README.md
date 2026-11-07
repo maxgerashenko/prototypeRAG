@@ -15,6 +15,8 @@ file sits in a folder of one layer but does the job of another, the docs follow 
 | 6 | API | [api.md](api.md) | The HTTP, WebSocket and SSE edge: REST routes, Twilio webhooks, voice sockets, live call feed, app startup |
 | 7 | Web | [web.md](web.md) | The front end: React + TypeScript voice app and debug pages in `web/`, design spec in `design/` |
 
+Cross-layer topic: [bookings.md](bookings.md) — how a booking conversation runs, who owns the data, what extra metadata is saved, how it is tested (`tests/test_no_invented_sessions.py`: unknown sessions are refused, the bot cannot create a session; `tests/test_session_offer.py`: a refusal is followed by the real open sessions, an end time gets its AM/PM).
+
 `app/config.py` (settings), `tests/`, `scripts/` and the plan files are shared and belong to no layer.
 
 ## Who calls whom

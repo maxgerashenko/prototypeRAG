@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatsLabel, conversationsHint, outcomeLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText, fmtPhone } from "./format";
+import { chatsLabel, conversationsHint, outcomeLabel, reviewLabel, fmtClock, fmtWhen, hostOf, matchesQuery, monogram, plural, previewText, fmtPhone } from "./format";
 
 // dates are built in local time, so the tests pass in any time zone
 const local = (y: number, mo: number, d: number, h: number, mi: number, s = 0) =>
@@ -107,4 +107,15 @@ describe("outcomeLabel", () => {
     [null, null],
     ["", null],
   ])("%s -> %s", (o, out) => expect(outcomeLabel(o)).toBe(out));
+});
+
+describe("reviewLabel", () => {
+  it.each([
+    ["verified", "Verified"],
+    ["in_testing", "In testing"],
+    ["fixed", "Fixed"],
+    ["weird", "weird"],
+    [null, null],
+    ["", null],
+  ])("%s -> %s", (s, out) => expect(reviewLabel(s)).toBe(out));
 });

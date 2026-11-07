@@ -130,6 +130,7 @@ mobile, keyboard shortcuts (Space / Esc / Backspace). Keep them.
 - [PullToRefresh.md](PullToRefresh.md) — pull a list down to reload it in place; spinner colour follows the opening control, Bookings aligns it with the "+" icons.
 - [SeatSlider.md](SeatSlider.md) — attendees bar 1-30 with a small Private switch.
 - [StatusChip.md](StatusChip.md) — save-state pill (Saving… / Unsaved changes / Saved), from the greeting "Cached" chip.
+- Review badge (`ReviewBadge.tsx`, `.badge-review`): pill Verified (`--phone` green) / In testing (`--amber`) / Fixed (`--conversations` blue) in the conversation row tags and the transcript summary; hidden when not checked; `title` = review note.
 - [ControlSubtitle.md](ControlSubtitle.md) — the grey `·`-separated line under a control's title.
 - [BottomSheet.md](BottomSheet.md) — the panel that slides up from the bottom (name, size rules, swipe down to
   close, known gaps).

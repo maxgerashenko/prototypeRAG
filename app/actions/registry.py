@@ -7,7 +7,9 @@ only thing that calls handlers.
 
 A tool with `side_effect=True` (booking, SMS, message to the owner, ...) gets a required
 `confirmed` boolean added to its schema; the executor refuses to run it until the model
-passes `confirmed=true`, i.e. after reading the details back and hearing a "yes".
+passes `confirmed=true`, i.e. after reading the details back and hearing a "yes". Such a tool may
+have a `precheck`, run by the executor before the confirmation check, so a call that can never
+succeed is refused before the caller is asked for a yes.
 
 A tool with `optional=True` (bookings, sessions) is offered to the model, and run by the
 executor, only for businesses that list its name in `businesses.settings["enabled_tools"]`.
@@ -41,6 +43,7 @@ class Tool:
     required: tuple[str, ...] = ()
     side_effect: bool = False
     optional: bool = False  # off unless the business lists it in settings["enabled_tools"]
+    precheck: Callable[[ActionContext, dict], str | None] | None = None  # side-effect tools: run before the confirmation check; returns the refusal text, or None to go on
 
     def schema(self) -> dict:
         properties = dict(self.parameters)

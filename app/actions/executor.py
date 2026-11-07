@@ -4,9 +4,12 @@ Rules enforced here in code, not only in the prompt (plan/04-actions.md):
 - unknown tool / bad arguments → an error string the model can see, never an exception;
 - a side-effect tool runs only with `confirmed=true`, otherwise the model is told to read
   the details back and ask for an explicit yes;
-- every side-effect call (also refused and failed ones) is written to `action_log`.
-Read-only tools (search) are not logged: one DB write per search would add latency to the
-caller's turn, and their calls already show in the voice-turn timing log.
+- a side-effect tool's `precheck` runs first: a call that can never succeed (no such session, a
+  placeholder name) is refused before the caller is asked for a yes;
+- every side-effect call (also refused and failed ones) is written to `action_log`, and so is
+  every call of an optional read-only tool (list_sessions, check_availability).
+The always-on read-only tool (search) is not logged: one DB write per search would add latency to
+the caller's turn, and its calls already show in the voice-turn timing log.
 """
 
 import json
@@ -46,9 +49,21 @@ def execute(ctx: ActionContext, name: str, arguments: str | dict) -> str:
         return f"Error: arguments for {name} must be a JSON object."
 
     if not tool.side_effect:
-        return tool.handler(ctx, arguments)
+        result = tool.handler(ctx, arguments)
+        if tool.optional:
+            _log_action(ctx, name, arguments, result, "error" if result.startswith("Error") else "ok")
+        return result
 
     confirmed = arguments.pop("confirmed", False) is True
+    if tool.precheck is not None:
+        try:
+            problem = tool.precheck(ctx, arguments)
+        except Exception as exc:
+            log.exception("tool %s precheck failed", name)
+            problem = f"Error: {name} failed ({type(exc).__name__})."
+        if problem:
+            _log_action(ctx, name, arguments, problem, "error")
+            return problem
     if not confirmed:
         result = (
             f"Not done: {name} changes something. Read all details back to the caller, "

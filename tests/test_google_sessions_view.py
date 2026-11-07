@@ -43,7 +43,7 @@ def test_every_business_sees_the_google_session_with_its_owner(two):
     c = TestClient(app)
     for viewer in (owner, other):
         body = c.get(f"/businesses/{viewer}/bookings?start={DAY}&end={DAY}").json()
-        [s] = body["sessions"]
+        [s] = [x for x in body["sessions"] if x["id"] == str(sid)]  # other businesses' sessions may share the day
         assert (s["id"], s["source"], s["business_id"], s["booked"]) == (str(sid), "google", str(owner), 1)
         assert (s["start_min"], s["end_min"]) == (14 * 60, 15 * 60 + 30)
         assert body["busy"] == []

@@ -25,13 +25,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
 from app.actions.booking import calendar_sync
+from app.actions.booking.guests import DOMAIN, NO_GUEST_VISIBILITY, attendees_enabled
 from app.actions.booking.google_calendar import calendar_id_for
 from app.actions.booking.google_client import CalendarClient
 from app.actions.booking.google_client import CalendarError, EventExists, PreconditionFailed
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.session import SessionLocal
-from app.db.models import Booking, Business, CalendarEvent, GroupSession
+from app.db.models import Booking, Business, CalendarEvent, GroupSession, SessionGuest
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,11 @@ def title(name: str, booked: int, seats: int) -> str:
     return f"{name} · {booked}/{seats} attendees" + (" · FULL" if booked >= seats else "")
 
 
+def visibility(private: bool) -> str:
+    """The event visibility of a session's private flag."""
+    return "private" if private else "default"
+
+
 def event_id(session_id: uuid.UUID) -> str:
     return session_id.hex  # 32 chars of 0-9a-f: valid Google event id (base32hex alphabet)
 
@@ -87,6 +93,7 @@ def create_event(client: CalendarClient, calendar_id: str, row: GroupSession, tz
         "start": {"dateTime": row.starts_at.isoformat(), "timeZone": tz},
         "end": {"dateTime": row.ends_at.isoformat(), "timeZone": tz},
         "transparency": "opaque",
+        "visibility": visibility(row.private),
         "extendedProperties": {"private": {"business_id": str(row.business_id), "session_id": str(row.id)}},
         "reminders": {"useDefault": False},
     }
@@ -105,8 +112,39 @@ def _booked(session, business_id: uuid.UUID, sid: uuid.UUID) -> int:
         Booking.business_id == business_id, Booking.session_id == sid, Booking.status == "confirmed")) or 0
 
 
+def _fake(attendee: dict) -> bool:
+    return str(attendee.get("email", "")).lower().endswith(f"@{DOMAIN}")
+
+
+def _guest_attendees(session, business_id: uuid.UUID, sid: uuid.UUID) -> list[dict]:
+    """One attendee per guest with a confirmed seat, sorted by email. Marked accepted so Google
+    does not show 'awaiting response'. The real spelling goes in displayName."""
+    rows = session.execute(
+        select(SessionGuest.email, SessionGuest.display_name).distinct()
+        .join(Booking, (Booking.business_id == SessionGuest.business_id) & (Booking.guest_id == SessionGuest.id))
+        .where(Booking.business_id == business_id, Booking.session_id == sid, Booking.status == "confirmed")
+        .order_by(SessionGuest.email)
+    ).all()
+    return [{"email": e, "displayName": n, "responseStatus": "accepted"} for e, n in rows]  # as guests.attendee()
+
+
+def _attendee_patch(event: dict, want: list[dict]) -> dict:
+    """Body that makes the event's guest-domain attendees equal `want`, or {} when they already
+    are. Attendees with a real address (added by the owner in Google) are kept as they are."""
+    have = event.get("attendees") or []
+    mine = sorted(({"email": a["email"], "displayName": a.get("displayName", "")} for a in have if _fake(a)),
+                  key=lambda a: a["email"])
+    if mine == [{"email": a["email"], "displayName": a["displayName"]} for a in want]:
+        return {}
+    return {
+        "attendees": [a for a in have if not _fake(a)] + want,
+        **NO_GUEST_VISIBILITY,
+    }
+
+
 def push_title(business_id: uuid.UUID, sid: uuid.UUID) -> bool:
-    """Write 'name · n/max attendees' to the session's event. True when the event shows it now.
+    """Write 'name · n/max attendees' and, with the OAuth token, the booked guests as attendees
+    (sendUpdates=none, so nobody is emailed) to the session's event. True when it shows them now.
     Best effort: a failure is logged and the next sync pass retries (the seat stays taken)."""
     client = get_client()
     if client is None:
@@ -118,13 +156,20 @@ def push_title(business_id: uuid.UUID, sid: uuid.UUID) -> bool:
             if row is None or not row.external_ref or row.status != "active":
                 return False
             ref, want = row.external_ref, title(row.name, _booked(session, business_id, sid), row.max_attendees)
+            want_visibility = visibility(row.private)
+            guests = _guest_attendees(session, business_id, sid) if attendees_enabled() else None
         try:
             event = client.get_event(calendar_id, ref)
             if event is None:  # deleted in Google: the next sync cancels the session
                 return False
-            if event.get("summary") == want:
-                return True
-            client.patch_event(calendar_id, ref, {"summary": want}, event.get("etag"))
+            body = {} if event.get("summary") == want else {"summary": want}
+            if (event.get("visibility") or "default") != want_visibility and not (
+                    want_visibility == "default" and event.get("visibility") in ("public", "confidential")):
+                body["visibility"] = want_visibility
+            if guests is not None:
+                body.update(_attendee_patch(event, guests))
+            if body:
+                client.patch_event(calendar_id, ref, body, event.get("etag"))
             return True
         except PreconditionFailed:
             continue  # changed meanwhile: re-read the etag and the seat count
@@ -147,6 +192,9 @@ class EventRow:
     transparency: str = "opaque"
     kind: str = "external"  # "booking" / "session" / "external"
     etag: str | None = None
+    attendees: list | None = None  # None = not read (attendees are not compared then)
+    visibility: str | None = None  # None = not read (the private flag is left alone then)
+    google_updated: datetime | None = None  # when Google last changed the event; None = unknown
 
 
 def _owner_business(session, calendar_id: str) -> uuid.UUID | None:
@@ -164,10 +212,41 @@ def _owner_business(session, calendar_id: str) -> uuid.UUID | None:
     return None
 
 
+def _compare_guests(session, row: GroupSession, attendees: list, now: datetime, retitle: list) -> int:
+    """Google is the truth for who sits in a session, but only for removals: a guest the app
+    wrote and the sync has seen (attendee_seen_at) who is gone or declined loses the seat (no text
+    message, as for a deleted session). Adding a guest in Google books nothing: seats are only
+    taken from the app or by voice, which check the limit. A guest not seen yet is pushed again
+    (a failed attendee write), and so is any difference in the guest-domain attendees.
+    Returns how many bookings were cancelled."""
+    by_email = {a["email"].lower(): a for a in attendees}
+    cancelled = 0
+    for b, email in session.execute(
+        select(Booking, SessionGuest.email)
+        .join(SessionGuest, (SessionGuest.business_id == Booking.business_id) & (SessionGuest.id == Booking.guest_id))
+        .where(Booking.business_id == row.business_id, Booking.session_id == row.id, Booking.status == "confirmed")
+    ).all():
+        a = by_email.get(email.lower())
+        if a is not None and a.get("responseStatus") != "declined":
+            if b.attendee_seen_at is None:
+                b.attendee_seen_at = now
+        elif b.attendee_seen_at is not None:
+            b.status, b.cancelled_at = "cancelled", now
+            cancelled += 1
+    session.flush()
+    want = {e for (e,) in session.execute(
+        select(SessionGuest.email).join(Booking, (Booking.business_id == SessionGuest.business_id) & (Booking.guest_id == SessionGuest.id))
+        .where(Booking.business_id == row.business_id, Booking.session_id == row.id, Booking.status == "confirmed"))}
+    have = {a["email"].lower() for a in attendees if _fake(a)}
+    if want != have and (row.business_id, row.id) not in retitle:
+        retitle.append((row.business_id, row.id))
+    return cancelled
+
+
 def reconcile_events(calendar_id: str, events: Iterable[EventRow], now: datetime | None = None) -> dict:
     """Apply the mirrored events to `sessions`. Returns counts {created, moved, renamed, cancelled}."""
     now = now or datetime.now(timezone.utc)
-    counts = {"created": 0, "moved": 0, "renamed": 0, "cancelled": 0}
+    counts = {"created": 0, "moved": 0, "renamed": 0, "cancelled": 0, "unbooked": 0}
     retitle: list[tuple[uuid.UUID, uuid.UUID]] = []
     # Demo rule (Max, 2026-11-01): every event belongs to every business, so sessions are looked up by
     # event id only. business_id is stored but not filtered on.
@@ -204,6 +283,7 @@ def reconcile_events(calendar_id: str, events: Iterable[EventRow], now: datetime
                 row.status, row.cancelled_at, row.updated_at = "cancelled", now, now
                 counts["cancelled"] += 1
                 continue
+            app_updated = row.updated_at  # before this pass touches it
             if (row.starts_at, row.ends_at) != (e.starts_at, e.ends_at) and e.ends_at > e.starts_at:
                 row.starts_at, row.ends_at, row.updated_at = e.starts_at, e.ends_at, now
                 for b in session.scalars(select(Booking).where(
@@ -215,8 +295,15 @@ def reconcile_events(calendar_id: str, events: Iterable[EventRow], now: datetime
             if name != row.name:
                 row.name, row.updated_at = name, now
                 counts["renamed"] += 1
+            # a stale mirror must not undo a fresh app change: push_title then writes the app's value
+            google_newer = e.google_updated is None or app_updated is None or e.google_updated > app_updated
+            if e.visibility is not None and google_newer and (e.visibility == "private") != row.private:
+                row.private, row.updated_at = e.visibility == "private", now
+            if e.attendees is not None and attendees_enabled():
+                counts["unbooked"] += _compare_guests(session, row, e.attendees, now, retitle)
             if e.summary != title(row.name, _booked(session, row.business_id, row.id), row.max_attendees):
-                retitle.append((row.business_id, row.id))
+                if (row.business_id, row.id) not in retitle:
+                    retitle.append((row.business_id, row.id))
     for business_id, sid in retitle:  # after the commit: writes to Google must not hold the transaction
         push_title(business_id, sid)
     return counts
@@ -243,7 +330,7 @@ def reconcile_sessions(calendar_id: str) -> dict | None:
             Booking.external_ref.in_([r.google_event_id for r in rows]))))
         events = [
             EventRow(r.google_event_id, r.summary or "", r.starts_at, r.ends_at, r.status, r.transparency,
-                     "booking" if r.google_event_id in booking_events else "external", r.etag)
+                     "booking" if r.google_event_id in booking_events else "external", r.etag, r.attendees, r.visibility, r.google_updated)
             for r in rows
         ]
     return reconcile_events(calendar_id, events)

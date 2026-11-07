@@ -13,10 +13,12 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import Text, cast, select, text
+from sqlalchemy import Text, cast, or_, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.actions import sms
+from app.actions.booking import guests
+from app.actions.booking import rules as R
 from app.actions.booking import session_events as G
 from app.actions.booking.google_client import CalendarError
 from app.db import tenant_session
@@ -243,7 +245,8 @@ def update_session(
 
 
 def _when(s: GroupSession, zone: ZoneInfo) -> str:
-    return s.starts_at.astimezone(zone).strftime("%a %d %b, %H:%M")
+    at = s.starts_at.astimezone(zone)
+    return f"{at:%a %d %b}, {R.clock(at)}"
 
 
 def _text_callers(callers: list[tuple[str | None, str]], s_name: str, when: str, who: str) -> tuple[int, int]:
@@ -323,10 +326,12 @@ def remove_attendee(
 
 
 def list_open(
-    business_id: uuid.UUID, day: str | None = None, now: datetime | None = None, limit: int = 10
+    business_id: uuid.UUID, day: str | None = None, now: datetime | None = None, limit: int = 10,
+    seats: bool = True,
 ) -> list[dict]:
     """Public sessions that have not ended, soonest first: {ref, name, when, booked, max_attendees, full}.
-    `day` (business-local YYYY-MM-DD) narrows to that day; without it the next 30 days."""
+    `day` (business-local YYYY-MM-DD) narrows to that day; without it the next 30 days.
+    `seats=False` skips the per-row seat count (booked 0, full False): for name look-ups that read ref/name/when only."""
     now = now or datetime.now(timezone.utc)
     with tenant_session(business_id) as session:
         zone = _zone(_business(session, business_id).timezone)
@@ -342,12 +347,12 @@ def list_open(
         ).all()
         out = []
         for r in rows:
-            booked = G._booked(session, r.business_id, r.id)
+            booked = G._booked(session, r.business_id, r.id) if seats else 0
             a, b = r.starts_at.astimezone(zone), r.ends_at.astimezone(zone)
             out.append({
                 "ref": session_ref(r.id), "name": r.name, "booked": booked, "max_attendees": r.max_attendees,
                 "full": booked >= r.max_attendees,
-                "when": f"{a:%a %d %b}, {a:%H:%M}-{b:%H:%M}",
+                "when": f"{a:%a %d %b}, {R.clock(a)} to {R.clock(b)}",  # "10:00-11:00" was read aloud as two sessions
             })
         return out
 
@@ -356,11 +361,36 @@ def session_ref(sid: uuid.UUID) -> str:
     return str(sid)[:8].upper()
 
 
+def find_open(business_id: uuid.UUID, ref: str, now: datetime | None = None) -> dict | None:
+    """Read-only look-up of a public, active, not-ended session by its code (the start of its id, any
+    case): {ref, name, when} if exactly one matches, else None. Same lookup as `join_session`, so it has
+    the same missing business filter (demo rule #300: a Google session is shared by every business).
+    No calendar sync and no lock: the tools use it only to refuse a code that cannot work."""
+    now = now or datetime.now(timezone.utc)
+    ref = (ref or "").strip().lower()
+    if len(ref) < 6 or not re.fullmatch(r"[0-9a-f-]+", ref):
+        return None
+    with tenant_session(business_id) as session:
+        found = session.scalars(
+            select(GroupSession).where(
+                GroupSession.status == "active", GroupSession.ends_at > now,
+                GroupSession.private.is_(False), cast(GroupSession.id, Text).startswith(ref),
+            ).limit(2)
+        ).all()
+        if len(found) != 1:
+            return None
+        row = found[0]
+        zone = _zone(_business(session, row.business_id).timezone)
+        a, b = row.starts_at.astimezone(zone), row.ends_at.astimezone(zone)
+        return {"ref": session_ref(row.id), "name": row.name, "when": f"{a:%a %d %b}, {R.clock(a)} to {R.clock(b)}"}
+
+
 def join_session(
     business_id: uuid.UUID, ref: str, conversation_id: uuid.UUID | None, name: str, phone: str | None = None,
-    now: datetime | None = None,
+    now: datetime | None = None, last_name: str = "",
 ) -> dict:
-    """Put a caller (the conversation) into a session until it is full. -> {ref, name, when, booked,
+    """Put a caller (the conversation) into a session until it is full. `name` is the first name
+    when `last_name` is given, else the full name. The seat belongs to a guest (session_guests). -> {ref, name, when, booked,
     max_attendees, booking_ref}. SessionError carries the reason (full, ended, private, unknown...)."""
     now = now or datetime.now(timezone.utc)
     ref = (ref or "").strip().lower()
@@ -390,16 +420,19 @@ def join_session(
             raise SessionError(403, "This session is private")
         if conversation_id is not None and session.scalar(select(Booking.id).where(
                 Booking.business_id == owner, Booking.session_id == sid, Booking.status == "confirmed",
-                Booking.notes == f"conversation {conversation_id}")):
+                or_(Booking.caller_conversation_id == conversation_id,
+                    Booking.notes == f"conversation {conversation_id}"))):
             raise SessionError(409, "This caller already has a seat in that session")
         booked = G._booked(session, owner, sid)
         if booked >= row.max_attendees:
             raise SessionError(409, "That session is full")
         # the conversation FK needs the same business; across businesses (demo) the id goes into the notes
         linked = conversation_id if owner == business_id else None
+        guest = guests.for_caller(session, owner, name, last_name, phone)
         booking = Booking(
             business_id=owner, session_id=sid, type="session", starts_at=row.starts_at, ends_at=row.ends_at,
-            name=(name or "").strip() or "Caller", phone=phone, conversation_id=linked,
+            name=guest.display_name, phone=phone, conversation_id=linked, guest_id=guest.id,
+            caller_conversation_id=conversation_id,
             notes=f"conversation {conversation_id}" if conversation_id else None,
         )
         session.add(booking)
@@ -407,7 +440,7 @@ def join_session(
         zone = _zone(_business(session, owner).timezone)
         result = {
             "ref": session_ref(sid), "name": row.name, "booked": booked + 1, "max_attendees": row.max_attendees,
-            "when": f"{row.starts_at.astimezone(zone):%a %d %b, %H:%M}", "booking_ref": str(booking.id)[:8].upper(),
+            "when": _when(row, zone), "guest": guest.display_name, "booking_ref": str(booking.id)[:8].upper(),
         }
         linked_event = row.external_ref is not None
     if linked_event:  # after the commit; a failed patch keeps the seat, the next sync retries it

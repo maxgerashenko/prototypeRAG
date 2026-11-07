@@ -17,6 +17,7 @@ from typing import Protocol
 
 from sqlalchemy import Text, cast, select, text
 
+from app.actions.booking import guests
 from app.actions.booking import rules as R
 from app.db import tenant_session
 from app.db.models import Booking, BookingRule, Business, BusinessProfile
@@ -31,7 +32,8 @@ class BookingRequest:
     at: str  # HH:MM, business-local
     party_size: int | None = None
     service: str | None = None
-    name: str = ""
+    name: str = ""  # the first name when `last_name` is given, else the full name
+    last_name: str = ""
     phone: str | None = None
     notes: str | None = None
     conversation_id: uuid.UUID | None = None
@@ -100,7 +102,7 @@ def _check(rules: R.Rules, req: BookingRequest, existing, now: datetime):
     if reason:
         for cand in R.candidate_starts(rules, start):
             if R.violation(rules, cand, cand + length, req.party_size, now, _overlapping(existing, cand, cand + length)) is None:
-                alternatives.append(cand.strftime("%H:%M"))
+                alternatives.append(R.clock(cand))
                 if len(alternatives) == R.MAX_ALTERNATIVES:
                     break
     return start, end, reason, alternatives
@@ -133,11 +135,13 @@ class InternalBackend:
             start, end, reason, alts = _check(rules, request, _day_bookings(session, business_id, start), now)
             if reason:
                 return BookingResult(False, reason, alternatives=alts)
+            guest = guests.for_caller(session, business_id, request.name, request.last_name, request.phone)
             booking = Booking(
                 business_id=business_id, conversation_id=request.conversation_id,
+                caller_conversation_id=request.conversation_id, guest_id=guest.id,
                 type="appointment" if request.service else "table",
                 starts_at=R.to_utc(start), ends_at=R.to_utc(end), party_size=request.party_size,
-                service=(request.service or "").strip() or None, name=request.name.strip(),
+                service=(request.service or "").strip() or None, name=guest.display_name,
                 phone=request.phone, notes=(request.notes or "").strip() or None,
             )
             session.add(booking)
@@ -147,7 +151,7 @@ class InternalBackend:
                 name = session.scalar(select(Business.name).where(Business.id == business_id))
             return BookingResult(
                 True, "Booked.", booking.id, str(booking.id)[:REF_LEN].upper(), name,
-                start.strftime("%a %d %b, %H:%M"),
+                f"{start:%a %d %b}, {R.clock(start)}",
             )
 
     def cancel(self, business_id: uuid.UUID, reference: str, phone: str | None, now: datetime | None = None) -> str:

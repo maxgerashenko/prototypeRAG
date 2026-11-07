@@ -84,6 +84,11 @@ class CalendarEventsClient(Protocol):
         ...
 
 
+# Every event write passes this: the API must never email a guest. Guests carry fake
+# addresses (plan: guest identity), so a stray invite would bounce or reach a stranger.
+NO_UPDATES = {"sendUpdates": "none"}
+
+
 class GoogleCalendarClient:
     def __init__(self, credentials_file: str = "", token_file: str = ""):
         self.credentials_file = credentials_file  # service account key
@@ -144,7 +149,7 @@ class GoogleCalendarClient:
         ]
 
     def insert_event(self, calendar_id, body):
-        resp = self._call("POST", f"{API}/calendars/{_quote(calendar_id)}/events", json=body)
+        resp = self._call("POST", f"{API}/calendars/{_quote(calendar_id)}/events", json=body, params=NO_UPDATES)
         if resp.status_code == 409:
             raise EventExists(f"events.insert: event {body.get('id')} exists")
         if resp.status_code not in (200, 201):
@@ -181,7 +186,7 @@ class GoogleCalendarClient:
     def patch_event(self, calendar_id, event_id, body, etag=None):
         resp = self._call(
             "PATCH", f"{API}/calendars/{_quote(calendar_id)}/events/{_quote(event_id)}", json=body,
-            headers={"If-Match": etag} if etag else None,
+            params=NO_UPDATES, headers={"If-Match": etag} if etag else None,
         )
         if resp.status_code == 412:
             raise PreconditionFailed(f"events.patch {event_id}: etag changed")
@@ -190,7 +195,9 @@ class GoogleCalendarClient:
         return resp.json().get("etag", "")
 
     def delete_event(self, calendar_id, event_id):
-        resp = self._call("DELETE", f"{API}/calendars/{_quote(calendar_id)}/events/{_quote(event_id)}")
+        resp = self._call(
+            "DELETE", f"{API}/calendars/{_quote(calendar_id)}/events/{_quote(event_id)}", params=NO_UPDATES
+        )
         if resp.status_code not in (200, 204, 404, 410):
             raise CalendarError(f"events.delete {resp.status_code}: {resp.text[:200]}")
 

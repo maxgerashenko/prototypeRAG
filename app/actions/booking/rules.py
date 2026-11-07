@@ -11,6 +11,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+
+def clock(moment: datetime) -> str:
+    """A time of day the way it is said aloud: "10:00 AM", "6:30 PM" (one format for every caller-facing time)."""
+    return f"{moment.hour % 12 or 12}:{moment:%M} {'AM' if moment.hour < 12 else 'PM'}"
+
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MAX_ALTERNATIVES = 3
 

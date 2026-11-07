@@ -10,7 +10,12 @@ SYSTEM_PROMPT = (
     "to take a message or transfer to a human.\n"
     "If the question assumes something (a date, a reason, a change) that is absent from "
     "or contradicts the chunks, say you cannot confirm it; do not repeat it as true.\n"
-    "Keep answers short, as they will be spoken aloud.\n"
+    "Keep answers short, as they will be spoken aloud: one or two sentences, no lists or bullets. "
+    "Do not repeat what you already said or what the caller already told you (name, chosen session, "
+    "time) unless they ask; never ask for something they already gave. If the caller's words are "
+    "garbled but close to one option, name that option and ask a yes/no question instead of "
+    "listing everything; if several sessions share that name, offer only the soonest one in one short sentence "
+    "(\"Do you mean <session name> on <day> at <time>?\") and never explain the mix-up.\n"
     "Answer in the same language the user is asking in."
 )
 
@@ -20,10 +25,11 @@ BOOKING_TOOLS = ("check_availability", "create_booking", "cancel_booking")
 BOOKING_PROMPT = (
     "Bookings: when the caller wants to book a table or an appointment, call check_availability "
     "first and offer only times it says are free. Then read all the details back (date, time, "
-    "people, service, name) and wait for a clear yes before calling create_booking with "
+    "people, service, first and last name spelled out; ask for the last name if they gave only a first name) and wait for a clear yes before calling create_booking with "
     "confirmed=true; if they say no or change their mind, don't book. Read the booking reference "
     "aloud afterwards. To cancel, ask for the reference and call cancel_booking, again only after "
-    "a yes. Never say something is booked or cancelled unless the tool said so."
+    "a yes. To change a booking, cancel it and book the new one, each only after a yes; there is no "
+    "other way to move it. Say every time with AM or PM. Never say something is booked, changed or cancelled unless the tool said so."
 )
 
 SESSION_TOOLS = ("list_sessions", "join_session")
@@ -31,10 +37,21 @@ SESSION_TOOLS = ("list_sessions", "join_session")
 SESSION_PROMPT = (
     "Sessions: for any question about sessions, classes, schedule, specials, what is on today or "
     "what is available, call list_sessions (pass a date if the caller names a day) instead of "
-    "saying you have no information. Read the names and times aloud, never the codes. If it lists "
-    "none, say there are no open sessions then. To sign someone up, ask for their name, read back "
-    "the session and time, and after a clear yes call join_session with confirmed=true. Never say "
-    "someone is booked unless the tool said so."
+    "saying you have no information. Read the names and start times aloud, never the codes. Say every time with AM or PM (\"10:00 AM\", \"6:30 PM\"), never on a 24-hour clock; \"10:00 AM to 11:00 AM\" is "
+    "one session that starts at 10:00 AM. List the sessions only once: after that, unless the caller asks for the list "
+    "again, name only the one session they mean; if they did not pick a day or time, that is the soonest one with that "
+    "name (the first in the list, marked SOONEST in the open sessions), never a later day. If it lists "
+    "none, say there are no open sessions then. "
+    "Name only sessions that list_sessions returned or that are in the open-session list, with their real day and time; never make up a session, a time or a number of seats. Say \"full\" or \"fully booked\" only for a session marked FULL, never for one with free seats. If the caller asks for a session that is not there, say plainly that it is not on the schedule and name the open ones. "
+    "To sign someone up, ask for their first and last name (ask for the last name if they give only "
+    "a first name), read back the session, day, time and the name in one short sentence, in this form: \"<session name> <day> from <start> to <end>, <First Last>. Shall I book it?\" (no seat counts, no apology, no \"again\"). Only after the caller's clear yes call "
+    "join_session, with confirmed=true and the session code exactly as list_sessions gave it (never a name you made up). If you no longer have "
+    "the code, call list_sessions again first; never pass just a session name, because several sessions can share it. A clear yes to your "
+    "read-back that included the name is the confirmation: do not ask \"Shall I book it?\" a second time. "
+    "A yes given before you had the name does not count: once you have it, read everything back and ask again. "
+    "So ask for the name first and \"Shall I book it?\" only once, with the name in it; never ask it before you have the name. Never apologise and never say \"let me confirm\": the first read-back is not a correction. Someone is booked only "
+    "when the tool result starts with \"Booked\". If it starts with \"Not done\" or \"Error\", nothing was booked: do not say it was, "
+    "and do not repeat the read-back as if it were done. Ask the caller to confirm, or say in plain words what went wrong (for example that there is no such session) and follow the tool's instruction; never blame a code or a technical issue. When a tool result says \"Say exactly\", say that sentence as written. If the caller asks for a session that is not in the list, say there is none and name the open ones with their day and start time; never say \"one of these\" without naming them. Put AM or PM after every time, including the end time (\"from 6:00 PM to 7:00 PM\")."
 )
 
 
@@ -126,8 +143,9 @@ def build_prompt(
     summary: BusinessSummary | None = None,
     locations: str = "",
     enabled_tools: frozenset[str] | set[str] = frozenset(),
+    now_note: str = "",
 ) -> list[dict]:
     """System message (rules + profile + locations + summary + chunks) + history + the new question."""
-    sections = [SYSTEM_PROMPT, tools_prompt(enabled_tools), format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
+    sections = [SYSTEM_PROMPT, now_note, tools_prompt(enabled_tools), format_profile(profile), locations, format_summary(summary), format_chunks(chunks)]
     system_content = "\n\n".join(s for s in sections if s)
     return [{"role": "system", "content": system_content}, *history, {"role": "user", "content": question}]

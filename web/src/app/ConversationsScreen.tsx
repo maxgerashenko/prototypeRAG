@@ -5,6 +5,7 @@ import { ChatIcon, ClockIcon, GlobeIcon } from "./icons";
 import { ViewHeader } from "./ViewHeader";
 import { SourceBadge } from "./SourceIcon";
 import { OutcomeBadge } from "./OutcomeBadge";
+import { ReviewBadge } from "./ReviewBadge";
 import { PullRegion, SkeletonGate } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
 import { fmtClock, fmtWhen, hostOf, plural, previewText } from "./format";
@@ -66,8 +67,8 @@ export function ConversationsScreen({ pull, biz, convos, newIds, onBack, onCall,
                 {isNew && <span className="badge-new">NEW</span>}
               </div>
               {c.summary ? <div className="convo-summary">{c.summary}</div> : <div className="convo-preview">{previewText(c.preview)}</div>}
-              {(c.outcome || c.follow_up) && (
-                <div className="convo-tags"><OutcomeBadge outcome={c.outcome} followUp={c.follow_up} /></div>
+              {(c.outcome || c.follow_up || c.review_status) && (
+                <div className="convo-tags"><OutcomeBadge outcome={c.outcome} followUp={c.follow_up} /><ReviewBadge status={c.review_status} note={c.review_note} /></div>
               )}
               <div className="convo-meta">
                 <span>{fmtWhen(c.started_at)}</span>

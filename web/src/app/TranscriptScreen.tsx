@@ -3,6 +3,7 @@ import type { Loadable } from "./App";
 import { Bubble } from "./Bubbles";
 import { GlobeIcon } from "./icons";
 import { OutcomeBadge } from "./OutcomeBadge";
+import { ReviewBadge } from "./ReviewBadge";
 import { PullRegion, Skeleton, useMinShow } from "./PullIndicator";
 import type { PullState } from "./pullToRefresh";
 import { SourceBadge } from "./SourceIcon";
@@ -45,9 +46,10 @@ export function TranscriptScreen({ pull, bizName, convo, onBack, onContinue }: P
         )}
       </div>
 
-      {c && !showSk && (c.summary || c.outcome || c.follow_up) && (
+      {c && !showSk && (c.summary || c.outcome || c.follow_up || c.review_status) && (
         <div className="tr-summary">
           <OutcomeBadge outcome={c.outcome} followUp={c.follow_up} />
+          <ReviewBadge status={c.review_status} note={c.review_note} />
           {c.summary && <p>{c.summary}</p>}
         </div>
       )}

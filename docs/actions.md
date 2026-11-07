@@ -49,7 +49,7 @@ another business's data.
 | Module | Role |
 |---|---|
 | `registry.py` | `ActionContext`, `Tool`, `register()`, `get_tool()`, `TOOLS` (always-on schemas), `tools_for(business_id)` (adds the business's enabled optional tools), `enabled_tool_names()` |
-| `executor.py` | `execute(ctx, name, arguments)`: validation, enabled-tool check, confirmation guard, `action_log` writes |
+| `executor.py` | `execute(ctx, name, arguments)`: validation, enabled-tool check, `precheck`, confirmation guard, `action_log` writes |
 | `messages.py` | `take_message` tool → `messages_for_owner` row |
 | `transfer.py` | `transfer_to_human` tool; `transfer_number()` and `transfer_requested()` for the Twilio routes |
 | `summary.py` | `summarize_conversation()`: one-line summary, intent, outcome, follow-up on `conversations` |
@@ -80,7 +80,9 @@ LLM tool call (voice session / chat answer)
        unknown tool               → "Error: unknown tool ..."
        optional and not enabled   → "Error: ... not available for this business."
        args not a JSON object     → "Error: ..."
-       read-only tool             → handler(ctx, args)            (not logged)
+       read-only tool             → handler(ctx, args)            (optional ones, e.g. list_sessions: action_log ok / error;
+                                                                   search_business_info: not logged)
+       side effect, precheck says no → the refusal text (no such session, made-up name, no phone) → action_log error
        side effect, confirmed≠true→ "Not done: ... read back, ask for a yes"  → action_log needs_confirmation
        side effect, confirmed=true→ handler(ctx, args)  → action_log ok / error
   → result text back to the LLM as the tool message
@@ -138,7 +140,7 @@ The read-back is re-checked under a second transaction so a duplicate Twilio cal
 One `booking_rules` row per business (owner-set by SQL; no row = defaults):
 `slot_minutes` (60), `capacity` (1), `lead_time_minutes` (0), `max_party_size`, `hours`
 (`{"mon": [["09:00","21:00"]], ...}`, `NULL` = no hours check), `service_durations`
-(lowercase service → minutes). Timezone comes from `businesses.timezone`.
+(lowercase service → minutes). `check_availability` and `create_booking` refuse a service the business does not offer (`tools._unknown_service`, see [bookings.md](bookings.md) §1.2): a configured service list is the allowed set; with none configured, any name passes unless the business has open sessions and `join_session` on (the session list has no business filter, so another business's sessions are not counted). The `create_booking` handler does not repeat the check its precheck ran. Timezone comes from `businesses.timezone`.
 
 `violation()` returns the first broken rule as a sentence for the caller, in this order: too
 soon / past, party < 1, party too large, closed day, outside hours (the booking must end before
@@ -200,9 +202,14 @@ with `session_id` and `type='session'`.
   per-business lock as `InternalBackend.create`), `update_session` (name / seats / private; seats
   can't go below the booked count; a Google session's name is read-only), `cancel_session`
   (cancels attendees, deletes the event, texts callers after commit), `remove_attendee`.
-- **Caller side** (tools): `list_open` (public, not ended, next 30 days or one day, up to 10) and
+- **Caller side** (tools): `list_open` (public, not ended, next 30 days or one day, up to 10; `seats=False` skips the per-row seat count, used by the name look-ups `resolve_session`/`_join_check`/`_unknown_service`) and
   `join_session` (forced sync, per-calendar lock, private → refused, full → refused, one seat per
-  conversation).
+  conversation). A session `when` is `Thu 05 Nov, 10:00 AM to 11:00 AM`: every caller-facing time
+  comes from `rules.clock()` (12-hour with AM/PM). If the model passes a session name instead of the
+  code, `tools.resolve_session` finds it, using the bot's last read-back as a hint. A name or code
+  that matches no open session is refused by `join_session`'s `precheck` (before any read-back) with
+  a ready-to-say "Say exactly: There is no ... on the schedule. We have ..." sentence built in code (start times only, no codes, quote marks stripped from names by `tools._quotable`); a code is looked up with `sessions.find_open`.
+  The bot cannot create a session. More in [bookings.md](bookings.md).
 - **With Google** (`get_client()` is not `None` only when `BOOKING_BACKEND=google_calendar`):
   Google owns which sessions exist and when; Postgres owns seats, the private flag and
   attendees. App-made sessions are inserted as events with id = session UUID hex (a Google
@@ -225,6 +232,7 @@ with `session_id` and `type='session'`.
 | `tools_for(business_id)` | registry | Schemas for `tools=`; one DB read per call |
 | `execute(ctx, name, args)` | executor | The only path to a handler |
 | `Tool.schema()` | registry | Adds required `confirmed` boolean to side-effect tools |
+| `Tool.precheck` | registry | Optional `(ctx, args) -> str \| None` on a side-effect tool; the executor runs it before the confirmation check |
 | `summarize_conversation(bid, cid)` | summary | Idempotent, never raises |
 | `transfer_requested(bid, call_sid)` / `transfer_number(bid)` | transfer | Read by `/twilio/transfer` |
 | `Rules.violation()` / `candidate_starts()` | booking/rules | Pure, unit-tested |
@@ -259,8 +267,10 @@ Settings with no screen yet are set by SQL (`enabled_tools`, `transfer_number`, 
   come back as `Error: ...` / `Not available: ...` text the model can repeat. A side-effect
   handler that raises is caught by the executor, logged and returned as
   `Error: <tool> failed (<ExceptionType>)`.
-- **Audit**: every side-effect call, also refused (`needs_confirmation`) and failed (`error`)
-  ones, goes to `action_log`. A failing audit write is logged and swallowed.
+- **Audit**: every side-effect call, also refused (`needs_confirmation`, a `precheck` refusal as
+  `error`) and failed (`error`) ones, and every call of an optional read-only tool
+  (`list_sessions`, `check_availability`: `ok` / `error`), goes to `action_log`; the always-on
+  search tool is not logged (latency). A failing audit write is logged and swallowed.
 - **Google**: every network or HTTP failure is `CalendarError` (10 s timeout per call). Subtypes:
   `SyncTokenExpired` (410 → full resync), `PreconditionFailed` (412 → re-read), `EventExists`
   (409 → treated as success). Booking paths book nothing when Google fails; cancel keeps the

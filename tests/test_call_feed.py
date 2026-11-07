@@ -149,12 +149,15 @@ def test_phone_call_shows_up_live(settings, business, monkeypatch):
     assert seen == [
         ("reply", "Hi, I am an AI assistant."),
         ("playback", True),
+        ("mark", None),  # V11: a Twilio mark after each piece of audio sent
         ("clear", None),
         ("playback", False),  # barge-in stops the bot at once
         ("transcript", "What time do you close on Saturday?"),
         ("reply", "We close at 5 pm on Saturday."),
         ("playback", True),
+        ("mark", None),
         ("reply", "Anything else?"),  # still speaking: no playback off/on in between
+        ("mark", None),
         ("playback", False),  # the answer's audio ran out
     ]
     assert any(e["type"] == "latency" for e in events)

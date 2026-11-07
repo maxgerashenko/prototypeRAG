@@ -137,8 +137,10 @@ def test_get_lists_sessions_and_hides_attendee_rows(client, biz):
     _book(biz, utc(2026, 11, 5, 19, 0), name="Solo")
     body = client.get(f"/businesses/{biz}/bookings", params={"start": "2026-11-05", "end": "2026-11-05"}).json()
     assert [b["name"] for b in body["bookings"]] == ["Solo"]
-    assert len(body["sessions"]) == 1
-    item = body["sessions"][0]
+    # the demo rule shows every business's sessions of the day (dev DB has the real ones): only this test's own count
+    mine = [x for x in body["sessions"] if x["business_id"] == str(biz)]
+    assert len(mine) == 1
+    item = mine[0]
     assert (item["id"], item["date"], item["start_min"], item["end_min"], item["name"],
             item["max_attendees"], item["booked"]) == (sid, "2026-11-05", 10 * 60, 11 * 60, "Yoga", 8, 2)
     assert [(a["name"], a["phone"], a["by_assistant"]) for a in item["attendees"]] == [
@@ -147,7 +149,7 @@ def test_get_lists_sessions_and_hides_attendee_rows(client, biz):
     # the id of the booking conversation comes through for the assistant's booking, null for a manual one
     assert [a["conversation_id"] for a in item["attendees"]] == [str(conv), None]
     other_day = client.get(f"/businesses/{biz}/bookings", params={"start": "2026-11-06", "end": "2026-11-06"}).json()
-    assert other_day["sessions"] == []
+    assert [x for x in other_day["sessions"] if x["business_id"] == str(biz)] == []
 
 
 def test_sync_flag_pulls_google_first_and_flags_stale_when_unreachable(client, biz, monkeypatch):

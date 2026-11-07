@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Text, cast, select, text
 
+from app.actions.booking import guests
 from app.actions.booking import rules as R
 from app.actions.booking.google_client import CalendarClient, CalendarError, EventExists
 from app.actions.booking.mirror import CalendarMirror, DbMirror
@@ -63,9 +64,12 @@ def _conversation_link(conversation_id: uuid.UUID) -> str:
 
 
 def _event_body(booking_id: uuid.UUID, business_id: uuid.UUID, request: BookingRequest,
-                start: datetime, end: datetime, tz: str, ref: str) -> dict:
+                start: datetime, end: datetime, tz: str, ref: str, guest=None) -> dict:
+    """The event of a 1:1 booking. With a `guest` and the OAuth token the guest is its one
+    attendee (fake address, not emailed: the client sends sendUpdates=none)."""
+    who = guest.display_name if guest is not None else request.name.strip()
     what = request.service or (f"table for {request.party_size}" if request.party_size else "booking")
-    lines = [f"Name: {request.name.strip()}"]
+    lines = [f"Name: {who}"]
     digits = "".join(c for c in (request.phone or "") if c.isdigit())
     if digits:
         lines.append(f"Phone: ...{digits[-4:]}")  # the full number stays in our DB
@@ -80,15 +84,19 @@ def _event_body(booking_id: uuid.UUID, business_id: uuid.UUID, request: BookingR
     if request.conversation_id:
         private["conversation_id"] = str(request.conversation_id)
         lines.append(f"Conversation: {_conversation_link(request.conversation_id)}")
-    return {
+    body = {
         "id": event_id_for(booking_id),
-        "summary": f"{request.name.strip()} - {what}",
+        "summary": f"{who} - {what}",
         "description": "\n".join(lines),
         "start": {"dateTime": start.isoformat(), "timeZone": tz},
         "end": {"dateTime": end.isoformat(), "timeZone": tz},
         "extendedProperties": {"private": private},
         "reminders": {"useDefault": False},
     }
+    if guest is not None and guests.attendees_enabled():
+        body["attendees"] = [guests.attendee(guest)]
+        body.update(guests.NO_GUEST_VISIBILITY)
+    return body
 
 
 class GoogleCalendarBackend:
@@ -159,21 +167,23 @@ class GoogleCalendarBackend:
                     return BookingResult(False, reason, alternatives=alts)
                 booking_id = uuid.uuid4()
                 ref = str(booking_id)[:REF_LEN].upper()
-                body = _event_body(booking_id, business_id, request, start, end, rules.timezone, ref)
+                guest = guests.for_caller(session, business_id, request.name, request.last_name, request.phone)
+                body = _event_body(booking_id, business_id, request, start, end, rules.timezone, ref, guest)
                 event_id = body["id"]  # set first: if the insert times out, the event may still exist
                 self._insert(calendar_id, body)
                 session.add(Booking(
                     id=booking_id, business_id=business_id, conversation_id=request.conversation_id,
+                    caller_conversation_id=request.conversation_id, guest_id=guest.id,
                     type="appointment" if request.service else "table",
                     starts_at=R.to_utc(start), ends_at=R.to_utc(end), party_size=request.party_size,
-                    service=(request.service or "").strip() or None, name=request.name.strip(),
+                    service=(request.service or "").strip() or None, name=guest.display_name,
                     phone=request.phone, notes=(request.notes or "").strip() or None, external_ref=event_id,
                 ))
                 session.flush()
                 name = session.scalar(select(BusinessProfile.name).where(BusinessProfile.business_id == business_id))
                 if not name or name == "(pending)":
                     name = session.scalar(select(Business.name).where(Business.id == business_id))
-                return BookingResult(True, "Booked.", booking_id, ref, name, start.strftime("%a %d %b, %H:%M"))
+                return BookingResult(True, "Booked.", booking_id, ref, name, f"{start:%a %d %b}, {R.clock(start)}")
         except CalendarError as exc:
             log.warning("google calendar create failed: %s", exc)
             if event_id:  # the insert failed twice, but a timed-out call may have gone through

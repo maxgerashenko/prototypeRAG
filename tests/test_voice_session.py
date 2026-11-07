@@ -395,6 +395,66 @@ def test_answer_is_spoken_after_all_tool_rounds_are_used(business, monkeypatch):
     assert replies == ["You are booked."]  # not "Sorry, I couldn't find that"
 
 
+class EmptyAfterToolLLM(FakeLLM):
+    """A tool round, then `empties` rounds that stream no words and no call, then the answer (if any)."""
+
+    def __init__(self, empties: int, answer: str | None) -> None:
+        super().__init__()
+        self.empties, self.answer = empties, answer
+
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:
+            return await super()._create(**kwargs)
+        self.requests.append(kwargs)
+        n = len(self.requests)
+        if n == 1:
+            pieces = [_chunk(tool_calls=[_tool_call_delta(0, id="call_1", name="join_session", arguments='{"x": 1}')])]
+        elif n <= 1 + self.empties or self.answer is None:
+            pieces = [_chunk(None)]
+        else:
+            pieces = [_chunk(self.answer)]
+
+        async def gen():
+            for p in pieces:
+                yield p
+
+        return gen()
+
+
+def _turn_replies(business, llm, monkeypatch, tool_result):
+    s, _, events = _make_session(business, llm, monkeypatch)
+    monkeypatch.setattr(session_mod, "run_tool", lambda *a: tool_result)
+
+    async def run():
+        await s.start()
+        await s._reply_task  # greeting
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task  # the turn
+        await s.close()
+
+    run_async(run())
+    return [e["text"] for e in events if e["type"] == "reply"][1:]
+
+
+def test_empty_reply_after_a_tool_is_asked_again(business, monkeypatch):
+    llm = EmptyAfterToolLLM(empties=1, answer="You are booked.")
+    assert _turn_replies(business, llm, monkeypatch, "Booked.") == ["You are booked."]
+    assert len(llm.requests) == 3
+
+
+def test_still_empty_after_a_booking_says_what_was_booked(business, monkeypatch):
+    llm = EmptyAfterToolLLM(empties=5, answer=None)
+    result = "Booked Ann Lee into Sauna Polish on Thu 05 Nov, 10:00. Reference ABCD1234. Read the reference to the caller."
+    replies = _turn_replies(business, llm, monkeypatch, result)
+    assert replies == ["Booked Ann Lee into Sauna Polish on Thu 05 Nov, 10:00. Reference ABCD1234."]
+
+
+def test_still_empty_without_a_tool_result_is_not_silent(business, monkeypatch):
+    llm = EmptyAfterToolLLM(empties=5, answer=None)
+    replies = _turn_replies(business, llm, monkeypatch, "No sessions.")
+    assert replies and "say it again" in replies[0]
+
+
 def test_barge_in_clears_playback_and_cancels_reply(business, monkeypatch):
     s, audio_out, events = _make_session(business, FakeLLM(), monkeypatch)
 
@@ -539,7 +599,7 @@ def test_stt_error_surfaces_in_finish(monkeypatch):
         stt.TurnTranscriber(16000).finish()
 
 
-def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
+def test_barge_in_mid_reply_keeps_only_what_was_spoken_in_history(business, monkeypatch):
     import time as _time
 
     def slow_synthesize(text, rate):
@@ -569,12 +629,12 @@ def test_barge_in_mid_reply_keeps_only_what_was_spoken(business, monkeypatch):
         rows = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at))
         assert [(m.role, m.content) for m in rows][1:] == [
             ("user", "What time do you close on Saturday?"),
-            ("assistant", "We close at 5 pm on Saturday."),  # the unspoken sentence isn't stored
+            ("assistant", "We close at 5 pm on Saturday. [not heard: Anything else?]"),  # transcript keeps the cut part
         ]
     assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
 
 
-def test_barge_in_after_reply_sent_keeps_only_what_was_heard(business, monkeypatch):
+def test_barge_in_after_reply_sent_keeps_only_what_was_heard_in_history(business, monkeypatch):
     # B2: TTS is faster than playback, so the whole reply is sent while the caller has
     # heard only part of it; a barge-in then must not store the unheard rest
     def synthesize(text, rate):
@@ -601,7 +661,7 @@ def test_barge_in_after_reply_sent_keeps_only_what_was_heard(business, monkeypat
         rows = db.scalars(select(Message).where(Message.business_id == business).order_by(Message.created_at))
         assert [(m.role, m.content) for m in rows][1:] == [
             ("user", "What time do you close on Saturday?"),
-            ("assistant", "We close at 5 pm on Saturday."),
+            ("assistant", "We close at 5 pm on Saturday. [not heard: Anything else?]"),  # transcript keeps the cut part
         ]
     assert s._history[-1] == {"role": "assistant", "content": "We close at 5 pm on Saturday."}
 
@@ -1239,3 +1299,66 @@ def test_mark_echo_of_later_mark_clears_earlier_and_unknown_is_ignored(business,
         await s.close()
 
     run_async(run())
+
+
+class SayLLM:
+    """One round: the given text, in pieces."""
+
+    def __init__(self, *pieces: str) -> None:
+        self.pieces = pieces
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:
+            return SimpleNamespace(choices=[])
+
+        async def gen():
+            for p in self.pieces:
+                yield _chunk(p)
+
+        return gen()
+
+
+def _one_turn(business, monkeypatch, llm, caller_says):
+    monkeypatch.setattr(FakeTranscriber, "finish", lambda self, timeout=5.0: caller_says)
+    s, _, events = _make_session(business, llm, monkeypatch)
+    s._synthesize = short_synthesize
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._open_rows = [{"name": "Sauna Polish", "when": "Fri 06 Nov, 10:00 AM to 11:00 AM", "full": False}]
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    return [e["text"] for e in events if e["type"] == "reply"][1:]  # without the greeting
+
+
+def test_refusal_is_followed_by_the_real_sessions(business, monkeypatch):
+    monkeypatch.setattr(session_mod, "spoken_sessions", lambda b, rows, limit: "Sauna Polish tomorrow at 10:00 AM")
+    llm = SayLLM("We don't have a Steam Bath session at 2 PM.", " Would you like one of those instead?")
+    replies = _one_turn(business, monkeypatch, llm, "I'd like to book the Steam Bath session at 2 PM")
+    # the offer comes after the stream (the model's later sentences may already name the sessions)
+    assert replies == ["We don't have a Steam Bath session at 2 PM.", "Would you like one of those instead?",
+                       "We have Sauna Polish tomorrow at 10:00 AM."]
+
+
+def test_no_offer_when_the_model_names_the_sessions_itself_in_its_next_sentence(business, monkeypatch):
+    monkeypatch.setattr(session_mod, "spoken_sessions", lambda b, rows, limit: "Sauna Polish tomorrow at 10:00 AM")
+    llm = SayLLM("There is no session called 'Steam Bath' on the schedule.", " We have Sauna Polish tomorrow at 10:00 AM.")
+    replies = _one_turn(business, monkeypatch, llm, "I'd like to book the Steam Bath session at 2 PM")
+    assert replies == ["There is no session called 'Steam Bath' on the schedule.",
+                       "We have Sauna Polish tomorrow at 10:00 AM."]
+
+
+def test_no_offer_when_the_caller_did_not_ask_for_a_session(business, monkeypatch):
+    monkeypatch.setattr(session_mod, "spoken_sessions", lambda b, rows, limit: "Sauna Polish tomorrow at 10:00 AM")
+    llm = SayLLM("We don't have parking here.")
+    assert _one_turn(business, monkeypatch, llm, "Do you have parking?") == ["We don't have parking here."]
+
+
+def test_a_bare_end_time_gets_its_am_pm(business, monkeypatch):
+    llm = SayLLM("Polish is from 10:00 AM to 11:00.")
+    assert _one_turn(business, monkeypatch, llm, "When is Polish?") == ["Polish is from 10:00 AM to 11:00 AM."]

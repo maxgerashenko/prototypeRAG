@@ -34,7 +34,8 @@ from app.actions.booking.google_client import (
     CalendarError, CalendarEventsClient, GoogleCalendarClient, SyncTokenExpired, client_from_settings,
 )
 from app.config import get_settings
-from app.db.models import Booking, Business, CalendarEvent, CalendarSyncState
+from app.actions.booking.guests import attendees_enabled
+from app.db.models import Booking, Business, CalendarEvent, CalendarSyncState, SessionGuest
 from app.db.session import SessionLocal
 
 log = logging.getLogger(__name__)
@@ -77,7 +78,12 @@ def parse_event(item: dict) -> dict | None:
         "summary": item.get("summary"),
         "status": item.get("status") if item.get("status") in ("confirmed", "tentative", "cancelled") else "confirmed",
         "transparency": "transparent" if item.get("transparency") == "transparent" else "opaque",
+        "visibility": item.get("visibility") or "default",
         "google_updated": datetime.fromisoformat(updated.replace("Z", "+00:00")) if updated else None,
+        "attendees": [
+            {"email": a["email"], "displayName": a.get("displayName", ""), "responseStatus": a.get("responseStatus", "")}
+            for a in item.get("attendees") or [] if a.get("email")
+        ],
     }
     if start is None or end is None:
         return row if row["status"] == "cancelled" else None
@@ -148,6 +154,26 @@ def _apply_to_bookings(session, event_id: str, r: dict, now: datetime, result: S
             update(Booking).where(*linked, (Booking.starts_at != r["starts_at"]) | (Booking.ends_at != r["ends_at"]))
             .values(starts_at=r["starts_at"], ends_at=r["ends_at"])
         ).rowcount
+    if r.get("attendees") is not None and attendees_enabled():
+        _follow_attendee(session, event_id, r["attendees"], now, result)
+
+
+def _follow_attendee(session, event_id: str, attendees: list, now: datetime, result: SyncResult) -> None:
+    """A 1:1 booking's guest is the event's attendee. Seen in Google: attendee_seen_at is set.
+    Removed or declined after that: the booking is cancelled (the event itself stays; the owner
+    deletes it). Never seen yet: left alone. Anything added in Google is ignored."""
+    by_email = {a["email"].lower(): a for a in attendees}
+    for b, email in session.execute(
+        select(Booking, SessionGuest.email)
+        .join(SessionGuest, (SessionGuest.business_id == Booking.business_id) & (SessionGuest.id == Booking.guest_id))
+        .where(Booking.external_ref == event_id, Booking.status == "confirmed")
+    ).all():
+        a = by_email.get(email.lower())
+        if a is not None and a.get("responseStatus") != "declined":
+            b.attendee_seen_at = b.attendee_seen_at or now
+        elif b.attendee_seen_at is not None:
+            b.status, b.cancelled_at = "cancelled", now
+            result.bookings_cancelled += 1
 
 
 def _list_all(client: CalendarEventsClient, calendar_id: str, **kw) -> tuple[list[dict], str | None]:

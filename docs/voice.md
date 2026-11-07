@@ -37,7 +37,7 @@ the other end is Twilio or a browser.
 | `app/voice/greeting_cache.py` | Greeting text (`business_greeting`, `voice_name`, `AI_DISCLOSURE`) and its stored audio in Postgres (`load`, `store`, `pregenerate`, `prune`, `cache_status`). |
 | `app/voice/tools.py` | The tool surface shared by voice and chat: registers `search_business_info`, imports action modules so they register, exposes `TOOLS`, `tools_for`, `enabled_tool_names`, `run_tool`. |
 | `app/voice/audio.py` (`working_sound`) | Generated "working on it" tick loop played while a tool runs (T1). The codec helpers in the same file belong to the transport side. |
-| `app/rag/answer.py` | Chat answer pipeline: `prepare_prompt`, `answer_question` (blocking), `stream_answer` (generator), same tool loop as voice. |
+| `app/rag/answer.py` | Chat answer pipeline: `prepare_prompt`, `answer_question` (blocking), `stream_answer` (generator), same tool loop as voice. Also the reply guards (`offer_open_sessions`, `fix_end_times`, …) and `prompt_sessions`, which voice reuses. |
 | `app/rag/prompt.py` | Prompt text and formatters: chat `SYSTEM_PROMPT`, `BOOKING_PROMPT`, `SESSION_PROMPT`, `tools_prompt`, `format_profile`, `format_summary`, `format_chunks`, `build_prompt`. |
 
 ## 3. Voice call lifecycle and timing
@@ -66,7 +66,7 @@ adapter → CallSession(business_id, rate, send_audio, send_event, …)
    is still running, the task is kept in `_unanswered_stt` and its words lead the next turn.
 2. **Empty text** → `no_speech` event, no LLM call. **STT error** → `error` event (V7).
 3. `transcript` event, then `_reply` → `_reply_rounds`, the tool loop (section 4).
-4. Each finished sentence goes through `_say`: `speakable()` → `reply` event → TTS
+4. Each finished sentence goes through `_say`: `speakable()` → `fix_end_times()` (adds the AM/PM a range's end time lacks) → `reply` event → TTS
    (thread) → `_play()`. The first sentence is spoken while the LLM is still writing the
    rest.
 5. After the LLM is done, the turn **stays active until playback ends**
@@ -138,17 +138,18 @@ give-up line: "Sorry, I couldn't find that/finish that. Can I take a message?"
 | Client | `get_async_chat_client()` (async, streamed) | `get_chat_client()` (sync; streamed or not) |
 | Model / thinking | `LLM_MODEL`, `VOICE_REASONING_EFFORT` = `none` (DEC-29) | `LLM_MODEL`, `CHAT_REASONING_EFFORT` = `none` (V24) |
 | RAG | Tool only: the model calls `search_business_info` (DEC-30), top 5 | **Pre-retrieval** of top 5 chunks into the system prompt, plus the same search tool |
-| System prompt | `VOICE_SYSTEM_PROMPT` + local time + profile + tools rules + locations + summary, built once at call start | `SYSTEM_PROMPT` + tools rules + profile + locations + summary + chunks, built per request |
+| System prompt | `VOICE_SYSTEM_PROMPT` + local time + profile + tools rules + open-session list (name, time, code; only when `join_session` is enabled, `answer.open_sessions_note`) + locations + summary, built once at call start | `SYSTEM_PROMPT` + tools rules + profile + locations + summary + chunks, built per request |
 | History | In memory for the call; only heard text | Loaded from `messages` per request; the full answer |
 | Tool context | `business_id`, `conversation_id`, `call_sid`, `caller` from the session | `business_id`, `conversation_id` only |
-| Output cleanup | `speakable()` strips markdown, list marks, URLs (V14); sentence splitter with abbreviation list and a 120-char clause cut (T4b, V13) | None; SSE escapes newlines |
+| Output cleanup | `speakable()` strips markdown, list marks, URLs (V14); `_say` then runs `fix_end_times` (AM/PM on a range's end time); when a round refused a session the caller asked for (`REFUSES`) and names no real one, a code-built open-session list follows at the end of the round (`needs_session_offer` on the round's whole text, `spoken_sessions`, once per turn); sentence with abbreviation list and a 120-char clause cut (T4b, V13) | None; SSE escapes newlines |
 | Warm-up | `max_tokens=1` call with the prefix while the greeting plays (T2) | None |
 
 Tool rules that matter for conversation logic (enforced in `app/actions/executor.py`, see
 [actions.md](actions.md)): unknown tool or bad JSON returns an error string, never raises; an
 optional tool not enabled for the business is refused; a side-effect tool without
 `confirmed=true` returns "Not done … ask for an explicit yes", which drives the read-back step
-in the prompt. `tools_for(business_id)` offers only the tools that business enabled (#151),
+in the prompt; a side-effect tool's `precheck` (no such session, made-up name) refuses first, before
+that read-back. `tools_for(business_id)` offers only the tools that business enabled (#151),
 and `tools_prompt()` adds the booking/session rules only for those.
 
 ## 5. Prompts
@@ -157,7 +158,7 @@ and `tools_prompt()` adds the booking/session rules only for those.
 |---|---|---|
 | `VOICE_SYSTEM_PROMPT` | `session.py` | Answer only from profile or search results; search for anything else; offer `take_message` / `transfer_to_human`; never mention profile/search; name the area for area-specific hours; 1–3 short spoken sentences, no lists/markdown/URLs; caller's language; warm goodbye. |
 | `SYSTEM_PROMPT` | `prompt.py` | Same grounding rule, short answers, same language. |
-| `BOOKING_PROMPT`, `SESSION_PROMPT` | `prompt.py` | Check before offering, read back, wait for yes, `confirmed=true`, never claim done unless the tool said so. |
+| `BOOKING_PROMPT`, `SESSION_PROMPT` | `prompt.py` | Check before offering, read back in one short sentence ending "Shall I book it?" (no apology, no seat counts), wait for yes, `confirmed=true`, times said with AM/PM, name only sessions the tool or the open-session list gave (never make up a session, time or seat count; say "full" only for a session marked FULL; say plainly when one is not on the schedule and name the open ones with day and start time, never "one of these" without naming them; say a tool result's "Say exactly" sentence as written; AM or PM after every time, including the end time of a range), never claim done unless the tool said so. |
 | `format_summary` | `prompt.py` | Business summary as tone, not facts; guest themes as opinions; capped at 480 chars. |
 
 ## 6. Key functions
