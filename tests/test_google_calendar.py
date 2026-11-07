@@ -221,6 +221,46 @@ def test_db_mirror_syncs_then_counts_opaque_open_events_of_any_business(business
             s.execute(delete(Business).where(Business.id == other))
 
 
+def test_session_event_with_free_seats_is_not_busy_but_a_full_one_is(business_id, cal, monkeypatch):
+    """#284: an open group session doesn't block a 1:1 booking; a full session does."""
+    from app.actions.booking import calendar_sync
+    from app.actions.booking.mirror import DbMirror
+    from app.db.models import CalendarEvent, GroupSession
+
+    monkeypatch.setattr(calendar_sync, "sync_now", lambda calendar_id, client=None: None)
+    cal_id = f"{uuid.uuid4()}@group.calendar.google.com"
+    try:
+        with tenant_session(business_id) as s:
+            for ref in ("open", "full", "plain"):
+                s.add(CalendarEvent(calendar_id=cal_id, google_event_id=ref, summary=ref,
+                                    starts_at=_local("2026-11-05", "14:00"), ends_at=_local("2026-11-05", "15:00")))
+            sessions = {}
+            for ref, seats in (("open", 2), ("full", 1)):
+                g = GroupSession(business_id=business_id, starts_at=_local("2026-11-05", "14:00"),
+                                 ends_at=_local("2026-11-05", "15:00"), name=ref, max_attendees=seats,
+                                 external_ref=ref, source="google")
+                s.add(g)
+                sessions[ref] = g
+            s.flush()
+            for ref in ("open", "full"):  # one attendee each
+                s.add(Booking(business_id=business_id, type="session", session_id=sessions[ref].id,
+                              starts_at=_local("2026-11-05", "14:00"), ends_at=_local("2026-11-05", "15:00"),
+                              name="Anna", status="confirmed"))
+        ev = DbMirror().busy_events(cal_id, _local("2026-11-05", "00:00"), _local("2026-11-06", "00:00"))
+        assert sorted(e.event_id for e in ev) == ["full", "plain"]
+    finally:
+        with tenant_session(business_id) as s:
+            s.execute(delete(CalendarEvent).where(CalendarEvent.calendar_id == cal_id))
+
+
+def test_no_booking_rules_row_refuses_on_google_backend_too(backend, business_id):
+    with tenant_session(business_id) as s:
+        s.execute(delete(BookingRule).where(BookingRule.business_id == business_id))
+    req = _req(day="2026-11-02", at="03:00")
+    assert not backend.availability(business_id, req, NOW).ok
+    assert not backend.create(business_id, req, NOW).ok
+
+
 def test_concurrent_creates_for_one_slot_book_exactly_one(backend, cal, business_id):
     results = []
     threads = [threading.Thread(target=lambda: results.append(backend.create(business_id, _req(), NOW))) for _ in range(4)]
@@ -256,6 +296,8 @@ def test_two_businesses_on_one_calendar_book_a_slot_exactly_once(cal):
     for bid, name in zip(ids, ("Sauna", "Barber")):
         with tenant_session(bid) as s:
             s.add(Business(id=bid, name=name, timezone=NY))
+            s.flush()
+            s.add(BookingRule(business_id=bid, hours=OPEN_9_21))  # no hours = bookings refused (#260)
     try:
         mirror = FakeMirror(cal)
         mirror.delay = 0.05

@@ -444,7 +444,7 @@ class MessageForOwner(Base):
 
 class BookingRule(Base):
     """Owner-set booking rules, one row per business (app/actions/booking/rules.py).
-    No row = defaults: 60-minute slots, one booking at a time, no hours check."""
+    No row = defaults: 60-minute slots, one booking at a time; no hours = bookings refused (#260)."""
 
     __tablename__ = "booking_rules"
     __table_args__ = (

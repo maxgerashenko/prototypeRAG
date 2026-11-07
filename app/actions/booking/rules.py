@@ -3,8 +3,9 @@
 The rules row (`booking_rules`) is owner-set per business. Times the caller gives are
 wall-clock times in the business timezone; they are stored in UTC (plan/04-actions.md).
 `hours` is {"mon": [["09:00", "21:00"]], ...}: a missing or empty day is closed, and
-`hours=None` means "no hours configured" -> the hours rule is skipped (the profile's
-`opening_hours` is free text, so code can't enforce it).
+`hours=None` means "no hours configured": `violation` skips the hours rule, but the backends
+(`internal._check`) refuse every booking and availability check then (#260). The profile's
+`opening_hours` is free text, so code can't enforce it.
 """
 
 from dataclasses import dataclass, field
