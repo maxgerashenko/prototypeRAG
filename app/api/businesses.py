@@ -1,6 +1,6 @@
 """Dev endpoints for the test pages (stage 1, no login): list all businesses, and assign the
 main Twilio number to one of them. Reads and writes across tenants, so it must move behind
-the owner login (and RLS-aware admin access) in stage 3."""
+the owner login (and RLS-aware admin access) in stage 2."""
 
 import uuid
 from fastapi import APIRouter, HTTPException

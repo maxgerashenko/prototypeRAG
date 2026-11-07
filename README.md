@@ -40,7 +40,7 @@ how each layer is coded: [docs/README.md](docs/README.md).
 Multi-business voice and chat assistant: crawl a business's website → organize into chunks
 and facts → RAG over Postgres + pgvector → answer by chat, in the browser (push-to-talk) and
 by phone (Twilio) → actions (bookings, call transfer, take a message, call summaries). One
-deployment for all businesses, isolated by `business_id` (Row-Level Security comes in stage 3).
+deployment for all businesses, isolated by `business_id` (Row-Level Security comes in stage 2).
 Stages: 1 local (now), 2 many businesses, 3 Google Cloud (Cloud Run, Neon, Gemini).
 
 | Part | Tech |

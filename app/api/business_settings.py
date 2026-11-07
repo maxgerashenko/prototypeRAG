@@ -6,7 +6,7 @@
 - PUT /businesses/{id}/number         assign one of the Twilio account's numbers.
 
 The number endpoint reads and writes across tenants like app/api/businesses.py and needs
-the owner login / an RLS-exempt path in stage 3."""
+the owner login / an RLS-exempt path in stage 2."""
 
 import logging
 import re

@@ -14,10 +14,10 @@ Feed messages (one JSON object per SSE `data:` line):
 - `call_ended`: `call_id`, `t`
 
 Events only, no audio: watching doesn't let you listen in. In-memory and per process:
-fine for stage 1 (one uvicorn) and one Cloud Run instance; several instances in stage 2
-would need a shared channel (Postgres LISTEN/NOTIFY), see DEC-46. Lists calls of every
+fine for stage 1 (one uvicorn) and one Cloud Run instance; several instances in stage 3
+(cloud) would need a shared channel (Postgres LISTEN/NOTIFY), see DEC-46. Lists calls of every
 business, as open as `/businesses` and the conversations API until access control lands
-(OPEN-19); per-owner scoping is stage 3 (OPEN-12).
+(OPEN-19); per-owner scoping is stage 2 (OPEN-12).
 """
 
 import asyncio
