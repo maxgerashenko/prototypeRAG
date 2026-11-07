@@ -15,7 +15,11 @@ ROWS = [
 
 @pytest.fixture(autouse=True)
 def rows(monkeypatch):
-    monkeypatch.setattr(tools.sessions_, "list_open", lambda business_id, day=None: ROWS)
+    monkeypatch.setattr(tools.sessions_, "list_open", lambda business_id, day=None, now=None, limit=10, seats=True: ROWS[:limit])
+    monkeypatch.setattr(
+        tools.sessions_, "find_open",
+        lambda business_id, ref, now=None: next((r for r in ROWS if r["ref"].lower() == ref.lower()), None),
+    )
 
 
 @pytest.mark.parametrize("text, ref", [
@@ -30,9 +34,10 @@ def test_one_match_gives_its_code(text, ref):
 
 
 @pytest.mark.parametrize("text", ["yoga", ""])
-def test_no_match_lists_the_options(text):
+def test_no_match_says_it_is_not_on_the_schedule_and_offers_the_open_ones(text):
     ref, message = tools.resolve_session(uuid.uuid4(), text)
-    assert ref is None and message.startswith("Error: not booked.") and "·" in message
+    assert ref is None and message.startswith("Error: not booked.") and "Say exactly" in message
+    assert "on the schedule. We have Sauna Polish" in message and "Sauna German" in message and "AAAA1111" not in message
 
 
 @pytest.mark.parametrize("text, ref", [
@@ -137,3 +142,10 @@ def test_readback_that_mentions_the_name_or_phone_is_a_read_back():
             assert tools._read_back_asked(ctx, "Tom", tools._DETAIL_QUESTION)
         finally:
             _forget(bid)
+
+
+def test_a_session_beyond_the_first_ten_still_resolves(monkeypatch):
+    many = [{"ref": f"{i:08X}", "name": f"Class {chr(65 + i)}", "when": f"Mon 02 Nov, {i + 1}:00 AM to {i + 2}:00 AM"}
+            for i in range(12)]
+    monkeypatch.setattr(tools.sessions_, "list_open", lambda business_id, day=None, now=None, limit=10, seats=True: many[:limit])
+    assert tools.resolve_session(uuid.uuid4(), "Class L") == ("0000000B", "")

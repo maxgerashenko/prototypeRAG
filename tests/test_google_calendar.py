@@ -156,11 +156,11 @@ def test_service_makes_an_appointment_with_its_duration(backend, cal, business_i
 def test_owners_own_calendar_entry_blocks_the_slot_and_gives_alternatives(backend, cal, business_id):
     cal.external_busy = [(_local("2026-11-05", "14:30"), _local("2026-11-05", "15:30"))]
     av = backend.availability(business_id, _req(), NOW)
-    assert not av.ok and "fully booked" in av.reason and "16:00" in av.alternatives and "14:00" not in av.alternatives
+    assert not av.ok and "fully booked" in av.reason and "4:00 PM" in av.alternatives and "2:00 PM" not in av.alternatives
     res = backend.create(business_id, _req(), NOW)
     assert not res.ok and cal.events == {}  # no event inserted, no row
     with tenant_session(business_id) as s:
-        assert s.scalars(select(Booking)).all() == []
+        assert s.scalars(select(Booking).where(Booking.business_id == business_id)).all() == []
 
 
 def test_calendar_is_re_synced_and_re_checked_right_before_insert(backend, cal, business_id):
@@ -261,7 +261,7 @@ def test_insert_that_fails_twice_books_nothing(backend, cal, business_id):
     res = backend.create(business_id, _req(), NOW)
     assert not res.ok and "calendar" in res.message and cal.calls.count("insert") == 2 and cal.events == {}
     with tenant_session(business_id) as s:
-        assert s.scalars(select(Booking)).all() == []
+        assert s.scalars(select(Booking).where(Booking.business_id == business_id)).all() == []
 
 
 def test_two_businesses_on_one_calendar_book_a_slot_exactly_once(cal):
@@ -297,7 +297,7 @@ def test_google_failure_books_nothing(backend, cal, business_id):
     av = backend.availability(business_id, _req(), NOW)
     assert not av.ok and "calendar" in av.reason
     with tenant_session(business_id) as s:
-        assert s.scalars(select(Booking)).all() == []
+        assert s.scalars(select(Booking).where(Booking.business_id == business_id)).all() == []
 
 
 def test_event_is_deleted_again_if_the_row_cannot_be_written(backend, cal, business_id):

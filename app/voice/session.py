@@ -48,12 +48,15 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.actions.booking import rules as R
+from app.actions.booking.tools import spoken_sessions
 from app.actions.transfer import TRANSFER_STARTED
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Business, BusinessProfile, BusinessSummary, Conversation, Message, message_order, heard_text
 from app.llm import get_async_chat_client
-from app.rag.answer import EMPTY_ANSWER, turn_fallback
+from app.rag.answer import (
+    EMPTY_ANSWER, REFUSES, fix_end_times, needs_session_offer, open_sessions_note, prompt_sessions, turn_fallback,
+)
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import format_profile, format_summary, tools_prompt
 from app.voice import greeting_cache, tts
@@ -249,6 +252,7 @@ class CallSession:
         self._transfer_pending = False  # transfer_to_human succeeded: hang up (Twilio dials) after the reply
         self._history: list[dict] = []
         self._system_prompt = ""
+        self._open_rows: list[dict] = []  # the open sessions in the system prompt (prompt_sessions)
         self._tools: list[dict] = TOOLS  # per business from _load_business (#151)
         self.conversation_id: uuid.UUID | None = None
         self._opening = ""  # the standard greeting, set by _load_business
@@ -489,6 +493,13 @@ class CallSession:
         ]
         client = get_async_chat_client()
         start = len(messages)
+        offered = False  # the open sessions were named after a refusal in this turn
+
+        async def say(sentence: str) -> None:
+            nonlocal refused
+            await self._say(sentence, spoken, play_ends, speech_end, timings)
+            refused = refused or bool(REFUSES.search(sentence))
+
         empty_retried = False
         tool_rounds = 0  # the one retry after an empty reply doesn't use up a tool round
         while True:
@@ -504,6 +515,7 @@ class CallSession:
                 **({} if final else {"tools": self._tools}),
             )
             buffer = ""
+            refused = False  # a sentence of this round refuses something
             calls: dict[int, dict] = {}
             async for chunk in stream:
                 if not chunk.choices:
@@ -523,9 +535,18 @@ class CallSession:
                     buffer += delta.content
                     sentences, buffer = split_sentences(buffer)
                     for sentence in sentences:
-                        await self._say(sentence, spoken, play_ends, speech_end, timings)
+                        await say(sentence)
             if buffer.strip():
-                await self._say(buffer.strip(), spoken, play_ends, speech_end, timings)
+                await say(buffer.strip())
+            # A refusal of a session the caller asked for that names no real one gets the real ones, built in code
+            # (the model said "one of these" without naming them). Checked on the round's whole text, after the
+            # stream: the model's next sentence may already name them.
+            if refused and not offered and self._open_rows and needs_session_offer(
+                    " ".join(spoken[round_start:]), text, self._open_rows):
+                offered = True
+                free = [r for r in self._open_rows if not r["full"]]
+                if names := await asyncio.to_thread(spoken_sessions, self.business_id, free, 3):
+                    await self._say(f"We have {names}.", spoken, play_ends, speech_end, timings)
             if not calls:
                 if len(spoken) > round_start:  # this round said something: that is the answer
                     return
@@ -566,7 +587,7 @@ class CallSession:
     async def _say(
         self, sentence: str, spoken: list[str], play_ends: list[float], speech_end: float, timings: dict
     ) -> None:
-        sentence = speakable(sentence)
+        sentence = fix_end_times(speakable(sentence))
         if not sentence:
             return
         timings.setdefault("llm_first_sentence_ms", _ms(speech_end))
@@ -734,12 +755,15 @@ class CallSession:
             )
             if booking_text := tools_prompt(enabled):
                 self._system_prompt += f"\n\n{booking_text}"
+            if sessions_text := open_sessions_note(self.business_id, enabled):
+                self._system_prompt += f"\n\n{sessions_text}"  # the model loses the codes between turns and invents sessions
             if locations_text := format_locations(
                 session, self.business_id, default_location_id(session, self.business_id)
             ):
                 self._system_prompt += f"\n\n{locations_text}"  # DEC-49
             if summary_text := format_summary(session.get(BusinessSummary, self.business_id)):
                 self._system_prompt += f"\n\n{summary_text}"
+            self._open_rows = prompt_sessions([{"role": "system", "content": self._system_prompt}])
             self._opening = business_greeting(business, profile)
             return voice_name(business, profile)
 

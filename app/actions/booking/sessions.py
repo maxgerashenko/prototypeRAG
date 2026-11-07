@@ -326,10 +326,12 @@ def remove_attendee(
 
 
 def list_open(
-    business_id: uuid.UUID, day: str | None = None, now: datetime | None = None, limit: int = 10
+    business_id: uuid.UUID, day: str | None = None, now: datetime | None = None, limit: int = 10,
+    seats: bool = True,
 ) -> list[dict]:
     """Public sessions that have not ended, soonest first: {ref, name, when, booked, max_attendees, full}.
-    `day` (business-local YYYY-MM-DD) narrows to that day; without it the next 30 days."""
+    `day` (business-local YYYY-MM-DD) narrows to that day; without it the next 30 days.
+    `seats=False` skips the per-row seat count (booked 0, full False): for name look-ups that read ref/name/when only."""
     now = now or datetime.now(timezone.utc)
     with tenant_session(business_id) as session:
         zone = _zone(_business(session, business_id).timezone)
@@ -345,7 +347,7 @@ def list_open(
         ).all()
         out = []
         for r in rows:
-            booked = G._booked(session, r.business_id, r.id)
+            booked = G._booked(session, r.business_id, r.id) if seats else 0
             a, b = r.starts_at.astimezone(zone), r.ends_at.astimezone(zone)
             out.append({
                 "ref": session_ref(r.id), "name": r.name, "booked": booked, "max_attendees": r.max_attendees,
@@ -357,6 +359,30 @@ def list_open(
 
 def session_ref(sid: uuid.UUID) -> str:
     return str(sid)[:8].upper()
+
+
+def find_open(business_id: uuid.UUID, ref: str, now: datetime | None = None) -> dict | None:
+    """Read-only look-up of a public, active, not-ended session by its code (the start of its id, any
+    case): {ref, name, when} if exactly one matches, else None. Same lookup as `join_session`, so it has
+    the same missing business filter (demo rule #300: a Google session is shared by every business).
+    No calendar sync and no lock: the tools use it only to refuse a code that cannot work."""
+    now = now or datetime.now(timezone.utc)
+    ref = (ref or "").strip().lower()
+    if len(ref) < 6 or not re.fullmatch(r"[0-9a-f-]+", ref):
+        return None
+    with tenant_session(business_id) as session:
+        found = session.scalars(
+            select(GroupSession).where(
+                GroupSession.status == "active", GroupSession.ends_at > now,
+                GroupSession.private.is_(False), cast(GroupSession.id, Text).startswith(ref),
+            ).limit(2)
+        ).all()
+        if len(found) != 1:
+            return None
+        row = found[0]
+        zone = _zone(_business(session, row.business_id).timezone)
+        a, b = row.starts_at.astimezone(zone), row.ends_at.astimezone(zone)
+        return {"ref": session_ref(row.id), "name": row.name, "when": f"{a:%a %d %b}, {R.clock(a)} to {R.clock(b)}"}
 
 
 def join_session(

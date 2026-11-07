@@ -71,8 +71,8 @@ def patched_app(business_ids: set):
     saved = (settings.booking_backend, booking_tools.backend, G._client, sessions.list_open, answer_.list_open)
     orig = sessions.list_open
 
-    def scoped(business_id, day=None, now=None, limit=10):
-        rows = orig(business_id, day, now, 500)
+    def scoped(business_id, day=None, now=None, limit=10, seats=True):
+        rows = orig(business_id, day, now, 500, seats)
         with tenant_session(business_id) as s:
             mine = {sessions.session_ref(i) for i in s.scalars(
                 select(GroupSession.id).where(GroupSession.business_id == business_id))}
@@ -215,6 +215,21 @@ def snapshot(world: World, conv: uuid.UUID | None) -> tuple[str, list[Booking], 
     return "\n".join(lines) or "  (empty)", rows, seats
 
 
+FULL_WORDS = re.compile(r"\b(full|fully booked|sold out|booked up|no (seats|spots|places) left)\b", re.I)
+_AMPM = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b\.?", re.I)
+_H24 = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b(?!\s*[ap]\.?m)", re.I)
+
+
+def _clock_times(text: str) -> list[tuple[str, tuple[int, int]]]:
+    """Clock times in a message ("10 AM", "2:00 p.m.", "14:00") as (as written, (hour, minute) on a 24-hour clock)."""
+    found = []
+    for m in _AMPM.finditer(text):
+        h = int(m[1]) % 12 + (12 if m[3].lower() == "p" else 0)
+        found.append((m[0], (h, int(m[2] or 0))))
+    found += [(m[0], (int(m[1]), int(m[2]))) for m in _H24.finditer(text)]
+    return found
+
+
 def check(world: World, conv: uuid.UUID | None, transcript: list[tuple[str, str]], expect: dict) -> tuple[list[str], str]:
     state, rows, seats = snapshot(world, conv)
     fails: list[str] = []
@@ -222,7 +237,9 @@ def check(world: World, conv: uuid.UUID | None, transcript: list[tuple[str, str]
     new_ok = [b for b in new if b.status == "confirmed"]
     with tenant_session(world.bid) as s:
         guests = {g.id: g.display_name for g in s.scalars(select(SessionGuest).where(SessionGuest.business_id == world.bid))}
-        caps = {g.id: g.max_attendees for g in s.scalars(select(GroupSession).where(GroupSession.business_id == world.bid))}
+        group = s.scalars(select(GroupSession).where(GroupSession.business_id == world.bid)).all()
+        caps = {g.id: g.max_attendees for g in group}
+        session_times = {(t.hour, t.minute) for g in group for t in (_local(g.starts_at, world.tz), _local(g.ends_at, world.tz))}
 
     # universal invariants
     bot = [t for w, t in transcript if w == "bot"]
@@ -234,6 +251,8 @@ def check(world: World, conv: uuid.UUID | None, transcript: list[tuple[str, str]
             fails.append(f"INVARIANT b: {n} confirmed seats in a session with max_attendees={cap}")
     if any(b.guest_id is None for b in rows):
         fails.append("INVARIANT c: a booking has no guest_id")
+    if set(caps) != set(world.sessions.values()):  # (g) the bot can only add guests to sessions, never create one
+        fails.append(f"INVARIANT g: the business has {len(caps)} session(s) after the conversation, the setup made {len(world.sessions)}")
 
     # universal invariant (d): short replies, no repeated session list (unless the caller asks for a list/details)
     wants_list = re.compile(r"\b(list|all|options?|which|what (sessions|do you have|is on|else)|details?|tell me (more|about)|"
@@ -250,7 +269,7 @@ def check(world: World, conv: uuid.UUID | None, transcript: list[tuple[str, str]
         clock = r"\d{1,2}(?::\d{2})?\s?(?:am|pm)?"
         starts = re.sub(rf"({clock})\s?(?:to|until|-|–)\s?{clock}", r"\1", text, flags=re.I)  # "18:00 to 19:00" = one session
         times = set(re.findall(r"\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b|\b\d{1,2}:\d{2}\b", starts, re.I))
-        if bot_i >= 1 and len(times) >= 2 and not asked:
+        if bot_i >= 1 and len(times) >= 2 and not asked and not expect.get("relist_ok"):
             fails.append(f"INVARIANT d: bot reply #{bot_i + 1} lists several sessions again ({sorted(times)}) without being asked")
         bot_i += 1
 
@@ -322,6 +341,33 @@ def check(world: World, conv: uuid.UUID | None, transcript: list[tuple[str, str]
         pat = rf"{d:%A}|{d:%B} {d.day}\b|{d:%b} {d.day}\b|\b{d.day}(st|nd|rd|th)? (of )?{d:%B}"
         if not any(re.search(pat, t, re.I) for t in bot):
             fails.append(f"no bot message names the right day ({d:%A %d %B}); P8")
+    if expect.get("session_times_only"):  # every clock time a bot message names is the start or end of a setup session
+        said = {hm for w, t in transcript if w == "caller" for _, hm in _clock_times(t)}  # echoing the caller's own time is fine
+        for t in bot:
+            bad = [raw for raw, hm in _clock_times(t) if hm not in session_times | said]
+            if bad:
+                fails.append(f"the bot named the time {bad[0]!r}, which is no session's start or end: {t[:100]!r}; P13")
+                break
+    if expect.get("no_false_full"):  # P22: "full"/"sold out" only about a session whose setup seats are all taken
+        free_names, full_names = [], []
+        for key, sid in world.sessions.items():
+            taken = sum(1 for b in rows if b.session_id == sid and b.status == "confirmed")
+            (free_names if taken < caps[sid] else full_names).append(world.session_names[key])
+        for t in bot:
+            for sentence in re.split(r"[.!?;,\n]|\band\b|\(", t):  # clause level: "A at 10, B at 3 and C (full)"
+                if not FULL_WORDS.search(sentence):
+                    continue
+                low = sentence.lower()
+                named = [n for n in free_names if n.lower() in low]
+                if named or not full_names:
+                    fails.append(f"the bot called a session with free seats full ({(named or ['?'])[0]}): {sentence[:100]!r}; P22")
+    # bot_says_after: some bot message AFTER the first caller line matching `caller` must match `bot`
+    for rule in expect.get("bot_says_after") or []:
+        idx = next((i for i, (w, t) in enumerate(transcript) if w == "caller" and re.search(rule["caller"], t, re.I)), None)
+        if idx is None:
+            fails.append(f"the caller never said /{rule['caller']}/ (scenario did not reach this point)")
+        elif not any(w == "bot" and re.search(rule["bot"], t, re.I) for w, t in transcript[idx + 1:]):
+            fails.append(f"after the caller said /{rule['caller']}/ no bot message matches /{rule['bot']}/")
     for pattern in expect.get("bot_says") or []:
         if not any(re.search(pattern, t, re.I) for t in bot):
             fails.append(f"no bot message matches /{pattern}/")

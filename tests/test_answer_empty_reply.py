@@ -215,3 +215,16 @@ def test_review_edge_cases_are_not_blocked():
     long_first = "The Sauna Polish session on Friday " + "really " * 40 + "starts at ten. Shall I book it?"
     out = shorten(long_first)
     assert out.endswith("Shall I book it?") and out.startswith("The Sauna Polish") and len(out.split()) <= 40
+
+
+def test_a_false_booking_claim_after_a_say_exactly_refusal_says_the_refusal():
+    from app.rag.answer import NOT_BOOKED_ANSWER, guard_booking_claim
+
+    refusal = 'Error: not booked. Say exactly: "There is no session called \'Steam Bath\' on the schedule. We have Sauna Polish tomorrow at 10:00 AM." Never mention codes or a technical problem.'
+    said = "Your Steam Bath session is booked, reference ABCD1234."
+    msgs = [{"role": "user", "content": "hi"}, {"role": "tool", "tool_call_id": "c1", "content": refusal}]
+    assert guard_booking_claim(said, msgs, 1, []) == (
+        "There is no session called 'Steam Bath' on the schedule. We have Sauna Polish tomorrow at 10:00 AM.")
+    other = [{"role": "user", "content": "hi"}, {"role": "tool", "tool_call_id": "c1", "content": "Error: needs a name."}]
+    assert guard_booking_claim(said, other, 1, []) == NOT_BOOKED_ANSWER
+    assert guard_booking_claim(said, msgs, 2, []) == NOT_BOOKED_ANSWER  # a refusal from an earlier turn does not count

@@ -46,3 +46,16 @@ def _never_write_to_the_real_calendar():
     session_events.set_client(None)
     yield
     settings.booking_backend, booking_tools.backend = saved
+
+
+@pytest.fixture(autouse=True)
+def _internal_backend_for_every_test():
+    """The session-scoped guard above is undone by `get_settings.cache_clear()` (calendar sync, Google auth and
+    Google calendar tests call it): the next `create_session` would then write a real event. Reset per test."""
+    from app.config import get_settings
+    from app.actions.booking import session_events
+
+    get_settings().booking_backend = "internal"
+    session_events.set_client(None)
+    yield
+

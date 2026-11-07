@@ -8,6 +8,13 @@ from app.actions.booking import tools
 from app.actions.executor import ActionContext
 
 
+@pytest.fixture(autouse=True)
+def session_exists(monkeypatch):
+    monkeypatch.setattr(
+        tools.sessions_, "find_open", lambda business_id, ref, now=None: {"ref": "3C785323", "name": "Sauna Polish", "when": "x"}
+    )
+
+
 def ctx():
     return ActionContext(business_id=uuid.uuid4(), conversation_id=None)
 

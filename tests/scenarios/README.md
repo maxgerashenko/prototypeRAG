@@ -8,7 +8,7 @@ and transcript assertions, never from an LLM grader. Voice, Twilio and TTS are o
 
 ```
 uv run pytest -q tests/scenarios -m scenario          # all (about 15 s per scenario)
-uv run pytest -q tests/scenarios -m P5                # one problem id (P2 P3 P5 P6 P8 P12)
+uv run pytest -q tests/scenarios -m P5                # one problem id (P2 P3 P5 P6 P8 P12 P13 P16 P19 P22)
 uv run python -m tests.scenarios.harness <scenario-id>   # prints the live transcript + DB state
 SCENARIO_RETRIES=0 ...                                 # default 1: a failed scenario is retried once
 ```
@@ -30,9 +30,13 @@ passes only on a retry raises a warning ("flaky").
 - a: if a bot message says booked/confirmed/reserved, a confirmed booking exists for that conversation
 - b: never more confirmed seats than `max_attendees`
 - c: no booking without `guest_id`
-- d: bot reply <= 40 words and no new list of several session times, unless the caller asked for a list/details
+- d: bot reply <= 40 words and no new list of several session times, unless the caller asked for a list/details (or the scenario sets `relist_ok: true`)
 - e: a year the bot names is the current (or next) year
 - f: every time the bot says has AM or PM (never `10:00` or `18:00`)
+- g: the bot never creates a session: the business has exactly the sessions the setup made
+
+Per-scenario check `session_times_only: true`: every clock time in every bot message (`10 AM`, `2:00 PM`,
+`14:00`, ranges, `a.m.`) must be the local start or end of a setup session, or a time the caller said (the bot may repeat it when refusing), so an invented time fails.
 
 ## Scenarios (`scenarios.yaml`, format described at its top)
 
@@ -51,3 +55,5 @@ passes only on a retry raises a warning ("flaky").
 | context_memory_session_then_yes | P6 | chosen session + name remembered, "yes" books it |
 | brevity_no_relist | P5 | after the pick, no other session names, short replies |
 | session_name_with_and_without_suffix | P12 | "Sauna Polish session" tomorrow 10 AM vs "Sauna Polish" the day after 6 PM: the seat is in the morning one |
+| nonexistent_session_not_offered | P13 P16 P19 | caller asks for a "Steam Bath" session that is not on the schedule: it is never offered or read back, no seats claimed, the bot says it is not there and names the real ones (if the model refuses without naming any, `offer_open_sessions` appends them in code), only real session times are said, no booking (not even an appointment for the made-up service) and no new session |
+| empty_session_not_called_full | P22 | sessions with free seats (one empty, one partly booked) and one really full: no bot sentence calls a free one full / fully booked / sold out (`no_false_full`) |

@@ -69,3 +69,15 @@ def test_unknown_tool_and_bad_arguments(logged):
     assert executor.execute(CTX, "test_book", "{not json").startswith("Error")
     assert executor.execute(CTX, "test_book", "[1]").startswith("Error")
     assert logged == []
+
+
+register(Tool(name="test_prechecked", description="x", parameters={"name": {"type": "string"}}, side_effect=True,
+              handler=lambda ctx, args: CALLS.append(args) or "ran",
+              precheck=lambda ctx, args: "Error: refused before the read-back." if args.get("name") == "bad" else None))
+
+
+def test_precheck_refusal_comes_before_the_confirmation_check_and_is_logged(logged):
+    assert executor.execute(CTX, "test_prechecked", {"name": "bad"}) == "Error: refused before the read-back."
+    assert executor.execute(CTX, "test_prechecked", {"name": "bad", "confirmed": True}).startswith("Error: refused")
+    assert executor.execute(CTX, "test_prechecked", {"name": "ok"}).startswith("Not done")  # precheck passes: normal guard
+    assert CALLS == [] and [r[2] for r in logged] == ["error", "error", "needs_confirmation"]

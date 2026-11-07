@@ -20,7 +20,7 @@ from sqlalchemy import delete, select
 from app.actions.booking import rules as R
 from app.actions.booking import tools as booking_tools  # noqa: F401  (importing registers the tools)
 from app.db import tenant_session
-from app.db.models import ActionLog, Booking, BookingRule, Business, Conversation
+from app.db.models import ActionLog, Booking, BookingRule, Business, Conversation, Message
 from app.rag import answer
 from tests.test_rag import FakeLLM
 
@@ -47,6 +47,8 @@ def _call(bid, caller=CALLER) -> uuid.UUID | None:
         c = Conversation(business_id=bid, channel="voice" if caller else "chat", caller=caller)
         s.add(c)
         s.flush()
+        # `answer_question` does not save messages, and a booking needs a read-back: the bot's last message asks to confirm
+        s.add(Message(business_id=bid, conversation_id=c.id, role="assistant", content="Shall I book it under that name?"))
         return c.id
 
 
@@ -91,13 +93,13 @@ def _bookings(bid, status="confirmed"):
     with tenant_session(bid) as s:
         return s.execute(
             select(Booking.name, Booking.phone, Booking.party_size, Booking.starts_at)
-            .where(Booking.status == status).order_by(Booking.starts_at)
+            .where(Booking.business_id == bid, Booking.status == status).order_by(Booking.starts_at)
         ).all()
 
 
 def _log(bid):
     with tenant_session(bid) as s:
-        return s.execute(select(ActionLog.tool, ActionLog.status).order_by(ActionLog.created_at)).all()
+        return s.execute(select(ActionLog.tool, ActionLog.status).where(ActionLog.business_id == bid).order_by(ActionLog.created_at)).all()
 
 
 def _ref(result: str) -> str:
@@ -136,11 +138,11 @@ def test_happy_path_check_confirm_book(call_for, business_id):
         tool("create_booking", date=THU, time="14:00", party_size=2, name="Anna", confirmed=True),
         "You're booked: Thursday 5 November at 2 pm, table for two. Your reference is on screen.",
     )
-    assert call.results[-1].startswith("Booked table for 2 on Thu 05 Nov, 14:00. Reference ")
+    assert call.results[-1].startswith("Booked table for 2 on Thu 05 Nov, 2:00 PM. Reference ")
     rows = _bookings(business_id)
-    assert [(r.name, r.phone, r.party_size) for r in rows] == [("Anna", CALLER, 2)]
+    assert [(r.name, r.phone, r.party_size) for r in rows] == [("Anna 0100", CALLER, 2)]
     assert rows[0].starts_at.hour == 19  # 14:00 New York (EST) stored as UTC
-    assert _log(business_id) == [("create_booking", "ok")]
+    assert _log(business_id) == [("check_availability", "ok"), ("create_booking", "ok")]
 
 
 def test_appointment_with_a_service(call_for, business_id):
@@ -157,7 +159,7 @@ def test_appointment_with_a_service(call_for, business_id):
         "Done.",
     )
     assert call.results[-1].startswith("Booked Sauna on Fri 06 Nov, 10:00")
-    assert [r.name for r in _bookings(business_id)] == ["Dana"]
+    assert [r.name for r in _bookings(business_id)] == ["Dana 0100"]
 
 
 # ---- edge cases ----------------------------------------------------------------------
@@ -180,7 +182,7 @@ def test_closed_day_then_caller_picks_another_day(call_for, business_id):
         tool("create_booking", date=THU, time="19:00", party_size=4, name="Ben", confirmed=True),
         "Booked.",
     )
-    assert [(r.name, r.party_size) for r in _bookings(business_id)] == [("Ben", 4)]
+    assert [(r.name, r.party_size) for r in _bookings(business_id)] == [("Ben 0100", 4)]
 
 
 def test_model_that_skips_the_check_cannot_book_a_closed_day(call_for, business_id):
@@ -218,13 +220,13 @@ def test_full_slot_second_caller_gets_alternatives_and_takes_one(call_for, busin
         tool("check_availability", date=THU, time="14:30", party_size=2),
         "That time is fully booked. I can do 3 pm or 1 pm.",
     )
-    assert "fully booked" in second.results[-1] and "15:00" in second.results[-1]
+    assert "fully booked" in second.results[-1] and "3:00 PM" in second.results[-1]
     second.turn(
         "3 pm. Yes, book it.",
         tool("create_booking", date=THU, time="15:00", party_size=2, name="Bob", confirmed=True),
         "Booked.",
     )
-    assert [(r.name, r.phone) for r in _bookings(business_id)] == [("Anna", CALLER), ("Bob", "+15550100200")]
+    assert [(r.name, r.phone) for r in _bookings(business_id)] == [("Anna 0100", CALLER), ("Bob 0200", "+15550100200")]
 
 
 def test_full_slot_refuses_even_a_confirmed_create(call_for, business_id):
@@ -236,7 +238,7 @@ def test_full_slot_refuses_even_a_confirmed_create(call_for, business_id):
         "Sorry, that's taken.",
     )
     assert other.results[-1].startswith("Error: not booked. That time is fully booked.")
-    assert [r.name for r in _bookings(business_id)] == ["Anna"]
+    assert [r.name for r in _bookings(business_id)] == ["Anna 0100"]
 
 
 def test_party_too_large_is_refused(call_for, business_id):
@@ -271,7 +273,7 @@ def test_change_of_mind_before_confirming_books_only_the_final_choice(call_for, 
     )
     rows = _bookings(business_id)
     assert len(rows) == 1 and rows[0].starts_at.day == 6  # Friday 23:00 UTC; Thursday was never booked
-    assert _log(business_id) == [("create_booking", "needs_confirmation"), ("create_booking", "ok")]
+    assert _log(business_id) == [("create_booking", "needs_confirmation"), ("check_availability", "ok"), ("create_booking", "ok")]
 
 
 def test_caller_declines_at_read_back_nothing_is_booked(call_for, business_id):
@@ -299,7 +301,7 @@ def test_invalid_date_and_missing_name_are_returned_to_the_model(call_for, busin
         tool("create_booking", date=THU, time="14:00", party_size=2, name="  ", confirmed=True),
         "What name is it under?",
     )
-    assert call.results[-1].startswith("Error: not booked. A name")
+    assert call.results[-1].startswith("Error: not booked. The caller has not given their name")
     assert _bookings(business_id) == []
 
 

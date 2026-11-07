@@ -3,7 +3,7 @@
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import tenant_session
 from app.actions.booking import rules as R
+from app.actions.booking.tools import spoken_sessions
 from app.actions.booking.sessions import list_open
 from app.db.models import Business, BusinessProfile, BusinessSummary
 from app.llm import get_chat_client
@@ -43,7 +44,8 @@ def claims_booking(text: str) -> bool:
 
 def guard_booking_claim(answer: str, messages: list[dict], start: int, history: list[dict] | None) -> str:
     """The model sometimes writes "booked, reference 3F9A…" without calling the tool. A first claim in
-    the conversation with no "Booked" tool result in this turn is replaced by a question; a claim after
+    the conversation with no "Booked" tool result in this turn is replaced by a question (or, when a tool
+    refused this turn with a `Say exactly: "..."` sentence, by that sentence); a claim after
     an earlier one (a recap, "your booking is confirmed") is left alone."""
     if not claims_booking(answer):
         return answer
@@ -51,6 +53,10 @@ def guard_booking_claim(answer: str, messages: list[dict], start: int, history: 
         return answer
     if any(m.get("role") == "assistant" and claims_booking(str(m.get("content") or "")) for m in history or []):
         return answer
+    for m in reversed(messages[start:]):  # a refusal the tool worded for the caller beats the generic question
+        said = re.search(r'Say exactly: "([^"]+)"', str(m.get("content") or "")) if m.get("role") == "tool" else None
+        if said:
+            return said[1]
     return NOT_BOOKED_ANSWER
 
 
@@ -199,6 +205,126 @@ def shorten(text: str, max_words: int = MAX_REPLY_WORDS) -> str:
     return result
 
 
+def prompt_sessions(messages: list[dict]) -> list[dict]:
+    """The open sessions listed in the system prompt (`session_lines`): [{"name", "when", "full"}], [] if none.
+    Only messages[0] (the system prompt) is read: tool results and the caller's words never count."""
+    system = str(messages[0].get("content") or "") if messages and messages[0].get("role") == "system" else ""
+    rows = []
+    for line in re.findall(r"^[0-9A-F]{8} · (.+)$", system, re.M):
+        parts = line.split(" · ")
+        if len(parts) >= 2:
+            rows.append({"name": parts[0], "when": parts[1], "full": "FULL" in parts[2:]})
+    return rows
+
+
+# A reply that says there is no such session / it is not there. Sentence level, apostrophes straight or curly.
+REFUSES = re.compile(
+    r"\bnot\s+(?:on|in)\s+(?:the|our)\s+(?:schedule|list)\b|\bno\s+such\b"
+    r"|\bthere\s*(?:is|['\u2019]s|are)\s+no\b|\bthere\s+(?:isn['\u2019]t|aren['\u2019]t)\s+(?:a|an|any)\b"
+    r"|\b(?:don['\u2019]t|do\s+not|doesn['\u2019]t|does\s+not|can['\u2019]t|cannot|couldn['\u2019]t)"
+    r"\s+(?:have|see|find|offer|run)\b"
+    r"|\bisn['\u2019]t\s+(?:a|an|on|in|available|scheduled|listed)\b"
+    r"|\bnot\s+(?:available|scheduled|listed|there|one\s+of|among)\b", re.I)
+NO_SESSIONS_AT_ALL = re.compile(r"\bno\s+(?:open\s+|other\s+|more\s+)?(?:sessions|classes)\b", re.I)  # "none on Sunday"
+ASKS_FOR_SESSION = re.compile(r"\b(book|sign (me )?up|join|reserve|sessions?|class(es)?)\b", re.I)
+# Words that do not tie a refusal to what the caller asked for (the refusal "I couldn't find a booking with that
+# reference" answers "cancel my session booking" about a booking, not a session).
+_FILLER = frozenset(
+    "that this these those with from your have what when where which would could should about there their they them "
+    "then than will just like want need please thank thanks sure okay yeah hello here some more also only very much "
+    "into over does done make made know tell give take going able "
+    "book books booked booking bookings session sessions class classes today tomorrow tonight morning afternoon "
+    "evening noon week weekend monday tuesday wednesday thursday friday saturday sunday time times".split())
+
+
+def _content_words(text: str, rows: list[dict]) -> set[str]:
+    """Words of 4+ letters that are not filler and not part of an open session's name: what the caller
+    actually named (a session that is not on the list), if anything."""
+    in_names = {w for r in rows for w in re.findall(r"[a-z]+", r["name"].lower())}
+    return {w for w in re.findall(r"[a-z]{4,}", text.lower()) if w not in _FILLER and w not in in_names}
+
+
+def _sentences(text: str) -> list[str]:
+    return re.split(r"(?<=[.!?])\s+", text.strip())
+
+
+def _refusal_index(text: str, question: str, rows: list[dict]) -> int | None:
+    """Index of the first sentence that says a specific session is not there (None if no sentence does):
+    it must also share a content word with the caller's `question` ("Steam Bath" in both), so a refusal
+    about something else ("I can't find a booking with that reference") is left alone."""
+    asked = _content_words(question, rows)
+    for i, sentence in enumerate(_sentences(text)):
+        if REFUSES.search(sentence) and not NO_SESSIONS_AT_ALL.search(sentence) \
+                and asked & _content_words(sentence, rows):
+            return i
+    return None
+
+
+def _names_row(text: str, row: dict) -> bool:
+    """Every word of the session's name is in `text` (the rule resolve_session uses)."""
+    words = set(re.findall(r"[a-z0-9]+", text.lower()))
+    name = set(re.findall(r"[a-z0-9]+", row["name"].lower()))
+    return bool(name) and name <= words
+
+
+def needs_session_offer(text: str, question: str, rows: list[dict]) -> bool:
+    """The caller asked for a session that is not on the schedule and the reply refuses without naming
+    a real one ("We don't have a Steam Bath session. Would you like one of those instead?"): True.
+    False when no session is free, the caller named a real one, or the reply already names one."""
+    return (
+        any(not r["full"] for r in rows)
+        and bool(ASKS_FOR_SESSION.search(question))
+        and not any(_names_row(question, r) for r in rows)
+        and _refusal_index(text, question, rows) is not None
+        and not any(_names_row(text, r) for r in rows)
+    )
+
+
+def offer_open_sessions(answer: str, question: str, rows: list[dict], business_id: uuid.UUID, limit: int = 3) -> str:
+    """Code, not the model, names the real sessions after a refusal: the refusal sentence, then
+    "We have <name> <day> at <start>, ...". Fewer sessions while the reply is over MAX_REPLY_WORDS."""
+    if not needs_session_offer(answer, question, rows):
+        return answer
+    sentences = _sentences(answer)
+    cut = _refusal_index(answer, question, rows) + 1
+    head = " ".join(sentences[:cut])
+    asks = " ".join(x for x in sentences[cut:] if x.endswith("?")) or "Would you like one of those?"  # keep the model's question
+    free = [r for r in rows if not r["full"]]
+    while True:
+        reply = f"{head} We have {spoken_sessions(business_id, free, limit)}. {asks}"
+        if len(reply.split()) <= MAX_REPLY_WORDS or limit <= 1:
+            return reply
+        limit -= 1
+
+
+# "6:00 PM to 7:00" -> "... to 7:00 PM": the model drops the AM/PM of an end time now and then.
+_END_TIME = re.compile(
+    r"\b(?P<sh>\d{1,2})(?::(?P<sm>\d{2}))?\s?(?P<mer>[ap])\.?m\b\.?\s*(?:to|until|till|-|\u2013)\s*"
+    r"(?P<end>(?P<eh>\d{1,2}):(?P<em>\d{2})(?!\d)|(?P<bh>\d{1,2})(?=[.,;!?](?!\d)|$))(?!\s?[ap]\.?m\b)(?!:)",
+    re.I | re.M)
+
+
+def fix_end_times(text: str) -> str:
+    """Puts the missing AM/PM on the end of a time range whose start has one: the start's meridiem, or the
+    other when that would end the range before it starts; an end past 12 is read as 24-hour. Only the end
+    changes; "6 PM to 8 people", "10:00 to 11:00" and complete ranges are left alone."""
+    def fix(m: re.Match) -> str:
+        sh, sm = int(m["sh"]), int(m["sm"] or 0)
+        eh, em = int(m["eh"] or m["bh"]), int(m["em"] or 0)
+        if not (1 <= sh <= 12 and sm < 60 and em < 60 and 1 <= eh <= 23):
+            return m[0]
+        start = sh % 12 * 60 + sm + (720 if m["mer"].lower() == "p" else 0)
+        if eh > 12:
+            end = eh * 60 + em
+        else:
+            end = eh % 12 * 60 + em + (720 if m["mer"].lower() == "p" else 0)
+            if end <= start:
+                end = eh % 12 * 60 + em + (0 if m["mer"].lower() == "p" else 720)
+        clock = R.clock(time(end // 60 % 24, end % 60))
+        return m[0][: m.start("end") - m.start()] + clock + m[0][m.end("end") - m.start():]
+    return _END_TIME.sub(fix, text)
+
+
 def turn_fallback(messages: list[dict], start: int, default: str) -> str:
     """What to say when the model ends a turn without words. If a booking or cancellation went
     through in this turn (tool results after `messages[start:]`), say that, with its reference:
@@ -234,18 +360,31 @@ def session_lines(rows: list[dict]) -> list[str]:
     return out
 
 
+def open_sessions_note(business_id: uuid.UUID, enabled) -> str:
+    """The open sessions with their codes when sessions can be booked ("" otherwise, or when none are open):
+    tool results are not kept in the history, so without this the model loses the codes between turns and
+    invents them (or whole sessions)."""
+    if "join_session" not in enabled:
+        return ""
+    rows = list_open(business_id)
+    if not rows:
+        return ""
+    return "\n".join([
+        "Open sessions (for your reference: codes are for join_session only, never read them aloud; "
+        "do not recite this list unless the caller asks what is on; if a caller asks for a session that is not here, "
+        "say there is none and name these with day and start time):",
+        *session_lines(rows),
+    ])
+
+
 def now_note(session, business_id: uuid.UUID, enabled) -> str:
     """Today's date and time in the business's zone (the model has no clock) and, when sessions
-    can be booked, the open ones with their codes: tool results are not kept in the history, so
-    without this the model loses the codes between turns and invents them."""
+    can be booked, the open ones with their codes (`open_sessions_note`)."""
     zone = ZoneInfo(session.scalar(select(Business.timezone).where(Business.id == business_id)) or "UTC")
     lines = [f"Now: {datetime.now(zone):%A %d %B %Y}, {R.clock(datetime.now(zone))} ({zone.key})."]
-    if "join_session" in enabled:
-        rows = list_open(business_id)
-        if rows:
-            lines.append("Open sessions (for your reference: codes are for join_session only, never read them aloud; "
-                         "do not recite this list unless the caller asks what is on):")
-            lines += session_lines(rows)
+    sessions_note = open_sessions_note(business_id, enabled)
+    if sessions_note:
+        lines.append(sessions_note)
     return "\n".join(lines)
 
 
@@ -350,6 +489,9 @@ def answer_question(
         if text and not any(wrong and still(text) for wrong, _, still in checks):
             answer = shorten(drop_filler(text))
     answer = guard_booking_claim(answer, messages, start, history)
+    if answer not in (GIVE_UP_ANSWER, EMPTY_ANSWER, NOT_BOOKED_ANSWER):
+        answer = offer_open_sessions(answer, question, prompt_sessions(messages), business_id)
+        answer = fix_end_times(answer)
     return AnswerResult(answer=answer, chunks=chunks, profile=profile, messages=prompt)
 
 
@@ -358,7 +500,8 @@ def stream_answer(
     conversation_id: uuid.UUID | None = None,
 ):
     """Streaming: same retrieval/prompt step and tool loop; yields answer text piece by
-    piece (text the model writes before a tool call is yielded too)."""
+    piece (text the model writes before a tool call is yielded too).
+    There are no reply-text guards here (booking claim, session offer, end times): they need the whole reply."""
     _, _, messages = prepare_prompt(business_id, question, history, top_n)
 
     settings = get_settings()

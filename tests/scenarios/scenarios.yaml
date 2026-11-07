@@ -21,8 +21,15 @@
 #   bot_says: [regex, ...]        each must match some bot message (case-insensitive)
 #   forbid_after: [{caller: regex, bot: regex}]  from the reply to the first caller line matching `caller` on,
 #                                 no bot message may match `bot` (asking again for what was already said)
+#   bot_says_after: [{caller: regex, bot: regex}]  some bot message AFTER the first caller line matching `caller`
+#                                 must match `bot` (an earlier message does not count)
 #   max_confirmations: N          confirmation questions ("shall I book it?") before the last bot message
 #   bot_mentions_day: N           some bot message names the date of today+N (weekday or Month D)
+#   session_times_only: true      every clock time in every bot message ("10 AM", "2:00 PM", "14:00", ranges) is the
+#                                 local start or end of a setup session, or a time the caller said (the bot offered no invented time)
+#   relist_ok: true               invariant (d) may see several session times again (the bot names the open ones
+#                                 after refusing a session that does not exist)
+#   no_false_full: true           P22: no bot sentence calls a setup session with free seats full / fully booked / sold out
 #   skip_claim_check: true        invariant (a) off (the bot legitimately says "confirmed" about a seeded booking)
 
 common: |
@@ -404,3 +411,51 @@ scenarios:
       max_confirmations: 2
       forbid_after:
         - {caller: "Lincoln", bot: "first and last name"}
+
+  - id: nonexistent_session_not_offered
+    from: 0f303aa9
+    problems: [P13, P16, P19]
+    persona: |
+      Your name is Dana Reyes, phone +15550101555. First ask what is on tomorrow. Then ask "any other
+      sessions tomorrow?". Then say you would like to book "the Steam Bath session at 2 PM". If the bot
+      tells you there is no such session and names others, say no thanks, you do not want those, and
+      output <END>. If it asks you to confirm anything, say yes.
+    opening: "Hi, what sessions do you have tomorrow?"
+    max_turns: 8
+    setup:
+      sessions:
+        - {key: polish, name: Sauna Polish, day: 1, hour: 10, max_attendees: 8}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 8}
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 8}
+    expect:
+      new_confirmed: 0
+      session_times_only: true
+      relist_ok: true
+      bot_says_after:  # the refusal must come after the caller asked for it (an earlier "no other sessions" does not count)
+        - caller: "steam"
+          bot: "not (on|in) (the|our) (schedule|list)|no such|there(.s| is| isn.t| are| is not) no |there isn.t (a|an|any)|(don.t|do not|cannot|can.t) (have|see|find|confirm)|isn.t (a|an|on|available|scheduled|listed|in)|not available|not (one of|among|there|listed|scheduled)"
+        - caller: "steam"  # and it names the real sessions (the refusal sentence is built in code)
+          bot: "Polish|German|Banya"
+      forbid_after:
+        - caller: "steam"
+          bot: "steam[^.?!]*(shall i book|book it)|(shall i book|book it)[^.?!]*steam|steam[^.?!]*seats"
+        - caller: "steam"  # an affirmative answer (the caller's own "2 PM" is allowed in a refusal, so check the words)
+          bot: "\\byes\\b[^.?!]*steam|steam[^.?!]*(is available|is open|we have|is on the schedule|can book)"
+
+  - id: empty_session_not_called_full
+    from: 1b422ce8
+    problems: [P22]
+    persona: |
+      Your name is Lena Hart, phone +15550101777. Ask what is on tomorrow. Then ask whether there are
+      still places in the Sauna Polish session. After the bot answered, if it offers to book say no thanks, you only wanted to know; then output <END>.
+    opening: "Hi, what sessions are on tomorrow?"
+    max_turns: 6
+    setup:
+      sessions:
+        - {key: polish, name: Sauna Polish, day: 1, hour: 10, max_attendees: 8}
+        - {key: german, name: Sauna German, day: 1, hour: 15, max_attendees: 6, booked: ["Ann Lee"]}
+        - {key: banya, name: Banya Evening, day: 1, hour: 18, max_attendees: 2, booked: ["Ann Lee", "Bob Ray"]}
+    expect:
+      new_confirmed: 0
+      no_false_full: true
+      bot_says: ["Polish[^.?!]*(seats|places|spots|room|available)|(seats|places|spots|room|available)[^.?!]*Polish"]

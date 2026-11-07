@@ -91,6 +91,20 @@ def biz():
         s.execute(delete(Business).where(Business.id == bid))
 
 
+@pytest.fixture
+def own_sessions_only(monkeypatch):
+    """`list_open` shows every business's sessions (demo rule #300) and the dev DB holds hundreds from old runs:
+    keep only the sessions of the business the test made."""
+    orig = S.list_open
+
+    def scoped(business_id, day=None, now=None, limit=10, seats=True):
+        with tenant_session(business_id) as s:
+            mine = {S.session_ref(i) for i in s.scalars(select(GroupSession.id).where(GroupSession.business_id == business_id))}
+        return [r for r in orig(business_id, day, now, 5000, seats) if r["ref"] in mine][:limit]
+
+    monkeypatch.setattr(S, "list_open", scoped)
+
+
 def _conv(biz):
     cid = uuid.uuid4()
     with tenant_session(biz) as s:
@@ -227,6 +241,7 @@ def test_imported_session_item_has_its_real_length(cal, biz, monkeypatch):
     from zoneinfo import ZoneInfo
     with tenant_session(biz) as s:
         items = S.sessions_in_range(s, biz, start - timedelta(hours=1), start + timedelta(hours=1), ZoneInfo(NY))
+    items = [i for i in items if i["business_id"] == str(biz)]  # the range shows other businesses' sessions too
     assert (items[0]["start_min"], items[0]["end_min"], items[0]["source"]) == (17 * 60, 19 * 60, "google")
 
 
@@ -239,11 +254,11 @@ def test_event_moved_and_deleted_in_google(cal, biz, monkeypatch):
     later = NOW + timedelta(days=3)
     assert G.reconcile_events(CAL, [_ev(summary="Yoga", start=later)], now=NOW)["moved"] == 1
     with tenant_session(biz) as s:
-        assert s.scalar(select(Booking.starts_at).where(Booking.status == "confirmed")) == later
+        assert s.scalar(select(Booking.starts_at).where(Booking.business_id == biz, Booking.status == "confirmed")) == later
     assert G.reconcile_events(CAL, [_ev(summary="Yoga", start=later, status="cancelled")], now=NOW)["cancelled"] == 1
     with tenant_session(biz) as s:
-        assert s.scalar(select(GroupSession.status)) == "cancelled"
-        assert s.scalar(select(Booking.status)) == "cancelled"
+        assert s.scalar(select(GroupSession.status).where(GroupSession.business_id == biz)) == "cancelled"
+        assert s.scalar(select(Booking.status).where(Booking.business_id == biz)) == "cancelled"
     assert S.list_open(biz, now=NOW) == []
 
 
@@ -266,29 +281,30 @@ def test_base_name_and_title():
     assert G.title("Sauna", 3, 3) == "Sauna · 3/3 attendees · FULL"
 
 
-def test_tools(cal, biz):
+def test_tools(cal, biz, own_sessions_only):
     sid, _ = _make(biz, seats=1)
     ctx = ActionContext(business_id=biz, conversation_id=None)
     out = T.list_sessions(ctx, {"date": DAY})
-    assert S.session_ref(sid) in out and "1 of 1 seats left" in out
-    assert "Booked Ann" in T.join_session(ctx, {"session": S.session_ref(sid), "name": "Ann"})
-    assert "full" in T.join_session(ctx, {"session": S.session_ref(sid), "name": "Bob"}).lower()
+    assert S.session_ref(sid) in out and "the 1 seat is free" in out
+    assert "Booked Ann" in T.join_session(ctx, {"session": S.session_ref(sid), "first_name": "Ann", "last_name": "Lee"})
+    assert "full" in T.join_session(ctx, {"session": S.session_ref(sid), "first_name": "Bob", "last_name": "Ray"}).lower()
     assert "FULL" in T.list_sessions(ctx, {"date": DAY})
     assert T.join_session(ctx, {"session": S.session_ref(sid)}).startswith("Error")
 
 
-def test_sync_pass_turns_a_typed_event_into_a_session_and_deleting_cancels_it(cal, biz, monkeypatch):
+def test_sync_pass_turns_a_typed_event_into_a_session_and_deleting_cancels_it(cal, biz, monkeypatch, own_sessions_only):
     _owner(biz, monkeypatch)
     start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=2)
-    typed = {"id": "typed1", "etag": "t1", "status": "confirmed", "summary": "Evening Sauna",
+    eid = f"typed-{uuid.uuid4().hex}"  # events are matched across businesses by id: a fixed id met the row of an earlier run
+    typed = {"id": eid, "etag": "t1", "status": "confirmed", "summary": "Evening Sauna",
              "start": {"dateTime": start.isoformat()}, "end": {"dateTime": (start + timedelta(hours=2)).isoformat()},
              "updated": start.isoformat()}
-    cal.events["typed1"] = dict(typed)
+    cal.events[eid] = dict(typed)
     cal.listed = [typed]
     calendar_sync.sync_now(CAL, cal)
     rows = S.list_open(biz)
     assert [r["name"] for r in rows] == ["Evening Sauna"]
-    assert cal.events["typed1"]["summary"].startswith("Evening Sauna · 0/")
+    assert cal.events[eid]["summary"].startswith("Evening Sauna · 0/")
     S.join_session(biz, rows[0]["ref"], _conv(biz), "Ann")
     cal.listed = [{**typed, "status": "cancelled"}]
     calendar_sync.sync_now(CAL, cal)

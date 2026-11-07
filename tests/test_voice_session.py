@@ -1299,3 +1299,66 @@ def test_mark_echo_of_later_mark_clears_earlier_and_unknown_is_ignored(business,
         await s.close()
 
     run_async(run())
+
+
+class SayLLM:
+    """One round: the given text, in pieces."""
+
+    def __init__(self, *pieces: str) -> None:
+        self.pieces = pieces
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:
+            return SimpleNamespace(choices=[])
+
+        async def gen():
+            for p in self.pieces:
+                yield _chunk(p)
+
+        return gen()
+
+
+def _one_turn(business, monkeypatch, llm, caller_says):
+    monkeypatch.setattr(FakeTranscriber, "finish", lambda self, timeout=5.0: caller_says)
+    s, _, events = _make_session(business, llm, monkeypatch)
+    s._synthesize = short_synthesize
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        s._open_rows = [{"name": "Sauna Polish", "when": "Fri 06 Nov, 10:00 AM to 11:00 AM", "full": False}]
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    return [e["text"] for e in events if e["type"] == "reply"][1:]  # without the greeting
+
+
+def test_refusal_is_followed_by_the_real_sessions(business, monkeypatch):
+    monkeypatch.setattr(session_mod, "spoken_sessions", lambda b, rows, limit: "Sauna Polish tomorrow at 10:00 AM")
+    llm = SayLLM("We don't have a Steam Bath session at 2 PM.", " Would you like one of those instead?")
+    replies = _one_turn(business, monkeypatch, llm, "I'd like to book the Steam Bath session at 2 PM")
+    # the offer comes after the stream (the model's later sentences may already name the sessions)
+    assert replies == ["We don't have a Steam Bath session at 2 PM.", "Would you like one of those instead?",
+                       "We have Sauna Polish tomorrow at 10:00 AM."]
+
+
+def test_no_offer_when_the_model_names_the_sessions_itself_in_its_next_sentence(business, monkeypatch):
+    monkeypatch.setattr(session_mod, "spoken_sessions", lambda b, rows, limit: "Sauna Polish tomorrow at 10:00 AM")
+    llm = SayLLM("There is no session called 'Steam Bath' on the schedule.", " We have Sauna Polish tomorrow at 10:00 AM.")
+    replies = _one_turn(business, monkeypatch, llm, "I'd like to book the Steam Bath session at 2 PM")
+    assert replies == ["There is no session called 'Steam Bath' on the schedule.",
+                       "We have Sauna Polish tomorrow at 10:00 AM."]
+
+
+def test_no_offer_when_the_caller_did_not_ask_for_a_session(business, monkeypatch):
+    monkeypatch.setattr(session_mod, "spoken_sessions", lambda b, rows, limit: "Sauna Polish tomorrow at 10:00 AM")
+    llm = SayLLM("We don't have parking here.")
+    assert _one_turn(business, monkeypatch, llm, "Do you have parking?") == ["We don't have parking here."]
+
+
+def test_a_bare_end_time_gets_its_am_pm(business, monkeypatch):
+    llm = SayLLM("Polish is from 10:00 AM to 11:00.")
+    assert _one_turn(business, monkeypatch, llm, "When is Polish?") == ["Polish is from 10:00 AM to 11:00 AM."]
