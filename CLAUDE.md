@@ -2,12 +2,12 @@
 
 Prototype of a multi-business voice/chat assistant: crawl a business's website → RAG over
 Postgres + pgvector → answer by chat and phone (Twilio) → actions (bookings, summaries).
-Built locally first (LM Studio on a 64 GB Mac, Docker Postgres), then moved to Google Cloud (Cloud Run,
+Built locally first (LM Studio on a 64 GB Mac, Docker Postgres), then to many businesses, then moved to Google Cloud (Cloud Run,
 Neon, Gemini) by changing env vars only.
 
 Built in three learning stages (DEC-27): **1 Local** — understand the principles;
-**2 Cloud** — understand the infrastructure with one pilot business; **3 Scale** — many
-businesses, safety, reliability, price. Each stage uses the simplest solution that reaches
+**2 Multi-business** — many businesses locally: isolation, onboarding, safety (DEC-50, supersedes DEC-27's order);
+**3 Cloud** — understand the infrastructure with one pilot business, then cost and load (M8). Each stage uses the simplest solution that reaches
 its goal; harder problems are deferred to the stage where they become real.
 
 Stage 1 build is in progress — see the build order in `DECISIONS.md` for what exists.
@@ -95,7 +95,7 @@ When the user discusses architecture or pastes external advice (e.g. from Gemini
 - Cost model (DEC-33): only free or pay-per-use services — no monthly fees, minimums or trials
   that turn paid. Test calls via Twilio Voice SDK, no phone number until a business pays (DEC-34).
 - Stage 1: only Postgres in Docker, app/crawler/LM Studio native (DEC-28). `business_id`
-  everywhere from stage 1; RLS enforced in stage 3 before the second business.
+  everywhere from stage 1; RLS enforced in stage 2 before the second business.
 - When recording a decision or open question, say which stage it belongs to.
 - Priority when goals conflict: correctness & legal > caller experience > multi-tenancy >
   same tech local/cloud > simplicity > cost > local first.
