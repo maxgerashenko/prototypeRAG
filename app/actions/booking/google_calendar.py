@@ -13,8 +13,14 @@ but busy time comes from the calendar mirror (`mirror.py`, #165), not `freeBusy`
   booking id (base32hex) -- a retry after a timeout gets 409 (= already there), never a
   duplicate -- then the `bookings` row with the event id in `external_ref`. If the row can't
   be written the event is deleted again; if Google fails nothing is booked.
-- cancel: deletes the event found by `external_ref`, then marks the row cancelled. If Google
-  can't delete it the booking stays confirmed (a stale event would keep blocking the slot).
+- cancel (#266): DB first, then Google. The row is marked cancelled and COMMITTED, and only then
+  is the event (found by `external_ref`) deleted, once more after a failure (404/410 count as
+  gone, so the retry is safe). If the commit fails, Google was never touched and the booking
+  stays confirmed with its event. If Google can't delete the event, the row is put back to
+  confirmed (compensation): a confirmed booking never loses its event because of us. Between
+  the commit and the delete the event still blocks the slot, so nobody can book it meanwhile.
+  Left over: the delete reached Google but both answers were lost -> the row is reopened
+  without an event; the next sync sees the event cancelled and cancels the row (calendar_sync).
 
 Event: summary "Name - service"; description with the name, last 4 digits of the phone, the
 booking reference and a link to the conversation (`APP_BASE_URL/web/#conversation=<id>`);
@@ -28,7 +34,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Text, cast, select, text
+from sqlalchemy import Text, cast, select, text, update
 
 from app.actions.booking import rules as R
 from app.actions.booking.google_client import CalendarClient, CalendarError, EventExists
@@ -205,8 +211,30 @@ class GoogleCalendarBackend:
         except CalendarError:
             log.error("orphan google calendar event %s in %s could not be deleted", event_id, calendar_id)
 
+    def _delete(self, calendar_id: str, event_id: str) -> None:
+        """events.delete, once more after a failure. A first call that reached Google after all
+        makes the retry answer 404/410, which the client reads as success."""
+        try:
+            self.client.delete_event(calendar_id, event_id)
+        except CalendarError as exc:
+            log.warning("events.delete failed, retrying once: %s", exc)
+            self.client.delete_event(calendar_id, event_id)
+
+    def _reopen(self, business_id: uuid.UUID, booking_id: uuid.UUID) -> None:
+        """Compensation for a cancel whose event could not be deleted: confirmed again."""
+        try:
+            with tenant_session(business_id) as session:
+                session.execute(
+                    update(Booking).where(
+                        Booking.business_id == business_id, Booking.id == booking_id, Booking.status == "cancelled",
+                    ).values(status="confirmed", cancelled_at=None)
+                )
+        except Exception:
+            log.exception("booking %s is cancelled but its google calendar event could not be deleted", booking_id)
+
     def cancel(self, business_id: uuid.UUID, reference: str, phone: str | None, now: datetime | None = None) -> str:
-        """Cancel by reference; the phone must match the booking's (as in the internal backend)."""
+        """Cancel by reference; the phone must match the booking's (as in the internal backend).
+        Commit first, then delete the event; a failed delete reopens the booking (#266)."""
         ref = parse_reference(reference)
         if ref is None or not phone:
             return "Error: a booking reference and the caller's phone number are needed."
@@ -222,12 +250,15 @@ class GoogleCalendarBackend:
             if len(rows) != 1:
                 return "No upcoming booking found with that reference for this phone number."
             booking = rows[0]
-            if booking.external_ref:
-                try:
-                    self.client.delete_event(calendar_id, booking.external_ref)
-                except CalendarError as exc:
-                    log.warning("google calendar cancel failed: %s", exc)
-                    return f"Error: not cancelled. {UNAVAILABLE}"
             booking.status = "cancelled"
             booking.cancelled_at = now
-            return f"Cancelled booking {str(booking.id)[:REF_LEN].upper()}."
+            booking_id, event_ref = booking.id, booking.external_ref
+        # committed (a failing commit raises above, before Google is touched)
+        if event_ref:
+            try:
+                self._delete(calendar_id, event_ref)
+            except CalendarError as exc:
+                log.warning("google calendar cancel failed: %s", exc)
+                self._reopen(business_id, booking_id)
+                return f"Error: not cancelled. {UNAVAILABLE}"
+        return f"Cancelled booking {str(booking_id)[:REF_LEN].upper()}."
