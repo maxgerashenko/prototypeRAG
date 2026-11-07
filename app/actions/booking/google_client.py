@@ -22,7 +22,6 @@ from typing import Protocol
 API = "https://www.googleapis.com/calendar/v3"
 SCOPES = (
     "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.freebusy",
 )
 TIMEOUT_S = 10  # a caller is waiting on the line
 
@@ -51,10 +50,6 @@ class EventsPage:
 
 
 class CalendarClient(Protocol):
-    def busy(self, calendar_id: str, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
-        """Busy intervals (tz-aware) of the calendar inside [start, end)."""
-        ...
-
     def insert_event(self, calendar_id: str, body: dict) -> str:
         """Create an event; returns its id. Raises EventExists (409) if a body with its own `id`
         already exists, i.e. an earlier attempt got through."""
@@ -126,22 +121,6 @@ class GoogleCalendarClient:
         except Exception as exc:  # network, token refresh
             raise CalendarError(f"{method} {url}: {exc}") from exc
         return resp
-
-    def busy(self, calendar_id, start, end):
-        resp = self._call(
-            "POST", f"{API}/freeBusy",
-            json={"timeMin": start.isoformat(), "timeMax": end.isoformat(), "items": [{"id": calendar_id}]},
-        )
-        if resp.status_code != 200:
-            raise CalendarError(f"freeBusy {resp.status_code}: {resp.text[:200]}")
-        cal = resp.json().get("calendars", {}).get(calendar_id, {})
-        if cal.get("errors"):  # e.g. notFound: the calendar is not shared with the service account
-            raise CalendarError(f"freeBusy for {calendar_id}: {cal['errors']}")
-        return [
-            (datetime.fromisoformat(b["start"].replace("Z", "+00:00")),
-             datetime.fromisoformat(b["end"].replace("Z", "+00:00")))
-            for b in cal.get("busy", [])
-        ]
 
     def insert_event(self, calendar_id, body):
         resp = self._call("POST", f"{API}/calendars/{_quote(calendar_id)}/events", json=body)

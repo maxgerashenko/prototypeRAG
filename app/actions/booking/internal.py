@@ -10,6 +10,7 @@ interval at all (conservative: with capacity 1, back-to-back bookings are fine, 
 overlapping is not).
 """
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,14 @@ from app.db.models import Booking, BookingRule, Business, BusinessProfile
 
 REF_LEN = 8  # booking reference = first 8 hex chars of the id, read out to the caller
 MIN_REF = 6
+_REF = re.compile(rf"[0-9a-f]{{{MIN_REF},{REF_LEN}}}")
+
+
+def parse_reference(reference: str | None) -> str | None:
+    """The booking reference as a lowercase hex prefix, or None unless it is 6-8 hex chars
+    (no LIKE wildcards such as '%' or '_' can reach the id prefix match)."""
+    ref = (reference or "").strip().lower()
+    return ref if _REF.fullmatch(ref) else None
 
 
 @dataclass(frozen=True)
@@ -153,8 +162,8 @@ class InternalBackend:
     def cancel(self, business_id: uuid.UUID, reference: str, phone: str | None, now: datetime | None = None) -> str:
         """Cancel by reference; the phone must match the booking's, so a caller can only
         cancel their own booking."""
-        ref = (reference or "").strip().lower()
-        if len(ref) < MIN_REF or not phone:
+        ref = parse_reference(reference)
+        if ref is None or not phone:
             return "Error: a booking reference and the caller's phone number are needed."
         now = now or datetime.now(timezone.utc)
         with tenant_session(business_id) as session:

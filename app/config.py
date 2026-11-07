@@ -10,6 +10,10 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://app:app@localhost:5432/app"
 
+    # contact URL in the crawler's User-Agent (#195, R10 "honest crawler"); set to the owner's
+    # real site or mailto: so a site owner can reach us
+    crawler_contact_url: str = "https://github.com/maxgerashenko/prototypeRAG"
+
     llm_base_url: str = "http://localhost:1234/v1"
     llm_api_key: str = "lm-studio"
     llm_model: str = "google/gemma-4-12b"  # chat/voice model (DEC-32)
@@ -53,7 +57,7 @@ class Settings(BaseSettings):
     # same for /chat (V24): a chat user waits for the first word just like a caller
     chat_reasoning_effort: str = "none"
     # T2: prime the LLM's prompt cache while the greeting plays. Helps LM Studio; whether
-    # Gemini needs or allows it (it costs one extra request per call) is checked in stage 2.
+    # Gemini needs or allows it (it costs one extra request per call) is checked in stage 3 (cloud).
     voice_llm_warmup: bool = True
     # seconds of silence after the call connects, before the opening greeting starts (0 = none)
     voice_greeting_delay_s: float = 1.0
@@ -81,7 +85,7 @@ class Settings(BaseSettings):
     # The main Twilio number (E.164, e.g. +15550001234). The voice app's business list
     # assigns it to one business at a time (POST /businesses/{id}/main-number).
     twilio_phone_number: str = ""
-    # Public URL Twilio reaches us at (the ngrok URL locally, the Cloud Run URL in stage 2).
+    # Public URL Twilio reaches us at (the ngrok URL locally, the Cloud Run URL in stage 3).
     # Webhook signatures cover this URL, and the media stream URL is built from it. Empty:
     # derived from the request (Host + X-Forwarded-Proto).
     public_base_url: str = ""

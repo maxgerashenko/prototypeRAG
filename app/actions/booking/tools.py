@@ -20,17 +20,7 @@ from app.actions.registry import ActionContext, Tool, register
 from app.config import get_settings
 from app.db import tenant_session
 from app.db.models import Conversation
-
-E164 = re.compile(r"^\+[1-9]\d{7,14}$")
-
-
-def normalize_phone(raw: str | None) -> str | None:
-    """'+1 (555) 010-0100' -> '+15550100100'; None if it isn't a full international number."""
-    if not raw:
-        return None
-    digits = re.sub(r"[\s\-().]", "", raw.strip())
-    return digits if E164.match(digits) else None
-
+from app.phone import normalize_phone  # noqa: F401  (re-exported: tests and callers import it from here)
 
 def make_backend() -> BookingBackend:
     """`BOOKING_BACKEND` picks the backend (DEC-48); the default is the Postgres-only one."""

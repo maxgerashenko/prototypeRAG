@@ -3,6 +3,7 @@
 `session` — same convention as app/ingest/store.py.
 """
 
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -59,6 +60,13 @@ def vector_search(
     return [(cid, rank) for rank, cid in enumerate(rows, start=1)]
 
 
+def keyword_terms(query_text: str) -> list[str]:
+    """Plain word tokens (letters, digits, underscore) of the question, lowercased and
+    de-duplicated. Only these reach `to_tsquery`: URLs, ':' or quotes in the raw text
+    (or in tsvector lexemes like 'a.com/x') are tsquery syntax and raised an error (#265)."""
+    return list(dict.fromkeys(re.findall(r"\w+", query_text.lower())))
+
+
 def keyword_search(
     session, business_id: uuid.UUID, query_text: str, top_k: int = 10, location_id: uuid.UUID | None = None
 ) -> list[tuple[uuid.UUID, int]]:
@@ -70,10 +78,10 @@ def keyword_search(
     chunk -- in practice, close to never. `ts_rank` still weighs multi-word, specific
     matches above a single stopword hit, so switching to OR doesn't make this noisy.
     """
-    if not query_text.strip():
+    words = keyword_terms(query_text)
+    if not words:
         return []
-    words = func.tsvector_to_array(func.to_tsvector("simple", query_text))
-    ts_query = func.to_tsquery("simple", func.array_to_string(words, " | "))
+    ts_query = func.to_tsquery("simple", " | ".join(words))
     stmt = (
         select(Chunk.id)
         .where(Chunk.business_id == business_id, Chunk.tsv.op("@@")(ts_query), *_location_filter(location_id))
