@@ -147,6 +147,36 @@ The Pixel Agents office itself (layout, areas, which label sits in which area) l
 `~/.pixel-agents/`, outside git. After changing it run `python3 .claude/tools/pixel_office.py
 save` and commit `.claude/pixel-agents/`; `... restore` puts it back on a new machine.
 
+## Which flow, and local or cloud (ask at the start of every new chat)
+
+Work follows one of two flows: a **big feature** uses "Building a feature" below, a **small change**
+uses "Short flow for small changes". Pick by size (more than a few files or a new design = big).
+
+At the start of every new chat — before the first piece of work — ask the user once which
+variant to use, recommended option first:
+
+- **Local flow** — local qwen writes the code, local gemma words the docs, commands and PR text;
+  Claude plans, reviews, edits tiny things and writes commit messages.
+- **Cloud flow** — `Agent_sonnet5.5_CODE` writes the code (can edit and run tests), `Agent_opus_ARCHITECT`
+  plans big features; gemma still words the docs/PR text.
+  **Short flow in the cloud variant:** `Agent_sonnet5.5_CODE` writes the code and its tests and runs
+  them; a second Sonnet, `sonnet5.5_REVIEW`, reviews the result; Claude applies the right findings
+  (via the code agent) and re-checks. Then ask the user where the commit goes — **onto the existing
+  open PR's branch or a new branch + new PR** — show the files and message, and commit only after a yes.
+
+**Big feature in the cloud variant — the long flow:**
+
+1. `Agent_opus_ARCHITECT` makes the plan (steps, specs, review points); the user answers its open questions.
+2. `Agent_sonnet5.5_CODE` writes the code, step by step, and runs each step's check.
+3. `sonnet5.5_REVIEW` reviews every step; Claude sends the right findings back to the code agent.
+4. Commits go onto the existing PR's branch or a new branch + PR (ask which; show files and message; commit only after a yes).
+5. `haiku5.5_TEST` runs the tests; if the feature has a conversation flow (booking, sessions, any bot tool) it also writes scenarios for the new conversations and runs them. Failures go back to step 2.
+6. After all tests are green, `Agent_opus_ARCHITECT` reviews the whole change against its plan and the docs (read-only, one pass over the full diff). Only then is the work ready for the user's final review and approval.
+
+The answer holds for the whole chat unless the user changes it; the "ask which implementer" step
+in "Building a feature" is then already answered. Planning, review and commit messages stay with
+Claude and the reviewer in both variants.
+
 ## Building a feature: plan → implement → review → approve → PR
 
 For a feature that is more than a few lines. Who does what:
@@ -158,6 +188,8 @@ For a feature that is more than a few lines. Who does what:
 | Implementer | local qwen (`delegate_code.py`) **or** `Agent_sonnet5.5_CODE` (Sonnet, can edit and run tests) | writes the code — the user picks |
 | Reviewer | `sonnet5.5_REVIEW` (Sonnet, read-only) | reviews every implemented step |
 | Fixer | local qwen | implements the review findings |
+| Tester | `haiku5.5_TEST` (Haiku, edits tests only) | cloud variant: runs the tests, writes + runs scenarios for new conversation flows |
+| Final reviewer | `Agent_opus_ARCHITECT` | cloud variant: reviews the whole change after all tests pass |
 | Main session | Claude | coordinates, does `CLAUDE` steps, final call, commit messages, PR text |
 
 1. **User asks for an implementation plan.** Run `Agent_opus_ARCHITECT` with the request.
