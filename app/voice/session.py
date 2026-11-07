@@ -60,10 +60,11 @@ from app.db.models import Business, BusinessProfile, BusinessSummary, Conversati
 from app.llm import get_async_chat_client
 from app.rag.location import default_location_id, format_locations
 from app.rag.prompt import format_profile, format_summary, tools_prompt
-from app.voice import greeting_cache, tts
+from app.voice import greeting_cache, phrases, tts
 from app.voice.audio import working_sound
 from app.voice.greeting_cache import business_greeting, voice_name
 from app.voice.stt import TurnTranscriber
+from app.actions.registry import get_tool
 from app.voice.tools import TOOLS, enabled_tool_names, run_tool, tools_for
 from app.voice.vad import TurnDetector
 from sqlalchemy import select
@@ -88,8 +89,9 @@ MARK_GRACE_S = 1.0  # V11: how long past its estimate an un-echoed playback mark
 MARK_POLL_S = 0.05  # re-check the playback end this often, an echo can end it early
 CALL_CONNECTED_TEXT = "(The call has just connected.)"  # placeholder first user turn, see _llm_history
 HANG_UP_GRACE_S = 0.5  # after the last audio's estimated end, so the transport plays it out
-REPROMPT_TEXT = "Are you still there?"
-SILENCE_GOODBYE_TEXT = "I haven't heard anything, so I'll end the call now. Thanks for calling, goodbye."
+# English defaults; the lines actually spoken follow VOICE_LANGUAGE (phrases.py, #238)
+REPROMPT_TEXT = phrases.LINES["en"]["reprompt"]
+SILENCE_GOODBYE_TEXT = phrases.LINES["en"]["silence_goodbye"]
 
 # T4: the standard greeting's audio per (text, sample rate, voice, language), so a call
 # starts playing at once instead of after a TTS round trip. In-process only (lost on
@@ -164,7 +166,7 @@ _LIST_MARK = re.compile(r"(?:^|\n)\s*(?:[-*•]|\d+[.)])(?:\s+|$)")  # line-star
 _MD_MARKS = re.compile(r"`+|#+|\*+(?=\S)|(?<=\S)\*+|(?<!\w)_+|_+(?!\w)")
 
 
-# V17: the caller's last sentence ends in a farewell. English only (the regex); a question
+# V17: the caller's last sentence ends in a farewell. English plus the languages in phrases.py (#238); a question
 # ("Bye, and Sunday?") or a longer last sentence keeps the call open: a wrong hang-up is
 # worse for the caller than a missed one, which the silence timeout ends anyway.
 _FAREWELL = re.compile(
@@ -186,7 +188,12 @@ def is_farewell(text: str) -> bool:
     if not parts:  # only punctuation
         return False
     last = parts[-1].strip(" ,;:")
-    return len(last.split()) <= _FAREWELL_MAX_WORDS and _FAREWELL.search(last) is not None
+    if len(last.split()) > _FAREWELL_MAX_WORDS:
+        return False
+    if _FAREWELL.search(last) is not None:
+        return True
+    other = phrases.FAREWELL_PATTERNS.get(phrases.language())  # #238: the call's language too
+    return other is not None and other.search(last) is not None
 
 
 def speakable(text: str) -> str:
@@ -493,7 +500,13 @@ class CallSession:
         self, text: str, spoken: list[str], play_ends: list[float], speech_end: float, timings: dict
     ) -> None:
         try:
-            await self._reply_rounds(text, spoken, play_ends, speech_end, timings)
+            try:
+                await self._reply_rounds(text, spoken, play_ends, speech_end, timings)
+            except Exception:
+                # #224: search/LLM/DB down must not leave the caller in silence
+                log.exception("voice reply failed, speaking the fallback line")
+                await self._try_send_event({"type": "error", "message": "reply failed"})
+                await self._say(phrases.line("trouble"), spoken, play_ends, speech_end, timings)
         finally:
             self._stop_working_sound()
 
@@ -514,6 +527,7 @@ class CallSession:
             {"role": "user", "content": text},
         ]
         client = get_async_chat_client()
+        action_done = False  # a side-effect tool (booking, message) already succeeded this turn (#234)
         for round_no in range(MAX_TOOL_ROUNDS + 1):
             round_start = len(spoken)
             settings = get_settings()
@@ -583,8 +597,11 @@ class CallSession:
                     if result.startswith(TRANSFER_STARTED):
                         self._transfer_pending = True
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
+                tool = get_tool(c["name"])
+                if tool is not None and tool.side_effect and not result.startswith(("Error", "Not done")):
+                    action_done = True
             timings.setdefault("tool_end_ms", _ms(speech_end))
-        await self._say("Sorry, I couldn't find that. Can I take a message?", spoken, play_ends, speech_end, timings)
+        await self._say(phrases.line("give_up_done" if action_done else "give_up"), spoken, play_ends, speech_end, timings)
 
     async def _say(
         self, sentence: str, spoken: list[str], play_ends: list[float], speech_end: float, timings: dict
@@ -640,12 +657,12 @@ class CallSession:
                 continue
             if self._reprompts < SILENCE_MAX_REPROMPTS:
                 self._reprompts += 1
-                self._reply_task = self._spawn(self._speak_fixed(REPROMPT_TEXT, history=False))
+                self._reply_task = self._spawn(self._speak_fixed(phrases.line("reprompt"), history=False))
             else:
                 self._reply_task = self._spawn(self._silence_goodbye())
 
     async def _silence_goodbye(self) -> None:
-        await self._speak_fixed(SILENCE_GOODBYE_TEXT, history=False)
+        await self._speak_fixed(phrases.line("silence_goodbye"), history=False)
         await self._hang_up_after_playback("silence")
 
     async def _hang_up_after_playback(self, reason: str) -> None:

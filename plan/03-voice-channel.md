@@ -287,7 +287,7 @@ the speech fixture — `tests/test_voice.py`; live re-check on the Mac still to 
 | # | Problem | Kind | How to test | Fix idea if it fails |
 |---|---|---|---|---|
 | V16 | Turns with `search_business_info` take ≈ 5 s to the first sentence (1.8 s to emit the tool call, 3.2 s over 5 chunks) — budget is 1.5 s | Real | `latency` events | Ticks while the tool runs (T1, done; spoken filler dropped, #40); fewer/shorter chunks; LM Studio prompt caching; faster model; compare Gemini (step 6) |
-| V17 | Silence re-prompt / hang-up — **fixed in code 2026-10-05**: VAD mode only (phone, `voice-debug.html`), not push-to-talk; 6 s quiet after the bot's audio ends → "Are you still there?", 6 s more → goodbye line, `hangup` event, socket closed (1000). A caller whose last sentence is a farewell (`is_farewell()`, English regex, never on a question) is answered, then hung up on. Re-prompt/goodbye go to the transcript, not the LLM history | Fixed in code | "Test on Mac" below | Farewell by LLM tool (`end_call`) if the regex misses too often or for other languages |
+| V17 | Silence re-prompt / hang-up — **fixed in code 2026-10-05**: VAD mode only (phone, `voice-debug.html`), not push-to-talk; 6 s quiet after the bot's audio ends → "Are you still there?", 6 s more → goodbye line, `hangup` event, socket closed (1000). A caller whose last sentence is a farewell (`is_farewell()`, English regex plus es/ru from `phrases.py` by `VOICE_LANGUAGE`, never on a question) is answered, then hung up on. Re-prompt/goodbye go to the transcript, not the LLM history | Fixed in code | "Test on Mac" below | Farewell by LLM tool (`end_call`) if the regex misses too often or for other languages |
 
 ### Needs Twilio / later stages
 
@@ -399,6 +399,11 @@ cloud sessions can only run unit tests with fakes. Record results under "Known p
   had only the non-vector tables. On the Mac, with the real dev DB, run `uv run pytest -q tests/test_business_settings.py -k number`
   (all pass, no deadlock error). Then in Settings move a number between two businesses a few times quickly and
   check `SELECT id, phone_numbers FROM businesses WHERE '+1…' = ANY(phone_numbers)` returns exactly one row
+- [ ] **Voice turn robustness (#224, #234, #232, #238)**: (1) stop LM Studio mid-call and ask a question: the caller hears
+  "Sorry, I'm having trouble. Can I take a message?" and the call stays open; (2) a booking/message then more tool calls
+  till the cap: the closing line says the earlier request went through; (3) re-run the eval set (`tests/eval/bathhouse.yaml`)
+  against `/chat`: retrieved chunks now arrive fenced inside the user message, not in the system prompt — no regression;
+  (4) with `VOICE_LANGUAGE=es-ES`/`ru-RU` say a farewell in that language (hang-up) and stay silent (fallback lines in that language)
 - [ ] **Twilio playback marks (#76, V11/V26)**: on a real call (Voice SDK or phone), interrupt the bot
   right as a sentence ends and again just after it stops — no false barge-in, first word not swallowed
 - [ ] **Tests that need LM Studio's embedding model (coverage audit 2026-11-01)**: the cloud box has no

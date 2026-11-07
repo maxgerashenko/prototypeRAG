@@ -1325,3 +1325,94 @@ def test_stale_sender_the_barge_in_did_not_cancel_is_dropped(business, monkeypat
         await s.close()
 
     run_async(run())
+
+
+# --- #224 / #234 / #238 -------------------------------------------------------------
+
+
+class FailingLLM(FakeLLM):
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:
+            return await super()._create(**kwargs)
+        self.requests.append(kwargs)
+        raise RuntimeError("LLM down")
+
+
+def test_failed_reply_speaks_a_fixed_line_and_keeps_the_call_open(business, monkeypatch):
+    s, _, events = _make_session(business, FailingLLM(), monkeypatch)
+
+    async def run():
+        await s.start()
+        await s._reply_task  # greeting
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task  # the turn
+        assert not s._hung_up
+        await s.close()
+
+    run_async(run())
+    replies = [e["text"] for e in events if e["type"] == "reply"][1:]
+    assert replies == [session_mod.phrases.LINES["en"]["trouble"]]
+
+
+def test_search_failure_does_not_end_the_turn(business, monkeypatch):
+    def boom(*a):
+        raise RuntimeError("db down")
+
+    s, _, events = _make_session(business, FakeLLM(), monkeypatch)
+    monkeypatch.setattr(session_mod, "run_tool", boom)
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    replies = [e["text"] for e in events if e["type"] == "reply"][1:]
+    assert replies == [session_mod.phrases.LINES["en"]["trouble"]]
+
+
+class ToolsEveryRoundLLM(FakeLLM):
+    """Keeps calling tools even in the round that has none offered: the cap is hit."""
+
+    async def _create(self, **kwargs):
+        if kwargs.get("max_tokens") == 1:
+            return await super()._create(**kwargs)
+        self.requests.append(kwargs)
+        n = len(self.requests)
+        name = "take_message" if n == 1 else "search_business_info"
+        pieces = [_chunk(tool_calls=[_tool_call_delta(0, id=f"c{n}", name=name, arguments="{}")])]
+
+        async def gen():
+            for p in pieces:
+                yield p
+
+        return gen()
+
+
+def test_cap_after_a_successful_action_says_it_went_through(business, monkeypatch):
+    s, _, events = _make_session(business, ToolsEveryRoundLLM(), monkeypatch)
+    monkeypatch.setattr(session_mod, "run_tool", lambda *a: "Message saved.")
+
+    async def run():
+        await s.start()
+        await s._reply_task
+        await _feed(s, SILENCE_1S + _speech() + SILENCE_1S)
+        await s._reply_task
+        await s.close()
+
+    run_async(run())
+    replies = [e["text"] for e in events if e["type"] == "reply"][1:]
+    assert replies == [session_mod.phrases.LINES["en"]["give_up_done"]]
+
+
+@pytest.mark.parametrize("lang,text", [("es-ES", "Gracias, adiós."), ("ru-RU", "Спасибо, до свидания.")])
+def test_non_english_farewell_and_lines_follow_voice_language(monkeypatch, lang, text):
+    from app.config import get_settings
+
+    assert not session_mod.is_farewell(text)  # en-US: not recognised
+    monkeypatch.setattr(get_settings(), "voice_language", lang)
+    assert session_mod.is_farewell(text)
+    assert session_mod.phrases.line("reprompt") == session_mod.phrases.LINES[lang[:2]]["reprompt"]
+    assert not session_mod.is_farewell("¿A qué hora cierran?" if lang == "es-ES" else "Во сколько вы закрываетесь?")

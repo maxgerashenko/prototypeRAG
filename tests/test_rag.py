@@ -164,10 +164,10 @@ def test_answer_gives_up_after_max_tool_rounds(fake_llm):
     from app.rag import answer
 
     install, tool_calls = fake_llm
-    llm = install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS)])
+    llm = install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS + 1)])
     result = answer.answer_question(uuid.uuid4(), "loop?")
     assert result.answer == answer.GIVE_UP_ANSWER
-    assert len(llm.requests) == len(tool_calls) == answer.MAX_TOOL_ROUNDS
+    assert len(llm.requests) == len(tool_calls) + 1 == answer.MAX_TOOL_ROUNDS + 1
 
 
 def test_stream_answer_runs_tool_calls_in_a_loop(fake_llm):
@@ -192,7 +192,7 @@ def test_stream_answer_gives_up_after_max_tool_rounds(fake_llm):
     from app.rag import answer
 
     install, _ = fake_llm
-    install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS)])
+    install(*[[(f"c{i}", "search_business_info", "{}")] for i in range(answer.MAX_TOOL_ROUNDS + 1)])
     assert list(answer.stream_answer(uuid.uuid4(), "loop?")) == [answer.GIVE_UP_ANSWER]
 
 
@@ -218,13 +218,17 @@ def test_chat_and_debug_prompt_return_the_full_prompt(business_id, monkeypatch):
     r = client.post("/chat", json={"business_id": str(business_id), "question": "When do you open?"}).json()
     assert r["prompt"] == llm.requests[0]["messages"]
     system = r["prompt"][0]
-    assert system["role"] == "system" and "Name: Cafe Uno" in system["content"] and "[1] Hours\nWe open at 9." in system["content"]
-    assert r["prompt"][-1] == {"role": "user", "content": "When do you open?"}
+    assert system["role"] == "system" and "Name: Cafe Uno" in system["content"]
+    assert "We open at 9." not in system["content"]  # #232: crawled text is not in the system message
+    last = r["prompt"][-1]
+    assert last["role"] == "user" and "[1] Hours\nWe open at 9." in last["content"]
+    assert last["content"].endswith("Question: When do you open?")
 
     d = client.get("/debug/prompt", params={"business_id": str(business_id), "q": "And close?",
                                             "conversation_id": r["conversation_id"]}).json()
-    assert [(m["role"], m["content"]) for m in d["messages"][1:]] == [
-        ("user", "When do you open?"), ("assistant", "At 9."), ("user", "And close?")]
+    assert [(m["role"], m["content"]) for m in d["messages"][1:-1]] == [
+        ("user", "When do you open?"), ("assistant", "At 9.")]
+    assert d["messages"][-1]["role"] == "user" and d["messages"][-1]["content"].endswith("Question: And close?")
     assert d["messages"][0] == system
     assert len(llm.requests) == 1  # no LLM call
 
@@ -284,7 +288,7 @@ def test_format_chunks_numbers_and_handles_empty():
 def test_build_prompt_order_system_history_question():
     messages = build_prompt(None, [], [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}], "q?")
     assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"]
-    assert messages[-1]["content"] == "q?"
+    assert messages[-1]["content"].endswith("Question: q?")
 
 
 def test_sse_frame_keeps_multiline_answers():

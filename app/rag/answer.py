@@ -81,15 +81,18 @@ def answer_question(
     client = get_chat_client()
     tools = tools_for(business_id)  # #151: bookings only for businesses that enabled them
     answer = GIVE_UP_ANSWER
-    for _ in range(MAX_TOOL_ROUNDS):
+    for round_no in range(MAX_TOOL_ROUNDS + 1):
+        # #234: the last round has no tools, so work done in earlier rounds still gets told
         response = client.chat.completions.create(
-            model=settings.llm_model, messages=messages, tools=tools,
+            model=settings.llm_model, messages=messages, **({} if round_no == MAX_TOOL_ROUNDS else {"tools": tools}),
             reasoning_effort=settings.chat_reasoning_effort,
         )
         message = response.choices[0].message
         if not message.tool_calls:
             answer = message.content or ""  # NOT NULL column downstream
             break
+        if round_no == MAX_TOOL_ROUNDS:
+            break  # no tools were offered; don't run calls the model made anyway
         calls = [
             {"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments}
             for tc in message.tool_calls
@@ -110,9 +113,10 @@ def stream_answer(
     settings = get_settings()
     client = get_chat_client()
     tools = tools_for(business_id)
-    for _ in range(MAX_TOOL_ROUNDS):
+    for round_no in range(MAX_TOOL_ROUNDS + 1):
         stream = client.chat.completions.create(
-            model=settings.llm_model, messages=messages, tools=tools, stream=True,
+            model=settings.llm_model, messages=messages, stream=True,
+            **({} if round_no == MAX_TOOL_ROUNDS else {"tools": tools}),
             reasoning_effort=settings.chat_reasoning_effort,
         )
         text = ""
@@ -134,6 +138,8 @@ def stream_answer(
                 yield delta.content
         if not calls:
             return
+        if round_no == MAX_TOOL_ROUNDS:
+            break
         ordered = [calls[i] for i in sorted(calls)]
         messages.append(_tool_call_message(text, ordered))
         messages.extend(_run_calls(business_id, conversation_id, ordered))
