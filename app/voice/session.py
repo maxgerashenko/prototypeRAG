@@ -21,6 +21,11 @@ because audio goes out faster than real time and the transport plays it from a b
 Every `feed()` tells the VAD whether the bot is active (`set_bot_active`, V9/V10): while
 it is, `speech_start` needs a stricter aggressiveness and a longer minimum speech length
 before it fires, so speaker echo or a cough/"mm-hm" doesn't trigger a false barge-in.
+V15 (#240): every reply task runs in a generation (a context variable, inherited by the
+working-sound task it starts); a barge-in starts a new generation before it cancels the reply
+and sends `clear`, and `_play` drops audio (and its mark) from an older generation and ends
+that task, so no chunk of a cut reply can reach the caller after `clear`, whatever the order
+the transport's sends interleave in.
 
 Silence (V17, VAD mode only -- the phone case; push-to-talk callers aren't expected to
 talk at any moment): ~6 s with nothing from the caller after the bot finished speaking
@@ -38,6 +43,7 @@ conversation for the status callback.
 """
 
 import asyncio
+import contextvars
 import logging
 import re
 import time
@@ -63,6 +69,9 @@ from app.voice.vad import TurnDetector
 from sqlalchemy import select
 
 log = logging.getLogger(__name__)
+
+# V15 (#240): the barge-in generation the current reply task was spawned in; None outside one
+_reply_generation: contextvars.ContextVar[int | None] = contextvars.ContextVar("reply_generation", default=None)
 
 SendAudio = Callable[[bytes], Awaitable[None]]
 SendEvent = Callable[[dict], Awaitable[None]]
@@ -235,6 +244,7 @@ class CallSession:
         self._working_task: asyncio.Task | None = None
         # STT of a turn a barge-in cut off before it was answered; its words lead the next turn
         self._unanswered_stt: asyncio.Task | None = None
+        self._generation = 0  # V15: bumped by each barge-in; older reply tasks' audio is dropped
         self._playing_until = 0.0  # monotonic time the caller's buffer runs out of bot audio
         # V11: with `playback_marks` the client echoes a mark once it has played the audio
         # before it; name → estimated end. Until the echo arrives the bot counts as playing.
@@ -324,6 +334,7 @@ class CallSession:
         self._heard_at = time.monotonic()
         self._reprompts = 0
         if self._bot_active():
+            self._generation += 1  # first: anything the old reply still sends is dropped (V15)
             await self._cancel_reply()
             self._playing_until = 0.0
             self._marks.clear()  # the client echoes them at once on `clear`; nothing left to wait for
@@ -340,7 +351,11 @@ class CallSession:
     def _spawn(self, coro) -> asyncio.Task:
         """Reply tasks are never awaited on the happy path, so a failure (TTS without
         credentials, LLM down) would otherwise vanish; log it and tell the client."""
-        task = asyncio.create_task(coro)
+        # V15: the task runs in its own copy of the context with this barge-in generation;
+        # tasks it creates (the working sound) copy it in turn
+        context = contextvars.copy_context()
+        context.run(_reply_generation.set, self._generation)
+        task = asyncio.create_task(coro, context=context)
 
         def report(t: asyncio.Task) -> None:
             if not t.cancelled() and t.exception() is not None:
@@ -349,6 +364,10 @@ class CallSession:
 
         task.add_done_callback(report)
         return task
+
+    def _stale(self) -> bool:
+        generation = _reply_generation.get()
+        return generation is not None and generation != self._generation
 
     async def _try_send_event(self, event: dict) -> None:
         try:
@@ -657,7 +676,13 @@ class CallSession:
             pass
 
     async def _play(self, audio: bytes) -> None:
+        # V15: a reply cut by a barge-in must not send audio after `clear`, nor push the
+        # playback end or a mark that would keep the bot "active" for the new turn
+        if self._stale():
+            raise asyncio.CancelledError
         await self._send_audio(audio)
+        if self._stale():
+            raise asyncio.CancelledError
         now = time.monotonic()
         self._playing_until = max(now, self._playing_until) + tts.pcm16_duration_s(audio, self.sample_rate)
         if self._playback_marks:
