@@ -68,9 +68,6 @@ class FakeCalendar:
         self._check("list")
         return EventsPage(events=list(self.listed), next_sync_token="tok")
 
-    def busy(self, *a):
-        return []
-
 
 @pytest.fixture
 def cal(monkeypatch):

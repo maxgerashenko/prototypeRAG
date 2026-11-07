@@ -80,7 +80,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-01 | Tenancy model | One deployment, many businesses (`business_id`) | 1 | ✅ |
 | DEC-02 | Vector store | Postgres + pgvector (one DB for everything) | 1 | ✅ |
 | DEC-03 | Cloud DB hosting | Neon free tier in stage 2; Neon Launch (pay-per-use, no monthly minimum) when outgrown — Cloud SQL ruled out by DEC-33 | 2 → 3 | 🔄 |
-| DEC-04 | Tenant isolation | One shared database: shared tables + `business_id` (stage 1) + Row-Level Security (stage 3, before 2nd business); dedicated database only as a per-region cell (OPEN-16) | 1 (model) · 3 (RLS) | ✅ |
+| DEC-04 | Tenant isolation | One shared database: shared tables + `business_id` (stage 1) + Row-Level Security (stage 2, before 2nd business); dedicated database only as a per-region cell (OPEN-16) | 1 (model) · 2 (RLS) | ✅ |
 | DEC-05 | LLM interface | `openai` client against OpenAI-compatible endpoints | 1 | ✅ |
 | DEC-06 | Local LLM runtime | ~~Ollama~~ — **Superseded by DEC-29** | 1 | — |
 | DEC-07 | Cloud LLM | Gemini Flash, paid key, Gemini API first | 1 (compare) · 2 | 🔄 |
@@ -98,7 +98,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-19 | Dashboard | ~~FastAPI + Jinja + HTMX, no SPA~~ — **Superseded by DEC-41** | 1 (minimal) · 3 (login) | — |
 | DEC-20 | Frameworks | No LangChain / LlamaIndex | 1 | ✅ |
 | DEC-21 | Secrets | `.env` locally, Secret Manager in cloud | 1 · 2 | ✅ |
-| DEC-22 | Recordings | Transcripts only; audio recording off by default | 1 · 3 (opt-in) | 🔄 (R16) |
+| DEC-22 | Recordings | Transcripts only; audio recording off by default. One exception (2026-11-07 note): the voicemail after an unanswered transfer is recorded | 1 · 3 (opt-in) | 🔄 (R16) |
 | DEC-23 | Docs layout | Flat `plan/` folder | — | ✅ |
 | DEC-24 | Post-call work | Summaries run inside a request (Twilio status callback / end-of-chat), not background tasks | 1 | ✅ |
 | DEC-25 | Cloud Run settings for calls | Request-based billing; explicit low `--concurrency` from load test; `--max-instances` cap | 3 | 🔄 (load test) |
@@ -118,7 +118,7 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-39 | Reviews and marketing text | Website testimonials + marketing → a short business summary (description, highlights, guest themes, tone) in the system prompt; never a source of facts; no Google reviews (R9) | 1 | ✅ |
 | DEC-40 | Organize / clean step | New step between crawl and index: crawl priority, site chrome kept once (not thrown away), page type, location, language, duplicates, staleness, junk filter; idempotent by content hash + version; owner-confirmed facts never overwritten | 1 | ✅ |
 | DEC-41 | Web UI stack | React + TypeScript (Vite multi-page build) in `web/`, built to `web/dist` and served by the one FastAPI service under `/web`; voice app, debug pages and later the owner dashboard | 1 · 2 (image build) | ✅ |
-| DEC-43 | Twilio adapter: business lookup and trust | Voice SDK calls send `business_id` as a custom parameter, phone calls match `To` in `businesses.phone_numbers`; webhooks checked with `X-Twilio-Signature` already in stage 1 (ngrok is public); `/voice/ws` accepts only streams carrying an HMAC from `/twilio/voice`; Voice SDK token served to localhost only; `conversations.call_sid` for the status callback | 1 · 3 (lookups need an RLS-exempt path) | ✅ |
+| DEC-43 | Twilio adapter: business lookup and trust | Voice SDK calls send `business_id` as a custom parameter, phone calls match `To` in `businesses.phone_numbers`; webhooks checked with `X-Twilio-Signature` already in stage 1 (ngrok is public); `/voice/ws` accepts only streams carrying an HMAC from `/twilio/voice`; Voice SDK token served to localhost only; `conversations.call_sid` for the status callback | 1 · 2 (lookups need an RLS-exempt path) | ✅ |
 | DEC-42 | Voice app UI | The "Voice Chat Bot" design as the main page `/web/` (React, DEC-41): pick a business → past conversations → call with **server push-to-talk** → transcript, continue an earlier call; read API `app/api/businesses.py` + `app/api/conversations.py` | 1 · 3 (scope `/businesses` to the owner) | ✅ |
 | DEC-44 | Barge-in robustness (V9/V10) and turn-end tuning | Stricter VAD (higher aggressiveness, longer minimum speech) while the bot is speaking, reverting once a turn is confirmed; `end_silence_ms` default 500→700 ms; all three now env vars | 1 | 🔄 (live Mac mic test) |
 | DEC-45 | Task tracking in GitHub Issues + Project | One issue per real task or bug; milestones mirror `PROJECT_PLAN.md`; `area:*` / `type:*` / `blocked` labels (stage = milestone prefix); blocking via "blocked by" links; plan files stay the plan, `DECISIONS.md` stays decisions | 1 | ✅ |
@@ -131,7 +131,8 @@ Status: ✅ Decided · 🔄 Decided, revisit at trigger · ❓ Open (see section
 | DEC-56 | Add a session with a faded **+** in each free hour (user decision 2026-10-31, supersedes DEC-55) | The hold gesture and mouse click-to-add are removed (`holdToAdd.ts` deleted). Every free future hour shows a faded 44 px **+** centred in the row (`hour-add-<h>`); the round bottom-right **+** stays. Visible on touch without hover; no timing to tune, no iOS gesture risks | 1 | ✅ |
 | DEC-57 | Assigning a number also points it at this app in Twilio (user decision 2026-11-02, extends DEC-52) | `PUT /businesses/{id}/number` first calls `ensure_routed`: voice URL empty → set `<PUBLIC_BASE_URL>/twilio/voice` and `/twilio/status` (POST) through the Twilio API; already ours → only a missing status URL is filled; pointing elsewhere → 409, nothing overwritten; missing `PUBLIC_BASE_URL`/credentials or a Twilio error → 503 and the database is unchanged. Unassigning leaves Twilio as it is. Cause: a newly bought number had no voice URL, so calls got no answer | 1 | ✅ |
 | DEC-58 | Chat/voice model: qwen3.6-35b-a3b with reasoning off instead of gemma (user decision 2026-11-02, supersedes DEC-32's chat/voice pick) | `.env` `LLM_MODEL=qwen/qwen3.6-35b-a3b`, `CHAT_`/`VOICE_REASONING_EFFORT=none`. Two benchmark runs on 19 graded questions: same accuracy as gemma (18/19 and 17/19 vs 17/19), faster (mean 1.63 s and 0.87 s vs 1.83 s and 1.88 s). Code-drafting delegate stays qwen with thinking on | 1 | ✅ |
-| DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (one instance; several need Postgres LISTEN/NOTIFY) · 3 (scope to the owner, OPEN-12) | ✅ |
+| DEC-59 | Crawler fetch limits and URL spelling (crawler review fixes #188–#191, #199) | Query strings are **kept** except tracking params (`utm_*`, `fbclid`, ...); scheme/host follow the start URL; sitemap `max_depth` = path segments; Crawl-delay × max_pages over 2 h stops the crawl before fetching | 1 | ✅ |
+| DEC-46 | Phone calls shown live in the voice app | Twilio calls (modes A, B) appear in `/web/` as they happen, on the same call screen, watch-only: `ws.py` publishes the session events + `playback` on/off to an in-memory feed, `GET /voice/feed` streams it as Server-Sent Events (snapshot first, so a page opened mid-call catches up); events only, no audio; feed closed while the tab is hidden | 1 (built) · 2 (scope to the owner, OPEN-12) · 3 (cloud: one instance; several need Postgres LISTEN/NOTIFY) | ✅ |
 | DEC-47 | Fact vs raw chunk duplicates in retrieval | After the hybrid search, drop each scraped chunk that contains the verbatim quote of a returned fact; other raw chunks stay as fallback. Pages are never excluded wholesale | 1 | ✅ (decided 2026-10-19; OPEN-22's A/B eval can still choose "facts only") |
 | DEC-48 | Google Calendar as the pilot booking backend | `GoogleCalendarBackend` behind `BookingBackend`: availability from `freebusy.query`, `events.insert` after a re-check; pilot auth = service account with the owner's calendar shared to it (no OAuth); the Postgres `bookings` row stays as the double-booking lock and holds the event id in `external_ref`; per-business OAuth stays stage 3 | 2 (pilot) · 3 (OAuth, R14) | ✅ |
 | DEC-49 | A conversation is about one location (resolves OPEN-23) | To the caller each location is its own business: retrieval and the prompt use that location's facts/chunks plus business-wide ones (`location_id IS NULL`: what the business is, policies, that other locations exist); the other locations are listed (name, address) but never answered for. The location is fixed by the entry point, not guessed per question; until one can choose (phone number -> location, OPEN-21, stage 3) it is the default location. Storage stays DEC-37 (one business, `location_id` scoping) | 1 · 3 (number -> location) | ✅ (user decision 2026-10-19) |
@@ -221,7 +222,7 @@ Re-checked 2026-10-03 (after the foundation was built): the shared database is c
 At our scale (hundreds–thousands of chunks per business) a shared Postgres has no
 performance reason to split. Isolation is enforced in layers: `tenant_session` (stage 1),
 composite `(business_id, id)` foreign keys (stage 1, so a chunk or message can't point at
-another business's row), and RLS (stage 3). Separate **environments** (dev / staging /
+another business's row), and RLS (stage 2). Separate **environments** (dev / staging /
 prod, stage 3) are a different topic: they separate code versions, not clients.
 The only real reasons for a separate database are region and contracts → handled as a
 cell per region, not a database per business (OPEN-16). `tenant_session` is the single
@@ -230,7 +231,7 @@ without a code rewrite. Nothing is pre-built for it.
 
 Timing (DEC-27): `business_id` on every table and the `tenant_session` helper from
 stage 1 (cheap, avoids a painful data migration later); RLS policies + `app_user` role
-switched on in stage 3 as a hard gate before the second business — a migration, not a
+switched on in stage 2 as a hard gate before the second business — a migration, not a
 code rewrite, because all queries already go through `tenant_session`.
 
 ### DEC-05 — LLM interface
@@ -537,6 +538,18 @@ fewer dependencies, easier debugging.
 Transcripts only by default; audio recording is a per-business opt-in later (needs Cloud
 Storage + consent, R15/R16).
 
+**Note (2026-11-07, #302, stage 1): the voicemail is an exception.** When a transfer
+(`transfer_to_human`, `<Dial>`) is not answered, `/twilio/transfer-result`
+(`app/voice/twilio_routes.py`) tells the caller "Your message will be recorded" and
+`<Record>`s up to `VOICEMAIL_MAX_S` seconds of audio at Twilio. `/twilio/voicemail` then
+saves only the Twilio `RecordingUrl` on a `messages_for_owner` row (`recording_url`); the
+audio stays on Twilio and is not copied to our storage. This is the only audio we record:
+live calls (DEC-46) and the conversation transcript path stay audio-free. The caller is
+told before recording, which covers consent for the stage-1 demo, but it is still audio
+of a person, so it counts as the R16 case. Left as is for stage 1; before a real business
+uses it, either make the voicemail opt-in per business or add consent and retention rules
+with the cloud recordings work (OPEN-14). DEC-46's "no recording" means the live feed.
+
 ### DEC-23 — Docs layout
 
 Flat `plan/` folder with overview files + numbered part files + this log.
@@ -746,7 +759,7 @@ the media stream are on a public URL from stage 1 on — before OPEN-19's access
 | Which business a call is for | **Voice SDK: `business_id` custom parameter; phone: dialled `To` in `businesses.phone_numbers`** | Same webhook for modes A and B; no number needed for B (DEC-34) | Lookup reads across tenants before the business is known | ✅ |
 | | A TwiML App per business | Nothing in the request to trust | One Twilio resource per business, onboarding step | ❌ |
 | Webhook trust | **Check `X-Twilio-Signature` now (Twilio's `RequestValidator`), fail closed without `TWILIO_AUTH_TOKEN`** | ngrok URL is public; a forged webhook could open calls on any business | `PUBLIC_BASE_URL` must equal the URL Twilio calls (else every call is refused — logged) | ✅ |
-| | Wait for OPEN-19 (stage 2) | — | Public endpoint without a check in stage 1 | ❌ |
+| | Wait for OPEN-19 (stage 3) | — | Public endpoint without a check in stage 1 | ❌ |
 | Media stream trust | **HMAC(auth token, business + CallSid) as a `<Stream>` custom parameter, checked on `start`** | Only streams `/twilio/voice` started can run a call; no extra state | Custom parameters arrive only in the `start` message, so the socket is accepted first | ✅ |
 | | Validate the WebSocket handshake's signature header | No extra parameter | Depends on Twilio signing the upgrade request and on the exact wss URL | ❌ |
 | Voice SDK token (mode B) | **`GET /twilio/token` for loopback clients without `X-Forwarded-For` only** | A token can start billed calls; ngrok requests carry the header | Page must be opened on localhost, not via ngrok | ✅ stage 1 (OPEN-19 replaces it) |
@@ -764,7 +777,7 @@ Consequences:
   them by a random UUID, so a transcript, `continue_from` history or `/chat`'s LLM history
   could put the answer first. Ordering now breaks the tie user-first (`message_order()` in
   `app/db/models.py`, used by every message query).
-- Stage 3: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
+- Stage 2: `/businesses` must be scoped to the signed-in owner (OPEN-12) before the
   second business.
 
 ### DEC-44 — Barge-in robustness (V9/V10) and turn-end tuning (stage 1, step 4)
@@ -919,6 +932,19 @@ Decision: `LLM_MODEL=qwen/qwen3.6-35b-a3b` with `CHAT_REASONING_EFFORT=none` and
 
 Risks and open points: the evidence is two runs on 19 questions, so the difference in accuracy is noise; speed is the reason. Qwen can state a wrong or made-up phone number where gemma and Haiku say they don't know: worse than a refusal, to watch on calls. Both failing questions (Saturday hours, Philadelphia phone) fail for every model because retrieval does not hand the facts to the model. Found on the first call: qwen's chat template rejects a prompt whose first turn after the system prompt is not a user turn ("No user query found"), and a call starts with the greeting; fixed by a placeholder first user turn (`CallSession._llm_history`, commit cf0a245), which gemma accepts too. Not yet checked: a live voice call, tool calling (`search_business_info`, bookings) on qwen.
 
+### DEC-59 — Crawler fetch limits and URL spelling (stage 1)
+
+Issues #188, #189, #190, #191, #199 (crawler review 2026-11-01).
+
+| Question | Option | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| Query strings in page URLs | Drop them all (old behaviour) | One page per path | `?location=williamsburg` and `?location=soho` merge: content silently lost | ❌ |
+| Query strings in page URLs | Keep, minus tracking params, sorted | Different pages stay different; `utm_*` duplicates merge | A calendar-style `?date=` site can fill `max_pages` | ✅ |
+| http/https, www/bare | Take scheme and host from the start URL | No guess about which spelling the site serves | Only for the site's own domain | ✅ |
+| `max_depth` on the sitemap path | Path segments (≤ 3) | Same limit as BFS in spirit, no extra fetches | BFS counts link hops, sitemap counts path depth | ✅ |
+| Huge Crawl-delay | Stop before fetching when delay × max_pages > 2 h; summary has `aborted` | Honours the delay in full, no silent multi-day crawl | A slow site needs a lower `--max-pages` | ✅ |
+| Body limits | HTML 5 MB, sitemap 20 MB, 60 s total per body; robots.txt truncated at 500 KiB (RFC 9309); PDF text in a child process, 60 s, 4 GB address space | Hostile or endless responses can't stall or exhaust the crawl | RLIMIT_AS is not enforced on macOS (the timeout still is) | ✅ |
+
 ### DEC-51 — Keep our crawler, use MarkItDown for PDF text (stage 1)
 
 Issue #116. Evidence and numbers: [comparison-scrapy-markitdown.md](comparison-scrapy-markitdown.md).
@@ -958,7 +984,7 @@ latency) only went to the server log (DEC-43 consequences).
 | Fan-out | **In-memory, per process; snapshot of calls in progress (with their events so far) first, then live messages** | No new service; a page opened or reconnected mid-call catches up | Only works while the call and the page hit the same process: fine for one uvicorn and one Cloud Run instance | ✅ stage 1 · 2 (one instance) |
 | | Postgres `LISTEN/NOTIFY` | Works across instances | More moving parts; not needed with one instance | 🔄 stage 2, when a second instance appears |
 | What the page can do | **Watch only: Close stops watching, the call goes on; a green button like the web Call button, with the phone icon and the caller's number (`+1 222 333 45 12`), brings it back** | Nothing on the page can affect a real caller | No hang-up / take-over from the page | ✅ (hang-up later if wanted) |
-| Audio | **Events only, no listening in** | No audio fan-out or consent question (DEC-22: no recording) | You read the call, you don't hear it | ✅ |
+| Audio | **Events only, no listening in** | No audio fan-out or consent question (the live feed records nothing; the voicemail exception is in DEC-22) | You read the call, you don't hear it | ✅ |
 | Switching to a call | **The app jumps to a phone call when it starts, once per call, unless a call of its own is on** (then the green button; the call shows after hang-up) | It's what Max asked for | Interrupts reading a transcript | ✅ |
 
 Consequences:
@@ -967,7 +993,7 @@ Consequences:
   15 s keep-alive comment holds the stream open through proxies.
 - Access: the feed lists calls of every business with the caller's number, as open as
   `/businesses` and the conversations API until OPEN-19's access control; it must sit
-  behind that before the URL is public in stage 2, and be scoped to the owner in stage 3
+  behind that before the URL is public in stage 3 (cloud), and be scoped to the owner in stage 2
   (OPEN-12).
 - A page that falls 500 messages behind gets a fresh snapshot instead.
 
@@ -1049,9 +1075,9 @@ Grouped by the stage in which the answer is needed.
 | OPEN-07 | 2 | Gemini API vs Vertex AI | API key (simple) · Vertex (IAM, region) | OPEN-02, data residency needs |
 | OPEN-11 | 2 | Code licence | Private, no licence · MIT · Apache 2.0 · AGPL | Before making the repo public |
 | OPEN-08 | 2 | Voice mode in cloud | Pipeline (Google STT → Gemini Flash → Google TTS) · Gemini Live | Stage-2 comparison: latency, quality, cost per minute, session limits |
-| OPEN-19 | 2 | API access control for the pilot | Shared secret header / IAP / Cloud Run IAM for owner routes; public only: chat widget. Twilio webhooks and `/voice/ws` are already checked since stage 1 (DEC-43) | Needed before stage 2 step 8 (public Cloud Run URL): today every route trusts the `business_id` in the request, and `/businesses/{id}/custom-replies` lets anyone rewrite what the phone bot says; `/debug/retrieve` dumps chunk text |
+| OPEN-19 | 3 | API access control for the pilot | Shared secret header / IAP / Cloud Run IAM for owner routes; public only: chat widget. Twilio webhooks and `/voice/ws` are already checked since stage 1 (DEC-43) | Needed before stage 3 step 8 (public Cloud Run URL): today every route trusts the `business_id` in the request, and `/businesses/{id}/custom-replies` lets anyone rewrite what the phone bot says; `/debug/retrieve` dumps chunk text |
 | OPEN-09 | 3 | Telephony provider | Twilio · Telnyx · Vonage · Plivo | OPEN-02 (price, number availability) |
-| OPEN-12 | 3 | Owner login for dashboard | Google sign-in · magic link | Before the second business |
+| OPEN-12 | 2 | Owner login for dashboard | Google sign-in · magic link | Before the second business |
 | OPEN-13 | 3 | CI/CD + Terraform timing | When deploys get frequent/risky or >1 person deploys | Stage 2 `deploy.sh` experience |
 | OPEN-14 | 3 | Call recordings | Never · opt-in per business | OPEN-02, legal review |
 | OPEN-15 | 3 | Voice concurrency per instance | 10 · 20 · 40 … | Load test with real call audio (DEC-25) |
@@ -1117,6 +1143,7 @@ Corrections to external advice (Gemini) and facts we rely on:
 | Squarespace "Previous/Next" links | Become `## [Title](/journal/…)` headings in Markdown → 5 of 28 pilot chunks are 11-char link fragments | DEC-40 |
 | Registrable domain | Stripping `www.` doesn't merge other subdomains (`shop.example.co.uk` vs `example.co.uk`), and some platform subdomains are separate sites; a Public Suffix List would be needed for that — deliberately not in stage 1 (user decision 2026-10-04: host without `www.` is enough) | DEC-37 |
 | Website testimonials | Published by the business on its own site (curated) → allowed source under DEC-11, but opinions, not facts; Google reviews stay excluded (R9) | DEC-39 |
+| Voice stack alternatives (research note, 2026-11-07) | The project does not use Hume (no reference in code or plans), so Hume's announced end of its TTS and EVI APIs on 2026-11-13 (per third-party pages quoting dev.hume.ai; official page not read) does not affect it. Hugging Face `speech-to-speech` (VAD + Parakeet TDT + OpenAI-compatible LLM + Qwen3-TTS, OpenAI-Realtime-style WebSocket) is a valid candidate for the stage-2 voice comparison (DEC-30) and is the closest to our pipeline mode, but needs a GPU/Apple Silicon and is not telephony-ready (Twilio 8 kHz µ-law bridge is ours). Fish Audio (hosted TTS API or open weights) and faster-whisper + Piper (offline) are further TTS/STT candidates; weights licences must be checked before any business use (R-list). Compare them with `scripts/bench_voice.py` (WER, latency, RTF, approx. cost) | DEC-13, DEC-30, OPEN-08, V27 |
 
 Free-tier limits, model names and pricing change — re-check before each decision that
 depends on them.

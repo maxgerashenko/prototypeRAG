@@ -2,7 +2,7 @@
 
 Child tables reference their parent by `(business_id, id)`, so a row can never point at
 another business's row — the database rejects cross-tenant links even before RLS.
-Action tables (bookings, ...) are added in step 5 (plan/04-actions.md); `action_log` is first.
+Action tables (`action_log`, `bookings`, `sessions`, ...) are defined further down (plan/04-actions.md).
 """
 
 import uuid
@@ -247,8 +247,8 @@ class Chunk(Base):
 class Fact(Base):
     """Atomic, sourced, location-scoped fact (plan/07-knowledge-quality.md §5, DEC-38).
 
-    Schema only in this change — extraction/merge (`app/ingest/facts.py`/`merge.py`) is
-    the next milestone (OPEN-20). `UNIQUE (business_id, fact_key) WHERE status='active'`
+    Extraction and merge live in `app/ingest/facts.py` / `merge.py` (OPEN-20).
+    `UNIQUE (business_id, fact_key) WHERE status='active'`
     is the dedupe key: a re-crawl that confirms the same fact updates `last_seen_at`
     instead of inserting a duplicate active row.
     """
